@@ -5,7 +5,7 @@ import { Icon } from '@/components/Icon'
 import { PreviewPDF } from '@/components/PreviewPDF'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { exporterPDF, exporterExcel, exporterCSV } from '@/lib/export'
 
 export default function PageDocuments() {
@@ -16,8 +16,24 @@ export default function PageDocuments() {
   const [previewOuvert, setPreviewOuvert] = useState(false)
   const [documentPreview, setDocumentPreview] = useState<string>('')
   const [menuExport, setMenuExport] = useState(false)
+  const [documentsAPI, setDocumentsAPI] = useState<any[]>([])
+  const [chargement, setChargement] = useState(true)
 
-  const documents = [
+  // Charger documents depuis API
+  useEffect(() => {
+    fetch('/api/documents')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.documents.length > 0) {
+          setDocumentsAPI(data.documents)
+        }
+        setChargement(false)
+      })
+      .catch(() => setChargement(false))
+  }, [])
+
+  // Données de démonstration (utilisées si BDD vide)
+  const documentsDemo = [
     {
       id: 1,
       titre: 'Police Automobile 2025',
@@ -95,7 +111,10 @@ export default function PageDocuments() {
     { value: 'ACS_VERS_COMPAGNIE', label: 'ACS → Compagnie' },
   ]
 
-  const documentsFiltres = documents.filter(doc => {
+  // Utiliser API si disponible, sinon données démo
+  const documents = documentsAPI.length > 0 ? documentsAPI : documentsDemo
+
+  const documentsFiltres = documents.filter((doc: any) => {
     const matchRecherche = doc.titre.toLowerCase().includes(recherche.toLowerCase()) ||
                           doc.client.toLowerCase().includes(recherche.toLowerCase()) ||
                           doc.reference.toLowerCase().includes(recherche.toLowerCase())
@@ -240,7 +259,7 @@ export default function PageDocuments() {
 
         {vueMode === 'grille' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {documentsFiltres.map((doc, index) => (
+            {documentsFiltres.map((doc: any, index: number) => (
               <motion.div
                 key={doc.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -336,7 +355,7 @@ export default function PageDocuments() {
                   </tr>
                 </thead>
                 <tbody>
-                  {documentsFiltres.map((doc, index) => (
+                  {documentsFiltres.map((doc: any, index: number) => (
                     <motion.tr
                       key={doc.id}
                       initial={{ opacity: 0, x: -20 }}
