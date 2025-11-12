@@ -1,0 +1,123 @@
+// Schéma Prisma pour l'application ACS Archive
+// Tous les noms sont en français
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Énumération des rôles utilisateurs
+enum RoleUtilisateur {
+  ADMIN
+  GESTIONNAIRE
+  EMPLOYE
+  CONSULTANT
+}
+
+// Modèle Utilisateur
+model Utilisateur {
+  id                String             @id @default(cuid())
+  nom               String
+  prenom            String
+  email             String             @unique
+  motDePasse        String
+  role              RoleUtilisateur    @default(EMPLOYE)
+  estActif          Boolean            @default(true)
+  dateCreation      DateTime           @default(now())
+  dateModification  DateTime           @updatedAt
+  
+  // Relations
+  documentsCrees    Document[]         @relation("UtilisateurCreateur")
+  journalActivites  JournalActivite[]
+  
+  @@map("utilisateurs")
+}
+
+// Modèle Catégorie de documents
+model Categorie {
+  id               String     @id @default(cuid())
+  nom              String
+  description      String?
+  couleur          String?    // Code couleur hex pour l'UI
+  dateCreation     DateTime   @default(now())
+  dateModification DateTime   @updatedAt
+  
+  // Relations
+  documents        Document[]
+  
+  @@map("categories")
+}
+
+// Modèle Document
+model Document {
+  id                  String             @id @default(cuid())
+  titre               String
+  description         String?
+  nomFichier          String
+  cheminFichier       String
+  typeFichier         String             // pdf, docx, xlsx, etc.
+  tailleFichier       Int                // en octets
+  numeroReference     String?
+  dateDocument        DateTime?          // Date du document lui-même
+  dateCreation        DateTime           @default(now())
+  dateModification    DateTime           @updatedAt
+  
+  // Relations
+  categorieId         String
+  categorie           Categorie          @relation(fields: [categorieId], references: [id])
+  createurId          String
+  createur            Utilisateur        @relation("UtilisateurCreateur", fields: [createurId], references: [id])
+  etiquettes          Etiquette[]
+  journalActivites    JournalActivite[]
+  
+  @@map("documents")
+  @@index([categorieId])
+  @@index([createurId])
+  @@index([dateCreation])
+}
+
+// Modèle Étiquette (Tags)
+model Etiquette {
+  id               String     @id @default(cuid())
+  nom              String     @unique
+  couleur          String?
+  dateCreation     DateTime   @default(now())
+  
+  // Relations
+  documents        Document[]
+  
+  @@map("etiquettes")
+}
+
+// Énumération des types d'actions
+enum TypeAction {
+  CREATION
+  CONSULTATION
+  MODIFICATION
+  SUPPRESSION
+  TELECHARGEMENT
+}
+
+// Modèle Journal d'activité (Audit Trail)
+model JournalActivite {
+  id               String      @id @default(cuid())
+  action           TypeAction
+  details          String?
+  adresseIp        String?
+  dateAction       DateTime    @default(now())
+  
+  // Relations
+  utilisateurId    String
+  utilisateur      Utilisateur @relation(fields: [utilisateurId], references: [id])
+  documentId       String?
+  document         Document?   @relation(fields: [documentId], references: [id])
+  
+  @@map("journal_activites")
+  @@index([utilisateurId])
+  @@index([documentId])
+  @@index([dateAction])
+}

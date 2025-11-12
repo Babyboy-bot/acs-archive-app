@@ -1,0 +1,46 @@
+=== THÈME ACS - GUIDE DE RÉFÉRENCE ===
+
+COULEURS PRINCIPALES
+--------------------
+Rouge ACS : #D32027
+Bleu ACS  : #0066B3
+Blanc     : #FFFFFF
+
+COULEURS SECONDAIRES
+--------------------
+Rouge Clair : #E84855
+Rouge Foncé : #A01820
+Bleu Clair  : #1E88E5
+Bleu Foncé  : #004D87
+
+DÉGRADÉS
+--------
+Principal : linear-gradient(135deg, #D32027 0%, #0066B3 100%)
+Rouge     : linear-gradient(135deg, #A01820 0%, #E84855 100%)
+Bleu      : linear-gradient(135deg, #004D87 0%, #1E88E5 100%)
+
+UTILISATION
+-----------
+- Rouge : Éléments principaux, CTA, erreurs
+- Bleu  : Éléments secondaires, informations, succès
+- Alternance : Rouge/Bleu pour variété visuelle
+
+APPLIQUÉ DANS
+-------------
+✓ Splash Screen (particules, barre progression)
+✓ Page d'accueil (logo, cartes fonctionnalités)
+✓ Page connexion (fond, inputs glass)
+✓ Navigation (logo, items actifs, avatar)
+✓ Tableau de bord (stats, avatars)
+✓ Boutons (primaire rouge, succès bleu)
+✓ Alertes (erreur rouge, info/succès bleu)
+✓ Composants UI (thèmes cohérents)
+
+TAILWIND CLASSES
+----------------
+text-acs-rouge
+text-acs-bleu
+bg-acs-rouge
+bg-acs-bleu
+border-acs-rouge
+border-acs-bleu
