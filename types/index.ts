@@ -1,7 +1,7 @@
 // Types TypeScript pour l'application ACS Archive
 // Tous les noms sont en français
 
-// Enums (seront générés par Prisma après prisma generate)
+// Enums (générés par Prisma après prisma generate)
 export enum RoleUtilisateur {
   ADMIN = 'ADMIN',
   GESTIONNAIRE = 'GESTIONNAIRE',
@@ -15,6 +15,31 @@ export enum TypeAction {
   MODIFICATION = 'MODIFICATION',
   SUPPRESSION = 'SUPPRESSION',
   TELECHARGEMENT = 'TELECHARGEMENT'
+}
+
+export enum TypeClient {
+  ENTREPRISE = 'ENTREPRISE',
+  PARTICULIER = 'PARTICULIER'
+}
+
+export enum TypeRisque {
+  AUTOMOBILE = 'AUTOMOBILE',
+  SANTE = 'SANTE',
+  HABITATION = 'HABITATION',
+  VIE = 'VIE',
+  RESPONSABILITE_CIVILE = 'RESPONSABILITE_CIVILE',
+  AUTRE = 'AUTRE'
+}
+
+export enum TypeCourrier {
+  ACS_VERS_CLIENT = 'ACS_VERS_CLIENT',
+  ACS_VERS_COMPAGNIE = 'ACS_VERS_COMPAGNIE'
+}
+
+export enum StatutExercice {
+  ACTIF = 'ACTIF',
+  ARCHIVE = 'ARCHIVE',
+  CLOTURE = 'CLOTURE'
 }
 
 // Type pour un utilisateur connecté (sans mot de passe)

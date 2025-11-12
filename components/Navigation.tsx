@@ -10,10 +10,10 @@ export function Navigation() {
 
   const elementsMenu = [
     { href: '/tableau-de-bord', label: 'Tableau de bord', icone: '📊' },
+    { href: '/recherche', label: 'Recherche', icone: '🔍' },
     { href: '/documents', label: 'Documents', icone: '📁' },
     { href: '/categories', label: 'Catégories', icone: '🏷️' },
     { href: '/utilisateurs', label: 'Utilisateurs', icone: '👥' },
-    { href: '/journal', label: 'Journal d\'activité', icone: '📋' },
   ]
 
   return (
@@ -74,7 +74,7 @@ export function Navigation() {
               </svg>
             </button>
             <Link
-              href="/profil"
+              href="/parametres"
               className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors"
             >
               <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold" style={{ background: 'linear-gradient(135deg, #D32027 0%, #0066B3 100%)' }}>

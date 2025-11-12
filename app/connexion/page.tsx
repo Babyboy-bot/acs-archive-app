@@ -2,6 +2,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Bouton } from '@/components/ui/Bouton'
@@ -9,6 +10,7 @@ import { ChampTexte } from '@/components/ui/ChampTexte'
 import { Alerte } from '@/components/ui/Alerte'
 
 export default function PageConnexion() {
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [motDePasse, setMotDePasse] = useState('')
   const [chargement, setChargement] = useState(false)
@@ -19,11 +21,30 @@ export default function PageConnexion() {
     setChargement(true)
     setErreur('')
 
-    // TODO: Implémenter la logique de connexion avec NextAuth
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, motDePasse }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setErreur(data.erreur || 'Erreur lors de la connexion')
+        setChargement(false)
+        return
+      }
+
+      // Connexion réussie - rediriger vers le tableau de bord
+      router.push('/tableau-de-bord')
+    } catch (error) {
+      console.error('Erreur de connexion:', error)
+      setErreur('Erreur de connexion au serveur')
       setChargement(false)
-      setErreur('Fonctionnalité en cours de développement')
-    }, 1000)
+    }
   }
 
   return (
