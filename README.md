@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ACS Archive - Application de Gestion d'Archives
 
 Application web de gestion d'archives pour **ACS - Assureurs Conseils Service**, société de courtage d'assurances en Côte d'Ivoire.
@@ -75,3 +76,7 @@ acs-archive-app/
 ---
 
 **ACS - Assureurs Conseils Service** © 2025
+=======
+# acs-archive-app
+Application de gestion d'archives pour ACS - Assureurs Conseils Service. Développée avec Next.js, TypeScript et TailwindCSS.
+>>>>>>> 6e5fd5df1eff20f80ba402f0a468d11c50342d50
