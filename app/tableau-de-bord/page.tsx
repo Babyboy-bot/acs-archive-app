@@ -2,6 +2,7 @@
 
 import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
+import { StatsTempsReel } from '@/components/StatsTempsReel'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
 import Link from 'next/link'
@@ -82,111 +83,14 @@ export default function DashboardUltraModerne() {
           <p className="text-gray-600">Bienvenue ! Voici un aperçu de votre système d'archivage</p>
         </motion.div>
 
-        {/* Cartes statistiques */}
-        <motion.div 
-          initial="hidden"
-          animate="visible"
-          variants={{
-            hidden: { opacity: 0 },
-            visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
-          }}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8"
+        {/* Stats temps réel */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="mb-8"
         >
-          {/* Total Documents */}
-          <motion.div 
-            variants={{ hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1 } }}
-            whileHover={{ scale: 1.05, y: -5 }} 
-            className="relative overflow-hidden"
-          >
-            <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-2xl shadow-xl p-6 text-white">
-              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                    <Icon name="folder" size="lg" className="text-white" />
-                  </div>
-                  <div className="text-sm bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
-                    +{stats.croissance}%
-                  </div>
-                </div>
-                <p className="text-sm opacity-90 mb-1">Total Documents</p>
-                <p className="text-4xl font-bold">{stats.documents.toLocaleString()}</p>
-                <p className="text-sm opacity-75 mt-2">+{stats.nouveaux} ce mois</p>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Stockage */}
-          <motion.div 
-            variants={{ hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1 } }}
-            whileHover={{ scale: 1.05, y: -5 }} 
-            className="relative overflow-hidden"
-          >
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-xl p-6 text-white">
-              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                    <Icon name="inbox" size="lg" className="text-white" />
-                  </div>
-                  <div className="text-sm bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
-                    24%
-                  </div>
-                </div>
-                <p className="text-sm opacity-90 mb-1">Espace Utilisé</p>
-                <p className="text-4xl font-bold">{stats.stockage} GB</p>
-                <p className="text-sm opacity-75 mt-2">Sur 10 GB</p>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Utilisateurs */}
-          <motion.div 
-            variants={{ hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1 } }}
-            whileHover={{ scale: 1.05, y: -5 }} 
-            className="relative overflow-hidden"
-          >
-            <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl shadow-xl p-6 text-white">
-              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                    <Icon name="users" size="lg" className="text-white" />
-                  </div>
-                  <div className="text-sm bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
-                    Actifs
-                  </div>
-                </div>
-                <p className="text-sm opacity-90 mb-1">Utilisateurs</p>
-                <p className="text-4xl font-bold">{stats.utilisateurs}</p>
-                <p className="text-sm opacity-75 mt-2">3 en ligne</p>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Aujourd'hui */}
-          <motion.div 
-            variants={{ hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1 } }}
-            whileHover={{ scale: 1.05, y: -5 }} 
-            className="relative overflow-hidden"
-          >
-            <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-xl p-6 text-white">
-              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                    <Icon name="upload" size="lg" className="text-white" />
-                  </div>
-                  <div className="text-sm bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
-                    Aujourd'hui
-                  </div>
-                </div>
-                <p className="text-sm opacity-90 mb-1">Uploads</p>
-                <p className="text-4xl font-bold">12</p>
-                <p className="text-sm opacity-75 mt-2">Documents ajoutés</p>
-              </div>
-            </div>
-          </motion.div>
+          <StatsTempsReel intervalMs={5000} />
         </motion.div>
 
         {/* Actions rapides */}
@@ -393,6 +297,34 @@ export default function DashboardUltraModerne() {
             </div>
           </motion.div>
         </div>
+
+        {/* Lien vers activités */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.9 }}
+          className="mt-8"
+        >
+          <Link href="/activite">
+            <motion.div
+              whileHover={{ scale: 1.02 }}
+              className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-2xl shadow-lg p-8 text-white cursor-pointer"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-2xl font-bold mb-2 flex items-center gap-3">
+                    <Icon name="clock" size="lg" />
+                    Activités et Historique
+                  </h3>
+                  <p className="text-purple-100">
+                    Consultez la timeline complète de toutes les actions effectuées
+                  </p>
+                </div>
+                <Icon name="arrow-right" size="xl" className="text-white" />
+              </div>
+            </motion.div>
+          </Link>
+        </motion.div>
       </main>
     </div>
   )

@@ -12,8 +12,9 @@ export function Navigation() {
 
   const elementsMenu: Array<{ href: string; label: string; icone: IconName }> = [
     { href: '/tableau-de-bord', label: 'Tableau de bord', icone: 'chart' },
-    { href: '/recherche', label: 'Recherche', icone: 'search' },
     { href: '/documents', label: 'Documents', icone: 'folder' },
+    { href: '/recherche', label: 'Recherche avancée', icone: 'search' },
+    { href: '/activite', label: 'Activités', icone: 'clock' },
     { href: '/categories', label: 'Catégories', icone: 'tag' },
     { href: '/utilisateurs', label: 'Utilisateurs', icone: 'users' },
   ]
