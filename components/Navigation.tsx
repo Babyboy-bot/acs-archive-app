@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import React from 'react'
 import { Icon, IconName } from './Icon'
+import { RechercheGlobale } from './RechercheGlobale'
 
 export function Navigation() {
   const cheminActuel = usePathname()
@@ -59,6 +60,7 @@ export function Navigation() {
 
           {/* Menu utilisateur */}
           <div className="flex items-center gap-3">
+            <RechercheGlobale />
             <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
               <svg
                 className="w-6 h-6"

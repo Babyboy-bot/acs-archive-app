@@ -20,13 +20,17 @@
     "@prisma/client": "^6.19.0",
     "bcryptjs": "^3.0.3",
     "framer-motion": "^12.23.24",
+    "jspdf": "^3.0.3",
+    "jspdf-autotable": "^5.0.2",
     "next": "^16.0.1",
     "next-auth": "^4.24.13",
     "prisma": "^6.19.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-dropzone": "^14.3.8",
-    "recharts": "^3.4.1"
+    "react-pdf": "^10.2.0",
+    "recharts": "^3.4.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",

@@ -2,15 +2,20 @@
 
 import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
+import { PreviewPDF } from '@/components/PreviewPDF'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { useState } from 'react'
+import { exporterPDF, exporterExcel, exporterCSV } from '@/lib/export'
 
 export default function PageDocuments() {
   const [recherche, setRecherche] = useState('')
   const [filtreRisque, setFiltreRisque] = useState('')
   const [filtreCourrier, setFiltreCourrier] = useState('')
   const [vueMode, setVueMode] = useState<'liste' | 'grille'>('grille')
+  const [previewOuvert, setPreviewOuvert] = useState(false)
+  const [documentPreview, setDocumentPreview] = useState<string>('')
+  const [menuExport, setMenuExport] = useState(false)
 
   const documents = [
     {
@@ -117,16 +122,49 @@ export default function PageDocuments() {
               </h1>
               <p className="text-gray-600">{documentsFiltres.length} document{documentsFiltres.length > 1 ? 's' : ''} trouvé{documentsFiltres.length > 1 ? 's' : ''}</p>
             </div>
-            <Link href="/documents/nouveau">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-              >
-                <Icon name="upload" size="sm" />
-                Nouveau document
-              </motion.button>
-            </Link>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setMenuExport(!menuExport)}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+                >
+                  <Icon name="download" size="sm" />
+                  Exporter
+                </motion.button>
+                {menuExport && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border-2 border-gray-200 overflow-hidden z-10"
+                  >
+                    <button onClick={() => { exporterPDF(documentsFiltres, 'Liste des documents'); setMenuExport(false) }} className="w-full px-4 py-3 hover:bg-red-50 transition-colors text-left flex items-center gap-2">
+                      <Icon name="document" size="sm" className="text-red-600" />
+                      <span className="font-medium">Export PDF</span>
+                    </button>
+                    <button onClick={() => { exporterExcel(documentsFiltres, 'documents'); setMenuExport(false) }} className="w-full px-4 py-3 hover:bg-green-50 transition-colors text-left flex items-center gap-2">
+                      <Icon name="card" size="sm" className="text-green-600" />
+                      <span className="font-medium">Export Excel</span>
+                    </button>
+                    <button onClick={() => { exporterCSV(documentsFiltres, 'documents'); setMenuExport(false) }} className="w-full px-4 py-3 hover:bg-blue-50 transition-colors text-left flex items-center gap-2">
+                      <Icon name="document" size="sm" className="text-blue-600" />
+                      <span className="font-medium">Export CSV</span>
+                    </button>
+                  </motion.div>
+                )}
+              </div>
+              <Link href="/documents/nouveau">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+                >
+                  <Icon name="upload" size="sm" />
+                  Nouveau document
+                </motion.button>
+              </Link>
+            </div>
           </div>
         </motion.div>
 
@@ -261,6 +299,7 @@ export default function PageDocuments() {
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
+                      onClick={() => { setDocumentPreview(doc.titre); setPreviewOuvert(true) }}
                       className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                     >
                       <Icon name="eye" size="sm" />
@@ -333,7 +372,7 @@ export default function PageDocuments() {
                       <td className="px-6 py-4 text-gray-600 text-sm">{doc.taille}</td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">
-                          <motion.button whileHover={{ scale: 1.1 }} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Voir">
+                          <motion.button whileHover={{ scale: 1.1 }} onClick={() => { setDocumentPreview(doc.titre); setPreviewOuvert(true) }} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Voir">
                             <Icon name="eye" size="sm" />
                           </motion.button>
                           <motion.button whileHover={{ scale: 1.1 }} className="p-2 hover:bg-blue-50 rounded-lg transition-colors" title="Télécharger">
@@ -373,6 +412,13 @@ export default function PageDocuments() {
             </Link>
           </motion.div>
         )}
+
+        {/* Prévisualisation PDF */}
+        <PreviewPDF 
+          ouvert={previewOuvert}
+          onFermer={() => setPreviewOuvert(false)}
+          titre={documentPreview}
+        />
       </main>
     </div>
   )
