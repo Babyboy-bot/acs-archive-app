@@ -16,7 +16,7 @@ Application web de gestion d'archives pour **ACS - Assureurs Conseils Service**,
 ## 👥 Équipe
 
 - **KASSI ELIE EMMANUEL** (Babyboy-bot)
-- **RODRIGUE**
+- **ASSINYO RODRIGUE**
 
 ## 📋 Documentation
 
