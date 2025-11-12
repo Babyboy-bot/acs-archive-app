@@ -38,59 +38,98 @@ model Utilisateur {
 }
 
 // Modèle Catégorie de documents
-model Categorie {
-  id               String     @id @default(cuid())
-  nom              String
-  description      String?
-  couleur          String?    // Code couleur hex pour l'UI
-  dateCreation     DateTime   @default(now())
-  dateModification DateTime   @updatedAt
-  
-  // Relations
-  documents        Document[]
-  
-  @@map("categories")
+// Structure adaptée à l'archivage ACS
+// CLIENT → EXERCICE (Année) → RISQUE → TYPE COURRIER → DOCUMENTS
+
+model Client {
+  id            String      @id @default(cuid())
+  nom           String      @unique
+  numeroClient  String?     @unique
+  type          TypeClient  @default(ENTREPRISE)
+  email         String?
+  telephone     String?
+  adresse       String?
+  exercices     Exercice[]
+  creeLe        DateTime    @default(now())
+  modifieLe     DateTime    @updatedAt
+
+  @@map("clients")
 }
 
-// Modèle Document
+enum TypeClient {
+  ENTREPRISE
+  PARTICULIER
+}
+
+model Exercice {
+  id        String     @id @default(cuid())
+  annee     Int
+  clientId  String
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  risques   Risque[]
+  statut    StatutExercice @default(ACTIF)
+  creeLe    DateTime   @default(now())
+  modifieLe DateTime   @updatedAt
+
+  @@unique([clientId, annee])
+  @@map("exercices")
+}
+
+enum StatutExercice {
+  ACTIF
+  ARCHIVE
+  CLOTURE
+}
+
+model Risque {
+  id          String       @id @default(cuid())
+  type        TypeRisque
+  numeroPolice String?
+  exerciceId  String
+  exercice    Exercice     @relation(fields: [exerciceId], references: [id], onDelete: Cascade)
+  documents   Document[]
+  creeLe      DateTime     @default(now())
+  modifieLe   DateTime     @updatedAt
+
+  @@map("risques")
+}
+
+enum TypeRisque {
+  AUTOMOBILE
+  SANTE
+  HABITATION
+  VIE
+  RESPONSABILITE_CIVILE
+  AUTRE
+}
+
 model Document {
-  id                  String             @id @default(cuid())
-  titre               String
-  description         String?
-  nomFichier          String
-  cheminFichier       String
-  typeFichier         String             // pdf, docx, xlsx, etc.
-  tailleFichier       Int                // en octets
-  numeroReference     String?
-  dateDocument        DateTime?          // Date du document lui-même
-  dateCreation        DateTime           @default(now())
-  dateModification    DateTime           @updatedAt
-  
-  // Relations
-  categorieId         String
-  categorie           Categorie          @relation(fields: [categorieId], references: [id])
-  createurId          String
-  createur            Utilisateur        @relation("UtilisateurCreateur", fields: [createurId], references: [id])
-  etiquettes          Etiquette[]
-  journalActivites    JournalActivite[]
-  
+  id               String             @id @default(cuid())
+  titre            String
+  description      String?
+  cheminFichier    String
+  typeFichier      String
+  tailleFichier    Int
+  typeCourrier     TypeCourrier
+  risqueId         String
+  risque           Risque             @relation(fields: [risqueId], references: [id], onDelete: Cascade)
+  auteurId         String
+  auteur           Utilisateur        @relation(fields: [auteurId], references: [id])
+  dateDocument     DateTime?
+  reference        String?
+  journalActivites JournalActivite[]
+  creeLe           DateTime           @default(now())
+  modifieLe        DateTime           @updatedAt
+
   @@map("documents")
-  @@index([categorieId])
-  @@index([createurId])
-  @@index([dateCreation])
+  @@index([risqueId])
+  @@index([auteurId])
+  @@index([creeLe])
 }
 
-// Modèle Étiquette (Tags)
-model Etiquette {
-  id               String     @id @default(cuid())
-  nom              String     @unique
-  couleur          String?
-  dateCreation     DateTime   @default(now())
-  
-  // Relations
-  documents        Document[]
-  
-  @@map("etiquettes")
+enum TypeCourrier {
+  ACS_VERS_CLIENT      // Courrier ACS → Client
+  ACS_VERS_COMPAGNIE   // Courrier ACS → Compagnie
 }
 
 // Énumération des types d'actions

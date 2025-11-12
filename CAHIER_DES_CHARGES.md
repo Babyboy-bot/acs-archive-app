@@ -203,21 +203,61 @@
 
 ## 10. Notes de la Réunion d'Archivage
 
-**Date de la réunion** : ___/___/2025
+**Date de la réunion** : 12/11/2025
 
-### Points importants
-- 
-- 
-- 
+### Structure d'Archivage Validée
+
+**Hiérarchie de rangement (4 niveaux) :**
+```
+1. CLIENT (Nom du client)
+   └─ 2. EXERCICE (Année - ex: 2025, 2024, etc.)
+       └─ 3. RISQUE (Type d'assurance)
+           └─ 4. TYPE DE COURRIER
+               ├─ Courrier ACS → Client
+               └─ Courrier ACS → Compagnie
+```
+
+**Types de Risques identifiés :**
+- Automobile
+- Santé  
+- Habitation
+- Vie
+- Responsabilité Civile
+- Autres risques
+
+**Méthode de rangement dans chaque risque :**
+- **Courrier ACS → Client** : Communications sortantes vers les clients
+- **Courrier ACS → Compagnie** : Communications avec les compagnies d'assurance
 
 ### Fonctionnalités prioritaires
-1. 
-2. 
-3. 
 
-### Points à clarifier
-- 
-- 
+1. **Recherche et accès direct aux dossiers** (PRIORITÉ #1)
+   - Trouver rapidement un document par Client/Année/Risque
+   - Navigation intuitive dans la hiérarchie
+   - Affichage instantané des résultats
+
+2. **Filtrage multi-critères**
+   - Par client
+   - Par exercice (année)
+   - Par type de risque
+   - Par type de courrier
+
+3. **Organisation automatique selon la structure validée**
+
+### Points importants
+
+- ✅ Pas de code source de l'ancienne application disponible
+- ✅ Aucune documentation existante
+- ✅ Développement from scratch validé
+- ⏳ Retour des archivistes attendu pour fonctionnalités spécifiques supplémentaires
+- ⏳ Attente de détails sur optimisations souhaitées pour accélérer leur travail
+
+### Points à clarifier (en attente retour archivistes)
+
+- Fonctionnalités spécifiques pour accélérer leur travail quotidien
+- Points de friction dans leur processus actuel
+- Besoins d'automatisation particuliers
+- Format préféré pour l'affichage des résultats
 
 ---
 
