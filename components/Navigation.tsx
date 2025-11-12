@@ -4,16 +4,17 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import React from 'react'
+import { Icon, IconName } from './Icon'
 
 export function Navigation() {
   const cheminActuel = usePathname()
 
-  const elementsMenu = [
-    { href: '/tableau-de-bord', label: 'Tableau de bord', icone: '📊' },
-    { href: '/recherche', label: 'Recherche', icone: '🔍' },
-    { href: '/documents', label: 'Documents', icone: '📁' },
-    { href: '/categories', label: 'Catégories', icone: '🏷️' },
-    { href: '/utilisateurs', label: 'Utilisateurs', icone: '👥' },
+  const elementsMenu: Array<{ href: string; label: string; icone: IconName }> = [
+    { href: '/tableau-de-bord', label: 'Tableau de bord', icone: 'chart' },
+    { href: '/recherche', label: 'Recherche', icone: 'search' },
+    { href: '/documents', label: 'Documents', icone: 'folder' },
+    { href: '/categories', label: 'Catégories', icone: 'tag' },
+    { href: '/utilisateurs', label: 'Utilisateurs', icone: 'users' },
   ]
 
   return (
@@ -49,7 +50,7 @@ export function Navigation() {
                   `}
                   style={estActif ? { background: 'linear-gradient(135deg, #D32027 0%, #0066B3 100%)' } : {}}
                 >
-                  <span className="mr-2">{element.icone}</span>
+                  <Icon name={element.icone} size="sm" className="mr-2" />
                   {element.label}
                 </Link>
               )
