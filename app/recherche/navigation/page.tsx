@@ -1,351 +1,272 @@
 'use client'
 
-import { useState } from 'react'
 import { Navigation } from '@/components/Navigation'
-import { Bouton } from '@/components/ui/Bouton'
-import Link from 'next/link'
+import { Icon } from '@/components/Icon'
+import { motion } from 'framer-motion'
+import { useState } from 'react'
 
 export default function PageNavigationHierarchique() {
-  const [niveauActuel, setNiveauActuel] = useState<'clients' | 'exercices' | 'risques' | 'documents'>('clients')
+  const [niveau, setNiveau] = useState<'clients' | 'exercices' | 'risques' | 'documents'>('clients')
   const [clientSelectionne, setClientSelectionne] = useState<string | null>(null)
-  const [exerciceSelectionne, setExerciceSelectionne] = useState<number | null>(null)
+  const [exerciceSelectionne, setExerciceSelectionne] = useState<string | null>(null)
   const [risqueSelectionne, setRisqueSelectionne] = useState<string | null>(null)
 
-  // Données simulées
   const clients = [
-    { id: '1', nom: 'Entreprise ABC', type: 'ENTREPRISE', exercices: 3, documents: 45 },
-    { id: '2', nom: 'SARL Transport CI', type: 'ENTREPRISE', exercices: 2, documents: 67 },
-    { id: '3', nom: 'Société DELTA', type: 'ENTREPRISE', exercices: 4, documents: 123 },
-    { id: '4', nom: 'Kouassi Jean', type: 'PARTICULIER', exercices: 1, documents: 12 },
+    { id: '1', nom: 'Entreprise ABC', type: 'ENTREPRISE', nombreExercices: 3 },
+    { id: '2', nom: 'SARL Transport CI', type: 'ENTREPRISE', nombreExercices: 2 },
+    { id: '3', nom: 'Kouassi Jean-Marie', type: 'PARTICULIER', nombreExercices: 1 },
   ]
 
   const exercices = [
-    { id: '1', annee: 2025, statut: 'ACTIF', risques: 3, documents: 23 },
-    { id: '2', annee: 2024, statut: 'ARCHIVE', risques: 4, documents: 15 },
-    { id: '3', annee: 2023, statut: 'CLOTURE', risques: 2, documents: 7 },
+    { id: '1', annee: 2025, statut: 'ACTIF', nombreRisques: 3 },
+    { id: '2', annee: 2024, statut: 'ARCHIVE', nombreRisques: 2 },
+    { id: '3', annee: 2023, statut: 'CLOTURE', nombreRisques: 1 },
   ]
 
   const risques = [
-    { id: '1', type: 'AUTOMOBILE', numeroPolice: 'POL-AUTO-2025-001', documents: 12 },
-    { id: '2', type: 'SANTE', numeroPolice: 'POL-SANTE-2025-002', documents: 8 },
-    { id: '3', type: 'HABITATION', numeroPolice: 'POL-HAB-2025-003', documents: 3 },
+    { id: '1', type: 'AUTOMOBILE', description: 'Assurance véhicules', couleur: '#D32027', nombreDocuments: 5 },
+    { id: '2', type: 'SANTE', description: 'Assurance santé collective', couleur: '#10B981', nombreDocuments: 3 },
+    { id: '3', type: 'HABITATION', description: 'Multirisque habitation', couleur: '#F59E0B', nombreDocuments: 2 },
   ]
 
   const documents = [
-    { id: '1', titre: 'Police Automobile 2025', typeCourrier: 'ACS_VERS_CLIENT', date: '2025-11-01', taille: '2.4 MB' },
-    { id: '2', titre: 'Cotation Compagnie XYZ', typeCourrier: 'ACS_VERS_COMPAGNIE', date: '2025-10-28', taille: '850 KB' },
-    { id: '3', titre: 'Avenant contrat', typeCourrier: 'ACS_VERS_CLIENT', date: '2025-10-15', taille: '1.2 MB' },
+    { id: '1', titre: 'Police Auto - Contrat 2025', typeCourrier: 'ACS_VERS_CLIENT', date: '2025-11-01', taille: '2.4 MB' },
+    { id: '2', titre: 'Demande cotation Compagnie', typeCourrier: 'ACS_VERS_COMPAGNIE', date: '2025-10-28', taille: '850 KB' },
+    { id: '3', titre: 'Attestation assurance', typeCourrier: 'ACS_VERS_CLIENT', date: '2025-10-15', taille: '1.2 MB' },
   ]
 
-  const risqueConfig: Record<string, { label: string; couleur: string; icon: string }> = {
-    AUTOMOBILE: { label: 'Automobile', couleur: '#D32027', icon: '🚗' },
-    SANTE: { label: 'Santé', couleur: '#10B981', icon: '🏥' },
-    HABITATION: { label: 'Habitation', couleur: '#F59E0B', icon: '🏠' },
-    VIE: { label: 'Vie', couleur: '#8B5CF6', icon: '❤️' },
-    RESPONSABILITE_CIVILE: { label: 'RC', couleur: '#0066B3', icon: '🛡️' },
-    AUTRE: { label: 'Autre', couleur: '#6B7280', icon: '📋' },
-  }
-
-  const statutConfig: Record<string, { label: string; couleur: string }> = {
-    ACTIF: { label: 'Actif', couleur: '#10B981' },
-    ARCHIVE: { label: 'Archivé', couleur: '#F59E0B' },
-    CLOTURE: { label: 'Clôturé', couleur: '#6B7280' },
-  }
-
-  const selectionnerClient = (clientId: string) => {
-    setClientSelectionne(clientId)
-    setNiveauActuel('exercices')
-  }
-
-  const selectionnerExercice = (annee: number) => {
-    setExerciceSelectionne(annee)
-    setNiveauActuel('risques')
-  }
-
-  const selectionnerRisque = (risqueId: string) => {
-    setRisqueSelectionne(risqueId)
-    setNiveauActuel('documents')
-  }
-
-  const remonterNiveau = () => {
-    if (niveauActuel === 'documents') {
+  const retour = () => {
+    if (niveau === 'documents') {
+      setNiveau('risques')
       setRisqueSelectionne(null)
-      setNiveauActuel('risques')
-    } else if (niveauActuel === 'risques') {
+    } else if (niveau === 'risques') {
+      setNiveau('exercices')
       setExerciceSelectionne(null)
-      setNiveauActuel('exercices')
-    } else if (niveauActuel === 'exercices') {
+    } else if (niveau === 'exercices') {
+      setNiveau('clients')
       setClientSelectionne(null)
-      setNiveauActuel('clients')
     }
   }
 
-  const breadcrumb = []
-  if (clientSelectionne) {
-    const client = clients.find(c => c.id === clientSelectionne)
-    breadcrumb.push({ label: client?.nom || '', niveau: 'clients' })
-  }
-  if (exerciceSelectionne) {
-    breadcrumb.push({ label: String(exerciceSelectionne), niveau: 'exercices' })
-  }
-  if (risqueSelectionne) {
-    const risque = risques.find(r => r.id === risqueSelectionne)
-    breadcrumb.push({ label: risqueConfig[risque?.type || 'AUTRE'].label, niveau: 'risques' })
+  const filAriane = () => {
+    const items = []
+    if (clientSelectionne) items.push(clients.find(c => c.id === clientSelectionne)?.nom || '')
+    if (exerciceSelectionne) items.push(exercices.find(e => e.id === exerciceSelectionne)?.annee.toString() || '')
+    if (risqueSelectionne) items.push(risques.find(r => r.id === risqueSelectionne)?.type || '')
+    return items
   }
 
   return (
-    <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)' }}>
+    <div className="min-h-screen bg-gray-50">
       <Navigation />
       
       <main className="container mx-auto px-4 py-8">
-        {/* En-tête */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold mb-2" style={{ color: '#1F2937' }}>
-              📂 Navigation Hiérarchique
-            </h1>
-            <p style={{ color: '#6B7280' }}>
-              Parcourez vos documents par structure d'archivage
-            </p>
-          </div>
-          <Link href="/recherche">
-            <Bouton variante="secondaire">
-              🔍 Recherche avancée
-            </Bouton>
-          </Link>
-        </div>
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8"
+        >
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
+            <Icon name="folder" size="xl" className="text-red-600" />
+            Navigation Hiérarchique
+          </h1>
+          <p className="text-gray-600">Parcourez vos documents par arborescence</p>
+        </motion.div>
 
-        {/* Breadcrumb */}
-        {breadcrumb.length > 0 && (
-          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => {
-                  setClientSelectionne(null)
-                  setExerciceSelectionne(null)
-                  setRisqueSelectionne(null)
-                  setNiveauActuel('clients')
-                }}
-                className="text-blue-600 hover:underline"
-              >
-                🏠 Accueil
-              </button>
-              {breadcrumb.map((item, index) => (
+        {/* Fil d'Ariane */}
+        {filAriane().length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-2xl shadow-lg p-4 mb-6"
+          >
+            <div className="flex items-center gap-2 text-sm">
+              <Icon name="home" size="sm" className="text-gray-400" />
+              <span className="text-gray-400">/</span>
+              {filAriane().map((item, index) => (
                 <div key={index} className="flex items-center gap-2">
-                  <span className="text-gray-400">/</span>
-                  <span className="font-medium" style={{ color: '#1F2937' }}>
-                    {item.label}
+                  <span className="font-medium text-gray-700">{item}</span>
+                  {index < filAriane().length - 1 && (
+                    <Icon name="chevron-right" size="sm" className="text-gray-400" />
+                  )}
+                </div>
+              ))}
+            </div>
+            {niveau !== 'clients' && (
+              <motion.button
+                whileHover={{ x: -5 }}
+                onClick={retour}
+                className="mt-3 flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+              >
+                <Icon name="arrow-left" size="sm" />
+                Retour
+              </motion.button>
+            )}
+          </motion.div>
+        )}
+
+        {/* Niveau 1 : Clients */}
+        {niveau === 'clients' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {clients.map((client, index) => (
+              <motion.div
+                key={client.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                whileHover={{ y: -5, scale: 1.02 }}
+                onClick={() => {
+                  setClientSelectionne(client.id)
+                  setNiveau('exercices')
+                }}
+                className="bg-white rounded-2xl shadow-lg p-6 cursor-pointer group"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="w-16 h-16 bg-gradient-to-br from-red-500 to-red-600 rounded-2xl flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                    <Icon name="building" size="lg" />
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                    client.type === 'ENTREPRISE' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                  }`}>
+                    {client.type}
                   </span>
                 </div>
-              ))}
-            </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-red-600 transition-colors">
+                  {client.nom}
+                </h3>
+                <p className="text-sm text-gray-600 flex items-center gap-2">
+                  <Icon name="calendar" size="sm" />
+                  {client.nombreExercices} exercice{client.nombreExercices > 1 ? 's' : ''}
+                </p>
+              </motion.div>
+            ))}
           </div>
         )}
 
-        {/* Bouton retour */}
-        {niveauActuel !== 'clients' && (
-          <div className="mb-6">
-            <Bouton onClick={remonterNiveau} variante="secondaire">
-              ← Retour au niveau précédent
-            </Bouton>
-          </div>
-        )}
-
-        {/* Niveau 1: Clients */}
-        {niveauActuel === 'clients' && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-2xl">1️⃣</span>
-              <h2 className="text-2xl font-bold" style={{ color: '#1F2937' }}>
-                Sélectionnez un Client
-              </h2>
-            </div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {clients.map((client) => (
-                <button
-                  key={client.id}
-                  onClick={() => selectionnerClient(client.id)}
-                  className="bg-white rounded-xl shadow-md p-6 text-left hover:shadow-xl transition-all border-l-4"
-                  style={{ borderColor: '#D32027' }}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="text-4xl">
-                      {client.type === 'ENTREPRISE' ? '🏢' : '👤'}
-                    </div>
-                    <span className="text-xs px-2 py-1 rounded-full" style={{ 
-                      backgroundColor: client.type === 'ENTREPRISE' ? 'rgba(211, 32, 39, 0.1)' : 'rgba(0, 102, 179, 0.1)',
-                      color: client.type === 'ENTREPRISE' ? '#D32027' : '#0066B3'
-                    }}>
-                      {client.type === 'ENTREPRISE' ? 'Entreprise' : 'Particulier'}
-                    </span>
+        {/* Niveau 2 : Exercices */}
+        {niveau === 'exercices' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {exercices.map((exercice, index) => (
+              <motion.div
+                key={exercice.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                whileHover={{ y: -5, scale: 1.02 }}
+                onClick={() => {
+                  setExerciceSelectionne(exercice.id)
+                  setNiveau('risques')
+                }}
+                className="bg-white rounded-2xl shadow-lg p-6 cursor-pointer group"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                    <Icon name="calendar" size="lg" />
                   </div>
-                  <h3 className="font-bold text-lg mb-2" style={{ color: '#1F2937' }}>
-                    {client.nom}
-                  </h3>
-                  <div className="flex items-center gap-4 text-sm text-gray-600">
-                    <span>📅 {client.exercices} exercices</span>
-                    <span>📄 {client.documents} docs</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Niveau 2: Exercices */}
-        {niveauActuel === 'exercices' && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-2xl">2️⃣</span>
-              <h2 className="text-2xl font-bold" style={{ color: '#1F2937' }}>
-                Sélectionnez un Exercice (Année)
-              </h2>
-            </div>
-            <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {exercices.map((exercice) => (
-                <button
-                  key={exercice.id}
-                  onClick={() => selectionnerExercice(exercice.annee)}
-                  className="bg-white rounded-xl shadow-md p-6 text-center hover:shadow-xl transition-all border-t-4"
-                  style={{ borderColor: '#0066B3' }}
-                >
-                  <div className="text-4xl mb-2">📅</div>
-                  <h3 className="font-bold text-3xl mb-2" style={{ color: '#0066B3' }}>
-                    {exercice.annee}
-                  </h3>
-                  <span 
-                    className="inline-block px-3 py-1 rounded-full text-sm font-medium mb-3"
-                    style={{ 
-                      backgroundColor: `${statutConfig[exercice.statut].couleur}15`,
-                      color: statutConfig[exercice.statut].couleur
-                    }}
-                  >
-                    {statutConfig[exercice.statut].label}
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                    exercice.statut === 'ACTIF' ? 'bg-green-100 text-green-700' :
+                    exercice.statut === 'ARCHIVE' ? 'bg-orange-100 text-orange-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {exercice.statut}
                   </span>
-                  <div className="text-sm text-gray-600">
-                    <div>{exercice.risques} risques</div>
-                    <div>{exercice.documents} documents</div>
+                </div>
+                <h3 className="text-3xl font-bold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors">
+                  {exercice.annee}
+                </h3>
+                <p className="text-sm text-gray-600 flex items-center gap-2">
+                  <Icon name="shield" size="sm" />
+                  {exercice.nombreRisques} risque{exercice.nombreRisques > 1 ? 's' : ''}
+                </p>
+              </motion.div>
+            ))}
+          </div>
+        )}
+
+        {/* Niveau 3 : Risques */}
+        {niveau === 'risques' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {risques.map((risque, index) => (
+              <motion.div
+                key={risque.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                whileHover={{ y: -5, scale: 1.02 }}
+                onClick={() => {
+                  setRisqueSelectionne(risque.id)
+                  setNiveau('documents')
+                }}
+                className="bg-white rounded-2xl shadow-lg overflow-hidden cursor-pointer group"
+              >
+                <div 
+                  className="h-24 flex items-center justify-center"
+                  style={{ background: `linear-gradient(135deg, ${risque.couleur}dd 0%, ${risque.couleur} 100%)` }}
+                >
+                  <Icon name="shield" size="xl" className="text-white group-hover:scale-110 transition-transform" />
+                </div>
+                <div className="p-6">
+                  <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-red-600 transition-colors">
+                    {risque.type}
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-3">{risque.description}</p>
+                  <p className="text-sm text-gray-600 flex items-center gap-2">
+                    <Icon name="document" size="sm" />
+                    {risque.nombreDocuments} document{risque.nombreDocuments > 1 ? 's' : ''}
+                  </p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+
+        {/* Niveau 4 : Documents */}
+        {niveau === 'documents' && (
+          <div className="space-y-4">
+            {documents.map((doc, index) => (
+              <motion.div
+                key={doc.id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: index * 0.1 }}
+                whileHover={{ x: 5 }}
+                className="bg-white rounded-2xl shadow-lg p-6 cursor-pointer border-2 border-transparent hover:border-red-300 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="w-14 h-14 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center">
+                      <Icon name="document-solid" size="lg" className="text-gray-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-lg text-gray-900 mb-1">{doc.titre}</h3>
+                      <div className="flex items-center gap-3 text-sm">
+                        <span className={`px-3 py-1 rounded-full font-semibold ${
+                          doc.typeCourrier === 'ACS_VERS_CLIENT' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {doc.typeCourrier === 'ACS_VERS_CLIENT' ? 'ACS → Client' : 'ACS → Compagnie'}
+                        </span>
+                        <span className="text-gray-500 flex items-center gap-1">
+                          <Icon name="calendar" size="xs" />
+                          {doc.date}
+                        </span>
+                        <span className="text-gray-500 flex items-center gap-1">
+                          <Icon name="inbox" size="xs" />
+                          {doc.taille}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Niveau 3: Risques */}
-        {niveauActuel === 'risques' && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-2xl">3️⃣</span>
-              <h2 className="text-2xl font-bold" style={{ color: '#1F2937' }}>
-                Sélectionnez un Type de Risque
-              </h2>
-            </div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {risques.map((risque) => {
-                const config = risqueConfig[risque.type]
-                return (
-                  <button
-                    key={risque.id}
-                    onClick={() => selectionnerRisque(risque.id)}
-                    className="bg-white rounded-xl shadow-md p-6 text-left hover:shadow-xl transition-all border-l-4"
-                    style={{ borderColor: config.couleur }}
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="text-4xl">{config.icon}</div>
-                      <span 
-                        className="px-3 py-1 rounded-full text-sm font-medium"
-                        style={{ 
-                          backgroundColor: `${config.couleur}15`,
-                          color: config.couleur
-                        }}
-                      >
-                        {risque.documents} docs
-                      </span>
-                    </div>
-                    <h3 className="font-bold text-lg mb-1" style={{ color: '#1F2937' }}>
-                      {config.label}
-                    </h3>
-                    <p className="text-sm text-gray-600">N° {risque.numeroPolice}</p>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Niveau 4: Documents */}
-        {niveauActuel === 'documents' && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-2xl">4️⃣</span>
-              <h2 className="text-2xl font-bold" style={{ color: '#1F2937' }}>
-                Documents
-              </h2>
-            </div>
-
-            {/* Types de courrier */}
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* ACS → Client */}
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2" style={{ color: '#D32027' }}>
-                  <span>📧</span> Courrier ACS → Client
-                </h3>
-                <div className="space-y-3">
-                  {documents.filter(d => d.typeCourrier === 'ACS_VERS_CLIENT').map((doc) => (
-                    <div 
-                      key={doc.id}
-                      className="border rounded-lg p-3 hover:shadow-md transition-all cursor-pointer"
-                      style={{ borderColor: '#E5E7EB' }}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <p className="font-medium mb-1" style={{ color: '#1F2937' }}>{doc.titre}</p>
-                          <div className="flex items-center gap-3 text-xs text-gray-500">
-                            <span>📅 {doc.date}</span>
-                            <span>📦 {doc.taille}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <button className="p-2 hover:bg-gray-100 rounded" title="Voir">👁️</button>
-                          <button className="p-2 hover:bg-gray-100 rounded" title="Télécharger">⬇️</button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                  <div className="flex gap-2">
+                    <motion.button whileHover={{ scale: 1.1 }} className="p-3 hover:bg-gray-100 rounded-xl transition-colors">
+                      <Icon name="eye" size="md" />
+                    </motion.button>
+                    <motion.button whileHover={{ scale: 1.1 }} className="p-3 hover:bg-blue-100 rounded-xl transition-colors">
+                      <Icon name="download" size="md" />
+                    </motion.button>
+                  </div>
                 </div>
-              </div>
-
-              {/* ACS → Compagnie */}
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2" style={{ color: '#0066B3' }}>
-                  <span>📨</span> Courrier ACS → Compagnie
-                </h3>
-                <div className="space-y-3">
-                  {documents.filter(d => d.typeCourrier === 'ACS_VERS_COMPAGNIE').map((doc) => (
-                    <div 
-                      key={doc.id}
-                      className="border rounded-lg p-3 hover:shadow-md transition-all cursor-pointer"
-                      style={{ borderColor: '#E5E7EB' }}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <p className="font-medium mb-1" style={{ color: '#1F2937' }}>{doc.titre}</p>
-                          <div className="flex items-center gap-3 text-xs text-gray-500">
-                            <span>📅 {doc.date}</span>
-                            <span>📦 {doc.taille}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <button className="p-2 hover:bg-gray-100 rounded" title="Voir">👁️</button>
-                          <button className="p-2 hover:bg-gray-100 rounded" title="Télécharger">⬇️</button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+              </motion.div>
+            ))}
           </div>
         )}
       </main>

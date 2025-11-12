@@ -1,6 +1,7 @@
 'use client'
 
 import { Navigation } from '@/components/Navigation'
+import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { useState } from 'react'
@@ -11,7 +12,6 @@ export default function PageDocuments() {
   const [filtreCourrier, setFiltreCourrier] = useState('')
   const [vueMode, setVueMode] = useState<'liste' | 'grille'>('grille')
 
-  // Données simulées
   const documents = [
     {
       id: 1,
@@ -23,7 +23,6 @@ export default function PageDocuments() {
       date: '2025-11-12',
       taille: '2.4 MB',
       reference: 'DOC-2025-001',
-      icon: '🚗',
       color: '#D32027'
     },
     {
@@ -36,7 +35,6 @@ export default function PageDocuments() {
       date: '2025-11-10',
       taille: '850 KB',
       reference: 'DOC-2025-002',
-      icon: '📋',
       color: '#0066B3'
     },
     {
@@ -49,7 +47,6 @@ export default function PageDocuments() {
       date: '2025-11-01',
       taille: '1.2 MB',
       reference: 'DOC-2025-003',
-      icon: '🏥',
       color: '#10B981'
     },
     {
@@ -62,7 +59,6 @@ export default function PageDocuments() {
       date: '2025-10-15',
       taille: '1.5 MB',
       reference: 'DOC-2025-005',
-      icon: '🏠',
       color: '#F59E0B'
     },
     {
@@ -75,18 +71,17 @@ export default function PageDocuments() {
       date: '2025-10-05',
       taille: '1.8 MB',
       reference: 'DOC-2025-006',
-      icon: '❤️',
       color: '#8B5CF6'
     },
   ]
 
   const risques = [
     { value: '', label: 'Tous les risques' },
-    { value: 'AUTOMOBILE', label: '🚗 Automobile' },
-    { value: 'SANTE', label: '🏥 Santé' },
-    { value: 'HABITATION', label: '🏠 Habitation' },
-    { value: 'VIE', label: '❤️ Vie' },
-    { value: 'RESPONSABILITE_CIVILE', label: '🛡️ RC' },
+    { value: 'AUTOMOBILE', label: 'Automobile' },
+    { value: 'SANTE', label: 'Santé' },
+    { value: 'HABITATION', label: 'Habitation' },
+    { value: 'VIE', label: 'Vie' },
+    { value: 'RESPONSABILITE_CIVILE', label: 'RC' },
   ]
 
   const courriers = [
@@ -109,7 +104,6 @@ export default function PageDocuments() {
       <Navigation />
       
       <main className="container mx-auto px-4 py-8">
-        {/* En-tête */}
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -117,8 +111,9 @@ export default function PageDocuments() {
         >
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2">
-                📁 Documents
+              <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
+                <Icon name="folder" size="xl" className="text-red-600" />
+                Documents
               </h1>
               <p className="text-gray-600">{documentsFiltres.length} document{documentsFiltres.length > 1 ? 's' : ''} trouvé{documentsFiltres.length > 1 ? 's' : ''}</p>
             </div>
@@ -128,14 +123,13 @@ export default function PageDocuments() {
                 whileTap={{ scale: 0.95 }}
                 className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
               >
-                <span className="text-xl">📤</span>
+                <Icon name="upload" size="sm" />
                 Nouveau document
               </motion.button>
             </Link>
           </div>
         </motion.div>
 
-        {/* Barre de recherche et filtres */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -143,23 +137,21 @@ export default function PageDocuments() {
           className="bg-white rounded-2xl shadow-lg p-6 mb-6"
         >
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* Recherche */}
             <div className="md:col-span-2">
               <div className="relative">
                 <input
                   type="text"
                   value={recherche}
                   onChange={(e) => setRecherche(e.target.value)}
-                  placeholder="🔍 Rechercher par titre, client, référence..."
+                  placeholder="Rechercher par titre, client, référence..."
                   className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
                 />
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl">
-                  🔍
+                <div className="absolute left-4 top-1/2 -translate-y-1/2">
+                  <Icon name="search" className="text-gray-400" />
                 </div>
               </div>
             </div>
 
-            {/* Filtre risque */}
             <select
               value={filtreRisque}
               onChange={(e) => setFiltreRisque(e.target.value)}
@@ -170,7 +162,6 @@ export default function PageDocuments() {
               ))}
             </select>
 
-            {/* Filtre courrier */}
             <select
               value={filtreCourrier}
               onChange={(e) => setFiltreCourrier(e.target.value)}
@@ -182,33 +173,33 @@ export default function PageDocuments() {
             </select>
           </div>
 
-          {/* Toggle vue */}
           <div className="flex items-center gap-2 mt-4">
             <span className="text-sm text-gray-600 mr-2">Affichage :</span>
             <button
               onClick={() => setVueMode('grille')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
                 vueMode === 'grille'
                   ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              🎴 Grille
+              <Icon name="card" size="sm" />
+              Grille
             </button>
             <button
               onClick={() => setVueMode('liste')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
                 vueMode === 'liste'
                   ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              📋 Liste
+              <Icon name="document" size="sm" />
+              Liste
             </button>
           </div>
         </motion.div>
 
-        {/* Documents - Vue Grille */}
         {vueMode === 'grille' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {documentsFiltres.map((doc, index) => (
@@ -220,24 +211,18 @@ export default function PageDocuments() {
                 whileHover={{ y: -8, scale: 1.02 }}
                 className="bg-white rounded-2xl shadow-lg overflow-hidden cursor-pointer group"
               >
-                {/* Header coloré */}
                 <div 
-                  className="h-32 relative overflow-hidden"
+                  className="h-32 relative overflow-hidden flex items-center justify-center"
                   style={{ background: `linear-gradient(135deg, ${doc.color}dd 0%, ${doc.color} 100%)` }}
                 >
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-6xl opacity-90 group-hover:scale-110 transition-transform">
-                      {doc.icon}
-                    </div>
-                  </div>
                   <div className="absolute top-4 right-4">
                     <span className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-white text-xs font-semibold">
                       {doc.exercice}
                     </span>
                   </div>
+                  <Icon name="document-solid" size="xl" className="text-white opacity-90 group-hover:scale-110 transition-transform" />
                 </div>
 
-                {/* Contenu */}
                 <div className="p-6">
                   <h3 className="font-bold text-lg text-gray-900 mb-2 group-hover:text-red-600 transition-colors">
                     {doc.titre}
@@ -245,24 +230,23 @@ export default function PageDocuments() {
                   
                   <div className="space-y-2 text-sm text-gray-600 mb-4">
                     <div className="flex items-center gap-2">
-                      <span>🏢</span>
+                      <Icon name="building" size="xs" />
                       <span>{doc.client}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span>📅</span>
+                      <Icon name="calendar" size="xs" />
                       <span>{doc.date}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span>📦</span>
+                      <Icon name="inbox" size="xs" />
                       <span>{doc.taille}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span>📋</span>
+                      <Icon name="tag" size="xs" />
                       <span className="text-xs font-mono">{doc.reference}</span>
                     </div>
                   </div>
 
-                  {/* Badge type courrier */}
                   <div className="mb-4">
                     <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
                       doc.typeCourrier === 'ACS_VERS_CLIENT'
@@ -273,21 +257,22 @@ export default function PageDocuments() {
                     </span>
                   </div>
 
-                  {/* Actions */}
                   <div className="flex gap-2">
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
-                      className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors"
+                      className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                     >
-                      👁️ Voir
+                      <Icon name="eye" size="sm" />
+                      Voir
                     </motion.button>
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
-                      className="flex-1 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:shadow-lg transition-all"
+                      className="flex-1 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center justify-center gap-2"
                     >
-                      ⬇️ Télécharger
+                      <Icon name="download" size="sm" />
+                      Télécharger
                     </motion.button>
                   </div>
                 </div>
@@ -296,7 +281,6 @@ export default function PageDocuments() {
           </div>
         )}
 
-        {/* Documents - Vue Liste */}
         {vueMode === 'liste' && (
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
             <div className="overflow-x-auto">
@@ -323,7 +307,9 @@ export default function PageDocuments() {
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="text-2xl">{doc.icon}</div>
+                          <div className="w-10 h-10 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <Icon name="document-solid" className="text-gray-600" />
+                          </div>
                           <div>
                             <p className="font-semibold text-gray-900">{doc.titre}</p>
                             <p className="text-sm text-gray-500 font-mono">{doc.reference}</p>
@@ -348,13 +334,13 @@ export default function PageDocuments() {
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">
                           <motion.button whileHover={{ scale: 1.1 }} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Voir">
-                            👁️
+                            <Icon name="eye" size="sm" />
                           </motion.button>
                           <motion.button whileHover={{ scale: 1.1 }} className="p-2 hover:bg-blue-50 rounded-lg transition-colors" title="Télécharger">
-                            ⬇️
+                            <Icon name="download" size="sm" />
                           </motion.button>
                           <motion.button whileHover={{ scale: 1.1 }} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Supprimer">
-                            🗑️
+                            <Icon name="trash" size="sm" className="text-red-600" />
                           </motion.button>
                         </div>
                       </td>
@@ -366,23 +352,23 @@ export default function PageDocuments() {
           </div>
         )}
 
-        {/* Message vide */}
         {documentsFiltres.length === 0 && (
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="text-center py-16 bg-white rounded-2xl shadow-lg"
           >
-            <div className="text-6xl mb-4">📁</div>
+            <Icon name="folder" size="xl" className="mx-auto mb-4 text-gray-400" />
             <p className="text-xl font-semibold text-gray-700 mb-2">Aucun document trouvé</p>
             <p className="text-gray-500 mb-6">Modifiez vos filtres ou ajoutez un nouveau document</p>
             <Link href="/documents/nouveau">
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg"
+                className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg inline-flex items-center gap-2"
               >
-                📤 Ajouter un document
+                <Icon name="upload" size="sm" />
+                Ajouter un document
               </motion.button>
             </Link>
           </motion.div>

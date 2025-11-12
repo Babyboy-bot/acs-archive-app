@@ -1,6 +1,7 @@
 'use client'
 
 import { Navigation } from '@/components/Navigation'
+import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useRouter } from 'next/navigation'
 import { useState, useCallback } from 'react'
@@ -12,7 +13,6 @@ export default function PageNouveauDocument() {
   const [fichiers, setFichiers] = useState<File[]>([])
   const [chargement, setChargement] = useState(false)
 
-  // Formulaire
   const [titre, setTitre] = useState('')
   const [description, setDescription] = useState('')
   const [client, setClient] = useState('')
@@ -21,7 +21,6 @@ export default function PageNouveauDocument() {
   const [typeCourrier, setTypeCourrier] = useState('')
   const [reference, setReference] = useState('')
 
-  // Drag & Drop
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFichiers(prev => [...prev, ...acceptedFiles])
   }, [])
@@ -47,23 +46,21 @@ export default function PageNouveauDocument() {
   ]
 
   const risques = [
-    { value: 'AUTOMOBILE', label: '🚗 Automobile', color: '#D32027' },
-    { value: 'SANTE', label: '🏥 Santé', color: '#10B981' },
-    { value: 'HABITATION', label: '🏠 Habitation', color: '#F59E0B' },
-    { value: 'VIE', label: '❤️ Vie', color: '#8B5CF6' },
-    { value: 'RESPONSABILITE_CIVILE', label: '🛡️ RC', color: '#0066B3' },
+    { value: 'AUTOMOBILE', label: 'Automobile', color: '#D32027' },
+    { value: 'SANTE', label: 'Santé', color: '#10B981' },
+    { value: 'HABITATION', label: 'Habitation', color: '#F59E0B' },
+    { value: 'VIE', label: 'Vie', color: '#8B5CF6' },
+    { value: 'RESPONSABILITE_CIVILE', label: 'RC', color: '#0066B3' },
   ]
 
   const courriers = [
-    { value: 'ACS_VERS_CLIENT', label: '📧 ACS → Client' },
-    { value: 'ACS_VERS_COMPAGNIE', label: '📨 ACS → Compagnie' },
+    { value: 'ACS_VERS_CLIENT', label: 'ACS → Client', icon: 'send' as const },
+    { value: 'ACS_VERS_COMPAGNIE', label: 'ACS → Compagnie', icon: 'email' as const },
   ]
 
   const soumettreFormulaire = async (e: React.FormEvent) => {
     e.preventDefault()
     setChargement(true)
-
-    // TODO: Implémenter l'upload réel
     setTimeout(() => {
       setChargement(false)
       router.push('/documents')
@@ -83,19 +80,18 @@ export default function PageNouveauDocument() {
       <Navigation />
       
       <main className="container mx-auto px-4 py-8">
-        {/* En-tête */}
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2">
-            📤 Nouveau Document
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
+            <Icon name="upload" size="xl" className="text-red-600" />
+            Nouveau Document
           </h1>
           <p className="text-gray-600">Ajoutez un document à l'archive ACS</p>
         </motion.div>
 
-        {/* Indicateur d'étapes */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -128,7 +124,6 @@ export default function PageNouveauDocument() {
         </motion.div>
 
         <form onSubmit={soumettreFormulaire}>
-          {/* Étape 1 : Upload fichier */}
           {etape === 1 && (
             <motion.div
               initial={{ opacity: 0, x: -20 }}
@@ -137,7 +132,6 @@ export default function PageNouveauDocument() {
             >
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Sélectionnez vos fichiers</h2>
 
-              {/* Zone Drag & Drop */}
               <div
                 {...getRootProps()}
                 className={`border-4 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all ${
@@ -149,9 +143,9 @@ export default function PageNouveauDocument() {
                 <input {...getInputProps()} />
                 <motion.div
                   animate={isDragActive ? { scale: 1.1 } : { scale: 1 }}
-                  className="text-6xl mb-4"
+                  className="mb-4"
                 >
-                  📁
+                  <Icon name="folder" size="xl" className="mx-auto text-gray-400" />
                 </motion.div>
                 {isDragActive ? (
                   <p className="text-xl font-semibold text-red-600">Déposez les fichiers ici...</p>
@@ -168,7 +162,6 @@ export default function PageNouveauDocument() {
                 )}
               </div>
 
-              {/* Liste des fichiers */}
               {fichiers.length > 0 && (
                 <div className="mt-8">
                   <h3 className="font-bold text-gray-900 mb-4">Fichiers sélectionnés ({fichiers.length})</h3>
@@ -182,8 +175,8 @@ export default function PageNouveauDocument() {
                         className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border-2 border-gray-200 hover:border-red-300 transition-all"
                       >
                         <div className="flex items-center gap-4 flex-1">
-                          <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center text-white text-xl">
-                            📄
+                          <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center text-white">
+                            <Icon name="document" size="md" />
                           </div>
                           <div className="flex-1">
                             <p className="font-semibold text-gray-900">{fichier.name}</p>
@@ -197,7 +190,7 @@ export default function PageNouveauDocument() {
                           onClick={() => retirerFichier(index)}
                           className="p-2 hover:bg-red-100 rounded-lg transition-colors"
                         >
-                          🗑️
+                          <Icon name="trash" size="sm" className="text-red-600" />
                         </motion.button>
                       </motion.div>
                     ))}
@@ -205,7 +198,6 @@ export default function PageNouveauDocument() {
                 </div>
               )}
 
-              {/* Boutons navigation */}
               <div className="flex justify-end mt-8">
                 <motion.button
                   whileHover={{ scale: 1.05 }}
@@ -213,15 +205,15 @@ export default function PageNouveauDocument() {
                   type="button"
                   onClick={() => setEtape(2)}
                   disabled={fichiers.length === 0}
-                  className="px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  Suivant →
+                  Suivant
+                  <Icon name="arrow-right" size="sm" />
                 </motion.button>
               </div>
             </motion.div>
           )}
 
-          {/* Étape 2 : Informations */}
           {etape === 2 && (
             <motion.div
               initial={{ opacity: 0, x: -20 }}
@@ -231,7 +223,6 @@ export default function PageNouveauDocument() {
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Informations du document</h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Titre */}
                 <div className="md:col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Titre du document *
@@ -246,11 +237,8 @@ export default function PageNouveauDocument() {
                   />
                 </div>
 
-                {/* Client */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Client *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Client *</label>
                   <select
                     value={client}
                     onChange={(e) => setClient(e.target.value)}
@@ -264,11 +252,8 @@ export default function PageNouveauDocument() {
                   </select>
                 </div>
 
-                {/* Exercice */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Exercice (Année) *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Exercice (Année) *</label>
                   <select
                     value={exercice}
                     onChange={(e) => setExercice(e.target.value)}
@@ -281,11 +266,8 @@ export default function PageNouveauDocument() {
                   </select>
                 </div>
 
-                {/* Risque */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Type de Risque *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Type de Risque *</label>
                   <select
                     value={risque}
                     onChange={(e) => setRisque(e.target.value)}
@@ -299,11 +281,8 @@ export default function PageNouveauDocument() {
                   </select>
                 </div>
 
-                {/* Type Courrier */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Type de Courrier *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Type de Courrier *</label>
                   <select
                     value={typeCourrier}
                     onChange={(e) => setTypeCourrier(e.target.value)}
@@ -317,11 +296,8 @@ export default function PageNouveauDocument() {
                   </select>
                 </div>
 
-                {/* Référence */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Référence
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Référence</label>
                   <input
                     type="text"
                     value={reference}
@@ -331,11 +307,8 @@ export default function PageNouveauDocument() {
                   />
                 </div>
 
-                {/* Description */}
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Description
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Description</label>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
@@ -346,16 +319,16 @@ export default function PageNouveauDocument() {
                 </div>
               </div>
 
-              {/* Boutons navigation */}
               <div className="flex justify-between mt-8">
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   type="button"
                   onClick={() => setEtape(1)}
-                  className="px-8 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                  className="px-8 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors flex items-center gap-2"
                 >
-                  ← Retour
+                  <Icon name="arrow-left" size="sm" />
+                  Retour
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
@@ -363,15 +336,15 @@ export default function PageNouveauDocument() {
                   type="button"
                   onClick={() => setEtape(3)}
                   disabled={!titre || !client || !risque || !typeCourrier}
-                  className="px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  Suivant →
+                  Suivant
+                  <Icon name="arrow-right" size="sm" />
                 </motion.button>
               </div>
             </motion.div>
           )}
 
-          {/* Étape 3 : Validation */}
           {etape === 3 && (
             <motion.div
               initial={{ opacity: 0, x: -20 }}
@@ -381,7 +354,10 @@ export default function PageNouveauDocument() {
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Vérification finale</h2>
 
               <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6 mb-6">
-                <h3 className="font-bold text-gray-900 mb-4">Résumé du document</h3>
+                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <Icon name="info" size="sm" />
+                  Résumé du document
+                </h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-gray-600">Titre</p>
@@ -417,12 +393,15 @@ export default function PageNouveauDocument() {
               </div>
 
               <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-6 mb-8">
-                <h3 className="font-bold text-gray-900 mb-4">Fichiers ({fichiers.length})</h3>
+                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <Icon name="folder" size="sm" />
+                  Fichiers ({fichiers.length})
+                </h3>
                 <div className="space-y-2">
                   {fichiers.map((fichier, index) => (
                     <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg">
                       <div className="flex items-center gap-3">
-                        <span className="text-2xl">📄</span>
+                        <Icon name="document" size="sm" className="text-red-600" />
                         <div>
                           <p className="font-medium text-gray-900">{fichier.name}</p>
                           <p className="text-sm text-gray-500">{formatTaille(fichier.size)}</p>
@@ -433,17 +412,17 @@ export default function PageNouveauDocument() {
                 </div>
               </div>
 
-              {/* Boutons navigation */}
               <div className="flex justify-between">
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   type="button"
                   onClick={() => setEtape(2)}
-                  className="px-8 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                  className="px-8 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors flex items-center gap-2"
                   disabled={chargement}
                 >
-                  ← Retour
+                  <Icon name="arrow-left" size="sm" />
+                  Retour
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
@@ -459,7 +438,8 @@ export default function PageNouveauDocument() {
                     </>
                   ) : (
                     <>
-                      ✅ Valider et enregistrer
+                      <Icon name="check" size="sm" />
+                      Valider et enregistrer
                     </>
                   )}
                 </motion.button>

@@ -1,13 +1,11 @@
-// Page de connexion
 'use client'
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Bouton } from '@/components/ui/Bouton'
-import { ChampTexte } from '@/components/ui/ChampTexte'
-import { Alerte } from '@/components/ui/Alerte'
+import { Icon } from '@/components/Icon'
+import { motion } from 'framer-motion'
 
 export default function PageConnexion() {
   const router = useRouter()
@@ -38,7 +36,6 @@ export default function PageConnexion() {
         return
       }
 
-      // Connexion réussie - rediriger vers le tableau de bord
       router.push('/tableau-de-bord')
     } catch (error) {
       console.error('Erreur de connexion:', error)
@@ -49,15 +46,26 @@ export default function PageConnexion() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)' }}>
-      {/* Effets d'arrière-plan ACS */}
+      {/* Effets d'arrière-plan */}
       <div className="absolute inset-0">
         <div className="absolute w-96 h-96 rounded-full blur-3xl -top-48 -left-48 animate-pulse" style={{ backgroundColor: 'rgba(211, 32, 39, 0.08)' }} />
         <div className="absolute w-96 h-96 rounded-full blur-3xl -bottom-48 -right-48 animate-pulse" style={{ backgroundColor: 'rgba(0, 102, 179, 0.08)', animationDelay: '1s' }} />
       </div>
-      <div className="max-w-md w-full relative z-10">
+      
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-md w-full relative z-10"
+      >
         {/* En-tête avec logo */}
         <div className="text-center mb-8">
-          <div className="inline-block bg-white rounded-3xl p-6 mb-6 shadow-lg border-2" style={{ borderColor: '#e5e7eb' }}>
+          <motion.div 
+            initial={{ scale: 0.8 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', stiffness: 200 }}
+            className="inline-block bg-white rounded-3xl p-6 mb-6 shadow-lg border-2" 
+            style={{ borderColor: '#e5e7eb' }}
+          >
             <Image
               src="/acs-logo.svg"
               alt="ACS Logo"
@@ -65,39 +73,73 @@ export default function PageConnexion() {
               height={80}
               priority
             />
-          </div>
-          <h1 className="text-3xl font-bold mb-2" style={{ color: '#1F2937' }}>Connexion</h1>
+          </motion.div>
+          <h1 className="text-3xl font-bold mb-2 flex items-center justify-center gap-3" style={{ color: '#1F2937' }}>
+            <Icon name="lock" size="lg" className="text-red-600" />
+            Connexion
+          </h1>
           <p style={{ color: '#6B7280' }}>Accédez à votre espace ACS Archive</p>
         </div>
 
         {/* Formulaire */}
-        <div className="bg-white rounded-2xl shadow-xl p-8 border" style={{ borderColor: '#e5e7eb' }}>
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-white rounded-2xl shadow-xl p-8 border" 
+          style={{ borderColor: '#e5e7eb' }}
+        >
           {erreur && (
-            <div className="mb-6">
-              <Alerte type="erreur" message={erreur} surFermeture={() => setErreur('')} />
-            </div>
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="mb-6 p-4 bg-red-50 border-2 border-red-200 rounded-xl flex items-start gap-3"
+            >
+              <Icon name="warning" size="sm" className="text-red-600 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-red-800 font-medium">{erreur}</p>
+                <button 
+                  onClick={() => setErreur('')}
+                  className="text-sm text-red-600 hover:text-red-700 mt-1"
+                >
+                  Fermer
+                </button>
+              </div>
+            </motion.div>
           )}
 
           <form onSubmit={gererSoumission} className="space-y-6">
-            <ChampTexte
-              etiquette="Adresse email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="exemple@acs.ci"
-              obligatoire
-              autoComplete="email"
-            />
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <Icon name="at" size="sm" />
+                Adresse email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="exemple@acs.ci"
+                required
+                autoComplete="email"
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+              />
+            </div>
 
-            <ChampTexte
-              etiquette="Mot de passe"
-              type="password"
-              value={motDePasse}
-              onChange={(e) => setMotDePasse(e.target.value)}
-              placeholder="••••••••"
-              obligatoire
-              autoComplete="current-password"
-            />
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <Icon name="key" size="sm" />
+                Mot de passe
+              </label>
+              <input
+                type="password"
+                value={motDePasse}
+                onChange={(e) => setMotDePasse(e.target.value)}
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+              />
+            </div>
 
             <div className="flex items-center justify-between text-sm">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -110,38 +152,54 @@ export default function PageConnexion() {
               </label>
               <Link
                 href="/mot-de-passe-oublie"
-                className="font-medium hover:opacity-80 transition-opacity"
+                className="font-medium hover:opacity-80 transition-opacity flex items-center gap-1"
                 style={{ color: '#0066B3' }}
               >
                 Mot de passe oublié ?
               </Link>
             </div>
 
-            <Bouton
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               type="submit"
-              variante="primaire"
-              taille="grand"
-              chargement={chargement}
-              className="w-full"
+              disabled={chargement}
+              className="w-full py-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              Se connecter
-            </Bouton>
+              {chargement ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Connexion en cours...
+                </>
+              ) : (
+                <>
+                  <Icon name="check" size="sm" />
+                  Se connecter
+                </>
+              )}
+            </motion.button>
           </form>
 
           <div className="mt-6 text-center text-sm text-gray-600">
             Vous n'avez pas de compte ?{' '}
-            <Link href="/inscription" className="font-medium hover:opacity-80 transition-opacity" style={{ color: '#0066B3' }}>
+            <Link href="/inscription" className="font-medium hover:opacity-80 transition-opacity flex items-center justify-center gap-1 mt-2" style={{ color: '#0066B3' }}>
+              <Icon name="user" size="xs" />
               Contactez l'administrateur
             </Link>
           </div>
-        </div>
+        </motion.div>
 
         {/* Pied de page */}
-        <div className="text-center mt-8 text-sm text-gray-500">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="text-center mt-8 text-sm text-gray-500"
+        >
           <p>© 2025 ACS - Assureurs Conseils Service</p>
           <p className="mt-1">Développé par KASSI ELIE EMMANUEL & ASSINYO RODRIGUE</p>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     </div>
   )
 }
