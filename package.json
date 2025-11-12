@@ -18,9 +18,11 @@
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "@prisma/client": "^6.19.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "bcryptjs": "^3.0.3",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.23.24",
+    "jsonwebtoken": "^9.0.2",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
     "next": "^16.0.1",

@@ -9,7 +9,7 @@ import { motion } from 'framer-motion'
 
 export default function PageConnexion() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
+  const [nomUtilisateur, setNomUtilisateur] = useState('')
   const [motDePasse, setMotDePasse] = useState('')
   const [chargement, setChargement] = useState(false)
   const [erreur, setErreur] = useState('')
@@ -25,7 +25,7 @@ export default function PageConnexion() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, motDePasse }),
+        body: JSON.stringify({ nomUtilisateur, motDePasse }),
       })
 
       const data = await response.json()
@@ -110,17 +110,16 @@ export default function PageConnexion() {
 
           <form onSubmit={gererSoumission} className="space-y-6">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <Icon name="at" size="sm" />
-                Adresse email
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Nom d'utilisateur
               </label>
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="exemple@acs.ci"
+                type="text"
+                value={nomUtilisateur}
+                onChange={(e) => setNomUtilisateur(e.target.value)}
+                placeholder="prenom.nom"
                 required
-                autoComplete="email"
+                autoComplete="username"
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
               />
             </div>

@@ -21,14 +21,16 @@ enum RoleUtilisateur {
 // Modèle Utilisateur
 model Utilisateur {
   id                String             @id @default(cuid())
+  nomUtilisateur    String             @unique // Connexion par nom d'utilisateur
   nom               String
   prenom            String
-  email             String             @unique
+  email             String?            // Optionnel
   motDePasse        String
   role              RoleUtilisateur    @default(EMPLOYE)
   estActif          Boolean            @default(true)
   dateCreation      DateTime           @default(now())
   dateModification  DateTime           @updatedAt
+  derniereConnexion DateTime?
   
   // Relations
   documents         Document[]
