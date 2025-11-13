@@ -3,28 +3,150 @@
 import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { apiFetchJson } from '@/lib/api'
+import { getUtilisateurActif, enregistrerSession, supprimerSession } from '@/lib/session'
 
 export default function PageParametres() {
+  const router = useRouter()
   const [ongletActif, setOngletActif] = useState('profil')
-  const [nom, setNom] = useState('Kassi')
-  const [prenom, setPrenom] = useState('Elie Emmanuel')
-  const [email, setEmail] = useState('elie.kassi@acs.ci')
-  const [telephone, setTelephone] = useState('+225 07 00 00 00 00')
+  const [utilisateurId, setUtilisateurId] = useState<string | null>(null)
+  const [nom, setNom] = useState('')
+  const [prenom, setPrenom] = useState('')
+  const [email, setEmail] = useState('')
+  const [telephone, setTelephone] = useState('')
   const [ancienMdp, setAncienMdp] = useState('')
   const [nouveauMdp, setNouveauMdp] = useState('')
   const [confirmMdp, setConfirmMdp] = useState('')
-  const [emailNotifs, setEmailNotifs] = useState(true)
-  const [nouveauxDocs, setNouveauxDocs] = useState(true)
-  const [modifications, setModifications] = useState(true)
-  const [rapports, setRapports] = useState(false)
   const [theme, setTheme] = useState('clair')
   const [langue, setLangue] = useState('fr')
+  const [chargement, setChargement] = useState(false)
+  const [message, setMessage] = useState('')
+  const [erreur, setErreur] = useState('')
+
+  useEffect(() => {
+    const actif = getUtilisateurActif()
+    if (!actif) {
+      supprimerSession()
+      router.push('/connexion')
+      return
+    }
+
+    setUtilisateurId(actif.id)
+    setNom(actif.nom ?? '')
+    setPrenom(actif.prenom ?? '')
+    setEmail(actif.email ?? '')
+  }, [router])
+
+  const sauvegarderProfil = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setChargement(true)
+    setErreur('')
+    setMessage('')
+
+    if (!utilisateurId) {
+      setErreur('Utilisateur non identifié. Merci de vous reconnecter.')
+      setChargement(false)
+      return
+    }
+
+    try {
+      const payload = {
+        nom: nom.trim(),
+        prenom: prenom.trim(),
+        email: email.trim() || null
+      }
+
+      const { response, data } = await apiFetchJson(`/utilisateurs/${utilisateurId}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      if (!response.ok || !data || typeof data !== 'object' || !('success' in data) || !(data as any).success) {
+        throw new Error((data as any)?.erreur || (data as any)?.detail || 'Erreur lors de la sauvegarde')
+      }
+
+      const utilisateurMisAJour = (data as any).utilisateur
+      if (utilisateurMisAJour) {
+        enregistrerSession({
+          token: getUtilisateurActif()?.id ? (localStorage.getItem('authToken') ?? '') : '',
+          refresh: getUtilisateurActif()?.id ? localStorage.getItem('refreshToken') : '',
+          utilisateur: {
+            id: utilisateurMisAJour.id,
+            nomUtilisateur: utilisateurMisAJour.nom_utilisateur ?? utilisateurMisAJour.nomUtilisateur,
+            nom: utilisateurMisAJour.nom,
+            prenom: utilisateurMisAJour.prenom,
+            email: utilisateurMisAJour.email,
+            role: utilisateurMisAJour.role,
+          }
+        })
+      }
+
+      setMessage('Profil mis à jour avec succès !')
+    } catch (error) {
+      console.error('Erreur mise à jour profil:', error)
+      setErreur(error instanceof Error ? error.message : 'Erreur de connexion')
+    } finally {
+      setChargement(false)
+    }
+  }
+
+  const changerMotDePasse = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setChargement(true)
+    setErreur('')
+    setMessage('')
+
+    if (!utilisateurId) {
+      setErreur('Utilisateur non identifié. Merci de vous reconnecter.')
+      setChargement(false)
+      return
+    }
+
+    // Validation
+    if (nouveauMdp !== confirmMdp) {
+      setErreur('Les mots de passe ne correspondent pas')
+      setChargement(false)
+      return
+    }
+
+    if (nouveauMdp.length < 8) {
+      setErreur('Le mot de passe doit contenir au moins 8 caractères')
+      setChargement(false)
+      return
+    }
+
+    try {
+      const { response, data } = await apiFetchJson(`/utilisateurs/${utilisateurId}/change-password/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ancien_mot_de_passe: ancienMdp,
+          nouveau_mot_de_passe: nouveauMdp
+        })
+      })
+
+      if (!response.ok || !data || typeof data !== 'object' || !('success' in data) || !(data as any).success) {
+        throw new Error((data as any)?.erreur || (data as any)?.detail || 'Erreur lors du changement de mot de passe')
+      }
+
+      setMessage('Mot de passe modifié avec succès !')
+      setAncienMdp('')
+      setNouveauMdp('')
+      setConfirmMdp('')
+    } catch (error) {
+      console.error('Erreur changement mot de passe:', error)
+      setErreur(error instanceof Error ? error.message : 'Erreur de connexion')
+    } finally {
+      setChargement(false)
+    }
+  }
 
   const onglets = [
     { id: 'profil', label: 'Profil', icon: 'user' as const },
     { id: 'securite', label: 'Sécurité', icon: 'lock' as const },
-    { id: 'notifications', label: 'Notifications', icon: 'bell' as const },
     { id: 'apparence', label: 'Apparence', icon: 'sparkles' as const },
   ]
 
@@ -90,7 +212,21 @@ export default function PageParametres() {
                   </div>
                 </div>
 
-                <form className="space-y-6">
+                {message && (
+                  <div className="mb-6 p-4 bg-green-50 border-2 border-green-200 rounded-xl flex items-center gap-3">
+                    <Icon name="check" size="sm" className="text-green-600" />
+                    <p className="text-green-800 font-medium">{message}</p>
+                  </div>
+                )}
+
+                {erreur && (
+                  <div className="mb-6 p-4 bg-red-50 border-2 border-red-200 rounded-xl flex items-center gap-3">
+                    <Icon name="warning" size="sm" className="text-red-600" />
+                    <p className="text-red-800 font-medium">{erreur}</p>
+                  </div>
+                )}
+
+                <form onSubmit={sauvegarderProfil} className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Nom</label>
@@ -112,9 +248,9 @@ export default function PageParametres() {
                     <input type="tel" value={telephone} onChange={(e) => setTelephone(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all outline-none" />
                   </div>
 
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" className="w-full py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2">
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" disabled={chargement} className="w-full py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
                     <Icon name="check" size="sm" />
-                    Enregistrer
+                    {chargement ? 'Enregistrement...' : 'Enregistrer'}
                   </motion.button>
                 </form>
               </motion.div>
@@ -128,20 +264,34 @@ export default function PageParametres() {
                     Changer le mot de passe
                   </h3>
 
-                  <form className="space-y-6">
+                  {message && (
+                    <div className="mb-6 p-4 bg-green-50 border-2 border-green-200 rounded-xl flex items-center gap-3">
+                      <Icon name="check" size="sm" className="text-green-600" />
+                      <p className="text-green-800 font-medium">{message}</p>
+                    </div>
+                  )}
+
+                  {erreur && (
+                    <div className="mb-6 p-4 bg-red-50 border-2 border-red-200 rounded-xl flex items-center gap-3">
+                      <Icon name="warning" size="sm" className="text-red-600" />
+                      <p className="text-red-800 font-medium">{erreur}</p>
+                    </div>
+                  )}
+
+                  <form onSubmit={changerMotDePasse} className="space-y-6">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Mot de passe actuel</label>
-                      <input type="password" value={ancienMdp} onChange={(e) => setAncienMdp(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none" placeholder="••••••••" />
+                      <input type="password" value={ancienMdp} onChange={(e) => setAncienMdp(e.target.value)} required className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none" placeholder="••••••••" />
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Nouveau mot de passe</label>
-                        <input type="password" value={nouveauMdp} onChange={(e) => setNouveauMdp(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none" placeholder="••••••••" />
+                        <input type="password" value={nouveauMdp} onChange={(e) => setNouveauMdp(e.target.value)} required minLength={8} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none" placeholder="••••••••" />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Confirmer</label>
-                        <input type="password" value={confirmMdp} onChange={(e) => setConfirmMdp(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none" placeholder="••••••••" />
+                        <input type="password" value={confirmMdp} onChange={(e) => setConfirmMdp(e.target.value)} required minLength={8} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none" placeholder="••••••••" />
                       </div>
                     </div>
 
@@ -152,50 +302,15 @@ export default function PageParametres() {
                       </p>
                     </div>
 
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" className="w-full py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold shadow-lg flex items-center justify-center gap-2">
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" disabled={chargement} className="w-full py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50 flex items-center justify-center gap-2">
                       <Icon name="key" size="sm" />
-                      Changer le mot de passe
+                      {chargement ? 'Changement...' : 'Changer le mot de passe'}
                     </motion.button>
                   </form>
                 </div>
               </motion.div>
             )}
 
-            {ongletActif === 'notifications' && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl shadow-lg p-8">
-                <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-                  <Icon name="bell" size="md" />
-                  Préférences de notifications
-                </h3>
-
-                <div className="space-y-4">
-                  {[
-                    { id: 'email', label: 'Notifications par email', desc: 'Recevoir des alertes par email', state: emailNotifs, setState: setEmailNotifs },
-                    { id: 'docs', label: 'Nouveaux documents', desc: "Être notifié lors de l'ajout de documents", state: nouveauxDocs, setState: setNouveauxDocs },
-                    { id: 'modifs', label: 'Modifications', desc: 'Suivre les modifications de documents', state: modifications, setState: setModifications },
-                    { id: 'rapports', label: 'Rapports hebdomadaires', desc: 'Recevoir un résumé chaque semaine', state: rapports, setState: setRapports },
-                  ].map((notif, index) => (
-                    <motion.label key={notif.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.1 }} className="flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 cursor-pointer transition-all border-2 border-transparent hover:border-gray-200">
-                      <div className="flex-1">
-                        <p className="font-semibold text-gray-900">{notif.label}</p>
-                        <p className="text-sm text-gray-600">{notif.desc}</p>
-                      </div>
-                      <div className="relative">
-                        <input type="checkbox" checked={notif.state} onChange={(e) => notif.setState(e.target.checked)} className="sr-only peer" />
-                        <div className={`w-14 h-8 rounded-full transition-all ${notif.state ? 'bg-gradient-to-r from-green-500 to-green-600' : 'bg-gray-300'}`}>
-                          <div className={`w-6 h-6 bg-white rounded-full shadow-lg transition-all ${notif.state ? 'translate-x-7 mt-1 ml-1' : 'translate-x-1 mt-1'}`} />
-                        </div>
-                      </div>
-                    </motion.label>
-                  ))}
-                </div>
-
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="w-full mt-8 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg flex items-center justify-center gap-2">
-                  <Icon name="check" size="sm" />
-                  Enregistrer
-                </motion.button>
-              </motion.div>
-            )}
 
             {ongletActif === 'apparence' && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl shadow-lg p-8">

@@ -5,8 +5,9 @@ import { Icon } from '@/components/Icon'
 import { PreviewPDF } from '@/components/PreviewPDF'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { exporterPDF, exporterExcel, exporterCSV } from '@/lib/export'
+import { apiFetchJson } from '@/lib/api'
 
 export default function PageDocuments() {
   const [recherche, setRecherche] = useState('')
@@ -16,85 +17,68 @@ export default function PageDocuments() {
   const [previewOuvert, setPreviewOuvert] = useState(false)
   const [documentPreview, setDocumentPreview] = useState<string>('')
   const [menuExport, setMenuExport] = useState(false)
-  const [documentsAPI, setDocumentsAPI] = useState<any[]>([])
+  const [documents, setDocuments] = useState<any[]>([])
   const [chargement, setChargement] = useState(true)
+  const [erreur, setErreur] = useState('')
 
   // Charger documents depuis API
   useEffect(() => {
-    fetch('/api/documents')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.documents.length > 0) {
-          setDocumentsAPI(data.documents)
+    const chargerDocuments = async () => {
+      setChargement(true)
+      setErreur('')
+      try {
+        const { response, data } = await apiFetchJson('/documents/')
+        if (!response.ok) {
+          throw new Error((data as any)?.detail || 'Erreur lors du chargement des documents')
         }
-        setChargement(false)
-      })
-      .catch(() => setChargement(false))
-  }, [])
 
-  // Données de démonstration (utilisées si BDD vide)
-  const documentsDemo = [
-    {
-      id: 1,
-      titre: 'Police Automobile 2025',
-      client: 'Entreprise ABC',
-      exercice: 2025,
-      risque: 'AUTOMOBILE',
-      typeCourrier: 'ACS_VERS_CLIENT',
-      date: '2025-11-12',
-      taille: '2.4 MB',
-      reference: 'DOC-2025-001',
-      color: '#D32027'
-    },
-    {
-      id: 2,
-      titre: 'Cotation Compagnie XYZ',
-      client: 'Entreprise ABC',
-      exercice: 2025,
-      risque: 'AUTOMOBILE',
-      typeCourrier: 'ACS_VERS_COMPAGNIE',
-      date: '2025-11-10',
-      taille: '850 KB',
-      reference: 'DOC-2025-002',
-      color: '#0066B3'
-    },
-    {
-      id: 3,
-      titre: 'Attestation Santé Collective',
-      client: 'SARL Transport CI',
-      exercice: 2025,
-      risque: 'SANTE',
-      typeCourrier: 'ACS_VERS_CLIENT',
-      date: '2025-11-01',
-      taille: '1.2 MB',
-      reference: 'DOC-2025-003',
-      color: '#10B981'
-    },
-    {
-      id: 4,
-      titre: 'Contrat Habitation',
-      client: 'Kouassi Jean',
-      exercice: 2025,
-      risque: 'HABITATION',
-      typeCourrier: 'ACS_VERS_CLIENT',
-      date: '2025-10-15',
-      taille: '1.5 MB',
-      reference: 'DOC-2025-005',
-      color: '#F59E0B'
-    },
-    {
-      id: 5,
-      titre: 'Police Vie - Garantie Décès',
-      client: 'Entreprise ABC',
-      exercice: 2025,
-      risque: 'VIE',
-      typeCourrier: 'ACS_VERS_CLIENT',
-      date: '2025-10-05',
-      taille: '1.8 MB',
-      reference: 'DOC-2025-006',
-      color: '#8B5CF6'
-    },
-  ]
+        const bruts = Array.isArray(data)
+          ? data
+          : Array.isArray((data as any)?.results)
+            ? (data as any).results
+            : []
+
+        const documentsFormattes = bruts.map((doc: any) => {
+          const risqueDetail = doc.risque_detail ?? doc.risqueDetail ?? null
+          const exerciceInfo = risqueDetail?.exercice_info ?? risqueDetail?.exerciceInfo ?? {}
+          const clientNom = exerciceInfo?.client ?? doc.client ?? 'Client inconnu'
+          const annee = exerciceInfo?.annee ?? doc.exercice ?? '—'
+          const typeRisque = risqueDetail?.type ?? doc.risque ?? 'AUTRE'
+          const creeLe = doc.cree_le ?? doc.creeLe ?? null
+
+          const color = typeRisque === 'AUTOMOBILE' ? '#D32027'
+            : typeRisque === 'SANTE' ? '#10B981'
+            : typeRisque === 'HABITATION' ? '#F59E0B'
+            : typeRisque === 'VIE' ? '#8B5CF6'
+            : typeRisque === 'RESPONSABILITE_CIVILE' ? '#0066B3'
+            : '#4B5563'
+
+          return {
+            id: doc.id,
+            titre: doc.titre,
+            reference: doc.reference ?? '',
+            client: clientNom,
+            exercice: annee,
+            risque: typeRisque,
+            typeCourrier: doc.type_courrier ?? doc.typeCourrier ?? 'AUTRE',
+            date: creeLe ? new Date(creeLe).toISOString().split('T')[0] : '',
+            taille: doc.taille_fichier ? `${(doc.taille_fichier / 1024 / 1024).toFixed(1)} MB` : 'N/A',
+            color,
+            documentSource: doc,
+          }
+        })
+
+        setDocuments(documentsFormattes)
+      } catch (error: any) {
+        console.error('Erreur chargement documents:', error)
+        setErreur(error?.message || 'Erreur lors du chargement des documents')
+      } finally {
+        setChargement(false)
+      }
+    }
+
+    chargerDocuments()
+  }, [])
 
   const risques = [
     { value: '', label: 'Tous les risques' },
@@ -111,17 +95,17 @@ export default function PageDocuments() {
     { value: 'ACS_VERS_COMPAGNIE', label: 'ACS → Compagnie' },
   ]
 
-  // Utiliser API si disponible, sinon données démo
-  const documents = documentsAPI.length > 0 ? documentsAPI : documentsDemo
-
-  const documentsFiltres = documents.filter((doc: any) => {
-    const matchRecherche = doc.titre.toLowerCase().includes(recherche.toLowerCase()) ||
-                          doc.client.toLowerCase().includes(recherche.toLowerCase()) ||
-                          doc.reference.toLowerCase().includes(recherche.toLowerCase())
-    const matchRisque = !filtreRisque || doc.risque === filtreRisque
-    const matchCourrier = !filtreCourrier || doc.typeCourrier === filtreCourrier
-    return matchRecherche && matchRisque && matchCourrier
-  })
+  const documentsFiltres = useMemo(() => {
+    const rechercheMin = recherche.toLowerCase()
+    return documents.filter((doc: any) => {
+      const matchRecherche = doc.titre.toLowerCase().includes(rechercheMin) ||
+        doc.client.toLowerCase().includes(rechercheMin) ||
+        doc.reference.toLowerCase().includes(rechercheMin)
+      const matchRisque = !filtreRisque || doc.risque === filtreRisque
+      const matchCourrier = !filtreCourrier || doc.typeCourrier === filtreCourrier
+      return matchRecherche && matchRisque && matchCourrier
+    })
+  }, [documents, recherche, filtreRisque, filtreCourrier])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -257,7 +241,17 @@ export default function PageDocuments() {
           </div>
         </motion.div>
 
-        {vueMode === 'grille' && (
+        {erreur && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+          >
+            {erreur}
+          </motion.div>
+        )}
+
+        {vueMode === 'grille' && !chargement && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {documentsFiltres.map((doc: any, index: number) => (
               <motion.div
@@ -339,7 +333,7 @@ export default function PageDocuments() {
           </div>
         )}
 
-        {vueMode === 'liste' && (
+        {vueMode === 'liste' && !chargement && (
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -410,7 +404,7 @@ export default function PageDocuments() {
           </div>
         )}
 
-        {documentsFiltres.length === 0 && (
+        {documentsFiltres.length === 0 && !chargement && (
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}

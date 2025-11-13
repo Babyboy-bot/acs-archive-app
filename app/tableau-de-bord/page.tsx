@@ -6,65 +6,141 @@ import { StatsTempsReel } from '@/components/StatsTempsReel'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { apiFetchJson } from '@/lib/api'
+import { formatDistanceToNow } from 'date-fns'
+import { fr } from 'date-fns/locale'
+
+type DocumentApi = {
+  id: string
+  titre: string
+  cree_le: string
+  reference?: string | null
+  type_courrier: 'ACS_VERS_CLIENT' | 'ACS_VERS_COMPAGNIE'
+  risque_detail?: {
+    type: string
+    exercice_info?: {
+      client?: string
+    }
+  } | null
+}
+
+type RisqueApi = {
+  id: string
+  type: string
+}
 
 export default function DashboardUltraModerne() {
   const [mounted, setMounted] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [documentsRecents, setDocumentsRecents] = useState<DocumentApi[]>([])
+  const [risques, setRisques] = useState<{ name: string; value: number; color: string }[]>([])
+  const [evolutionDocuments, setEvolutionDocuments] = useState<{ mois: string; ACS_Client: number; ACS_Compagnie: number }[]>([])
+  const [erreur, setErreur] = useState<string | null>(null)
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  const stats = {
-    documents: 1247,
-    nouveaux: 89,
-    stockage: 2.4,
-    utilisateurs: 24,
-    croissance: 12.5,
-  }
+  useEffect(() => {
+    let ignore = false
 
-  const evolutionDocuments = [
-    { mois: 'Jan', total: 145, ACS_Client: 85, ACS_Compagnie: 60 },
-    { mois: 'Fév', total: 132, ACS_Client: 75, ACS_Compagnie: 57 },
-    { mois: 'Mar', total: 168, ACS_Client: 95, ACS_Compagnie: 73 },
-    { mois: 'Avr', total: 154, ACS_Client: 88, ACS_Compagnie: 66 },
-    { mois: 'Mai', total: 189, ACS_Client: 110, ACS_Compagnie: 79 },
-    { mois: 'Juin', total: 176, ACS_Client: 102, ACS_Compagnie: 74 },
-    { mois: 'Juil', total: 195, ACS_Client: 115, ACS_Compagnie: 80 },
-    { mois: 'Août', total: 168, ACS_Client: 95, ACS_Compagnie: 73 },
-    { mois: 'Sep', total: 182, ACS_Client: 105, ACS_Compagnie: 77 },
-    { mois: 'Oct', total: 198, ACS_Client: 118, ACS_Compagnie: 80 },
-    { mois: 'Nov', total: 210, ACS_Client: 125, ACS_Compagnie: 85 },
-  ]
+    const chargerDonnees = async () => {
+      setLoading(true)
+      setErreur(null)
 
-  const risques = [
-    { name: 'Automobile', value: 435, color: '#D32027' },
-    { name: 'Santé', value: 312, color: '#10B981' },
-    { name: 'Habitation', value: 245, color: '#F59E0B' },
-    { name: 'Vie', value: 156, color: '#8B5CF6' },
-    { name: 'RC', value: 99, color: '#0066B3' },
-  ]
+      try {
+        const [documentsRes, risquesRes] = await Promise.all([
+          apiFetchJson<{ count: number; results: DocumentApi[] }>('/documents/?page_size=200&ordering=-cree_le'),
+          apiFetchJson<{ count: number; results: RisqueApi[] }>('/risques/?page_size=500'),
+        ])
 
-  const documentsRecents = [
-    { id: 1, titre: 'Police Auto - Entreprise ABC', client: 'Entreprise ABC', risque: 'Auto', date: 'Il y a 5 min' },
-    { id: 2, titre: 'Attestation Santé Collective', client: 'SARL Transport CI', risque: 'Santé', date: 'Il y a 15 min' },
-    { id: 3, titre: 'Contrat Habitation', client: 'Kouassi Jean', risque: 'Habitation', date: 'Il y a 1h' },
-    { id: 4, titre: 'Cotation Compagnie XYZ', client: 'Entreprise ABC', risque: 'Auto', date: 'Il y a 2h' },
-  ]
+        if (ignore) return
 
-  const activites = [
-    { user: 'Elie K.', action: 'CREATION', doc: 'Police Auto ABC', temps: '5 min', avatar: 'EK', color: '#10B981' },
-    { user: 'Rodrigue A.', action: 'CONSULTATION', doc: 'Attestation Santé', temps: '15 min', avatar: 'RA', color: '#0066B3' },
-    { user: 'Admin', action: 'MODIFICATION', doc: 'Risque Auto #45', temps: '1h', avatar: 'AA', color: '#F59E0B' },
-    { user: 'Elie K.', action: 'TELECHARGEMENT', doc: 'Contrat Habitation', temps: '2h', avatar: 'EK', color: '#8B5CF6' },
-  ]
+        const docs = Array.isArray(documentsRes.data?.results) ? documentsRes.data!.results : []
+        const risquesData = Array.isArray(risquesRes.data?.results) ? risquesRes.data!.results : []
 
-  const actionIcons = {
-    CREATION: 'upload',
-    CONSULTATION: 'eye',
-    MODIFICATION: 'edit',
-    TELECHARGEMENT: 'download',
-  } as const
+        setDocumentsRecents(docs.slice(0, 4))
+
+        // Agrégation risques par type
+        const couleurs = ['#D32027', '#10B981', '#F59E0B', '#8B5CF6', '#0066B3', '#14B8A6', '#7C3AED']
+        const regroupement = risquesData.reduce<Record<string, number>>((acc, risque) => {
+          const cle = risque.type || 'INCONNU'
+          acc[cle] = (acc[cle] ?? 0) + 1
+          return acc
+        }, {})
+
+        const risquesFormats = Object.entries(regroupement).map(([type, valeur], index) => ({
+          name: type.replace(/_/g, ' '),
+          value: valeur,
+          color: couleurs[index % couleurs.length],
+        }))
+        setRisques(risquesFormats)
+
+        // Calcul évolution 12 derniers mois
+        const maintenant = new Date()
+        const moisRefs: { cle: string; label: string }[] = []
+        for (let i = 11; i >= 0; i--) {
+          const date = new Date(maintenant)
+          date.setMonth(date.getMonth() - i)
+          const cle = `${date.getFullYear()}-${date.getMonth()}`
+          const label = date.toLocaleDateString('fr-FR', { month: 'short' })
+          moisRefs.push({ cle, label: label.charAt(0).toUpperCase() + label.slice(1, 3) })
+        }
+
+        const evolutionMap = new Map<string, { ACS_Client: number; ACS_Compagnie: number }>()
+        moisRefs.forEach(({ cle }) => {
+          evolutionMap.set(cle, { ACS_Client: 0, ACS_Compagnie: 0 })
+        })
+
+        docs.forEach((doc) => {
+          const date = doc.cree_le ? new Date(doc.cree_le) : null
+          if (!date) return
+          const cle = `${date.getFullYear()}-${date.getMonth()}`
+          if (!evolutionMap.has(cle)) return
+          const entree = evolutionMap.get(cle)!
+          if (doc.type_courrier === 'ACS_VERS_CLIENT') {
+            entree.ACS_Client += 1
+          } else {
+            entree.ACS_Compagnie += 1
+          }
+        })
+
+        const evolution = moisRefs.map(({ cle, label }) => ({
+          mois: label,
+          ACS_Client: evolutionMap.get(cle)?.ACS_Client ?? 0,
+          ACS_Compagnie: evolutionMap.get(cle)?.ACS_Compagnie ?? 0,
+        }))
+
+        setEvolutionDocuments(evolution)
+      } catch (error) {
+        console.error('Erreur chargement dashboard', error)
+        if (!ignore) {
+          setErreur("Impossible de charger les données du tableau de bord")
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false)
+        }
+      }
+    }
+
+    chargerDonnees()
+
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  const documentsRecentsAffiches = useMemo(() => {
+    return documentsRecents.map((doc) => ({
+      id: doc.id,
+      titre: doc.titre,
+      client: doc.risque_detail?.exercice_info?.client ?? 'Client inconnu',
+      risque: doc.risque_detail?.type ?? '—',
+      date: doc.cree_le,
+    }))
+  }, [documentsRecents])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -82,6 +158,16 @@ export default function DashboardUltraModerne() {
           </h1>
           <p className="text-gray-600">Bienvenue ! Voici un aperçu de votre système d'archivage</p>
         </motion.div>
+
+        {erreur ? (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {erreur}
+          </div>
+        ) : loading ? (
+          <div className="mb-6 rounded-xl border border-blue-100 bg-white px-4 py-3 text-sm text-blue-600">
+            Chargement des dernières données...
+          </div>
+        ) : null}
 
         {/* Stats temps réel */}
         <motion.div
@@ -155,7 +241,7 @@ export default function DashboardUltraModerne() {
               <Icon name="chart" className="text-red-600" />
               Évolution des Documents
             </h3>
-            {mounted && (
+            {mounted && evolutionDocuments.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <AreaChart data={evolutionDocuments}>
                   <defs>
@@ -177,6 +263,8 @@ export default function DashboardUltraModerne() {
                   <Area type="monotone" dataKey="ACS_Compagnie" stroke="#0066B3" fillOpacity={1} fill="url(#colorCompagnie)" />
                 </AreaChart>
               </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-gray-500">Aucune donnée disponible pour le moment.</p>
             )}
           </motion.div>
 
@@ -190,7 +278,7 @@ export default function DashboardUltraModerne() {
               <Icon name="shield" className="text-blue-600" />
               Répartition par Risques
             </h3>
-            {mounted && (
+            {mounted && risques.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
@@ -210,12 +298,14 @@ export default function DashboardUltraModerne() {
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-gray-500">Aucune donnée de risque disponible.</p>
             )}
           </motion.div>
         </div>
 
-        {/* Documents récents et Activités */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Documents récents */}
+        <div className="grid grid-cols-1 gap-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -226,27 +316,33 @@ export default function DashboardUltraModerne() {
               <Icon name="document" className="text-red-600" />
               Documents Récents
             </h3>
-            <div className="space-y-3">
-              {documentsRecents.map((doc, index) => (
-                <motion.div
-                  key={doc.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.7 + index * 0.1 }}
-                  whileHover={{ x: 5 }}
-                  className="flex items-center gap-4 p-4 rounded-xl hover:bg-gray-50 cursor-pointer transition-all border border-transparent hover:border-gray-200"
-                >
-                  <div className="w-12 h-12 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <Icon name="document-solid" className="text-gray-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{doc.titre}</p>
-                    <p className="text-sm text-gray-500">{doc.client} • {doc.risque}</p>
-                  </div>
-                  <div className="text-xs text-gray-400">{doc.date}</div>
-                </motion.div>
-              ))}
-            </div>
+            {documentsRecentsAffiches.length > 0 ? (
+              <div className="space-y-3">
+                {documentsRecentsAffiches.map((doc, index) => (
+                  <motion.div
+                    key={doc.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.7 + index * 0.1 }}
+                    whileHover={{ x: 5 }}
+                    className="flex items-center gap-4 p-4 rounded-xl hover:bg-gray-50 cursor-pointer transition-all border border-transparent hover:border-gray-200"
+                  >
+                    <div className="w-12 h-12 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Icon name="document-solid" className="text-gray-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{doc.titre}</p>
+                      <p className="text-sm text-gray-500">{doc.client} • {doc.risque}</p>
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {formatDistanceToNow(new Date(doc.date), { addSuffix: true, locale: fr })}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">Aucun document récent trouvé.</p>
+            )}
             <Link href="/documents">
               <motion.button whileHover={{ x: 5 }} className="mt-4 w-full text-center py-3 text-red-600 font-medium hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-2">
                 Voir tous les documents
@@ -254,77 +350,7 @@ export default function DashboardUltraModerne() {
               </motion.button>
             </Link>
           </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
-            className="bg-white rounded-2xl shadow-lg p-6"
-          >
-            <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <Icon name="bolt" className="text-blue-600" />
-              Activités Récentes
-            </h3>
-            <div className="space-y-4">
-              {activites.map((act, index) => (
-                <motion.div
-                  key={index}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.8 + index * 0.1 }}
-                  className="flex items-start gap-3"
-                >
-                  <div 
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 shadow-lg"
-                    style={{ backgroundColor: act.color }}
-                  >
-                    {act.avatar}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-900 flex items-center gap-2">
-                      <span className="font-semibold">{act.user}</span>
-                      <Icon name={actionIcons[act.action as keyof typeof actionIcons]} size="xs" className="text-gray-400" />
-                      <span className="text-gray-600">{act.action}</span>
-                    </p>
-                    <p className="text-sm text-gray-500 truncate">{act.doc}</p>
-                    <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                      <Icon name="clock" size="xs" />
-                      {act.temps}
-                    </p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
         </div>
-
-        {/* Lien vers activités */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.9 }}
-          className="mt-8"
-        >
-          <Link href="/activite">
-            <motion.div
-              whileHover={{ scale: 1.02 }}
-              className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-2xl shadow-lg p-8 text-white cursor-pointer"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-2xl font-bold mb-2 flex items-center gap-3">
-                    <Icon name="clock" size="lg" />
-                    Activités et Historique
-                  </h3>
-                  <p className="text-purple-100">
-                    Consultez la timeline complète de toutes les actions effectuées
-                  </p>
-                </div>
-                <Icon name="arrow-right" size="xl" className="text-white" />
-              </div>
-            </motion.div>
-          </Link>
-        </motion.div>
       </main>
     </div>
   )

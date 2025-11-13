@@ -2,44 +2,36 @@
 
 ## ⚠️ URGENT - À FAIRE MAINTENANT
 
-### 1. Mettre à jour Prisma (OBLIGATOIRE)
+### 1. Configurer le backend Django
 ```powershell
-# Arrêter le serveur (Ctrl+C dans le terminal npm run dev)
-# Fermer VS Code complètement
-# Rouvrir VS Code
-npx prisma generate
-npx prisma db push
+cd backend
+python -m venv .venv
+.venv\Scripts\activate        # sous Windows
+pip install -r requirements.txt
+copy .env.example .env          # puis renseigner DB, SECRET_KEY, JWT
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
 ```
 
-**Pourquoi ?** Le schéma a changé (ajout nomUtilisateur), Prisma doit régénérer les types TypeScript.
-
----
-
-### 2. Ajouter JWT_SECRET dans .env
+### 2. Configurer le frontend Next.js
 ```powershell
-# Ouvrir .env et ajouter:
-JWT_SECRET=ACS_Archive_2025_Secret_Ultra_Securise_Changez_Moi_En_Production
-```
-
----
-
-### 3. Créer le compte administrateur
-```powershell
-npx tsx scripts/creer-admin.ts
-```
-
-**Identifiants créés :**
-- Nom d'utilisateur: `admin`
-- Mot de passe: `Admin@2025`
-
----
-
-### 4. Tester la connexion
-```powershell
+npm install
+copy .env.example .env.local
+echo "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api" >> .env.local
 npm run dev
-# Ouvrir: http://localhost:3000/connexion
-# Se connecter avec: admin / Admin@2025
 ```
+
+### 3. Vérifier le flux d’authentification
+- Aller sur `http://localhost:3000/connexion`
+- Se connecter avec le compte Django créé (superuser ou utilisateur existant)
+- Confirmer que le token est bien stocké (DevTools → Application → localStorage)
+
+### 4. Exécuter les tests prioritaires
+1. Téléversement document (`/documents/nouveau`)
+2. Statistiques (`/tableau-de-bord`, composant `StatsTempsReel`)
+3. Recherche globale (`Ctrl+K` → onglet Documents)
+4. Journal d’activités (`/activite`)
 
 ---
 
@@ -102,56 +94,50 @@ UTILISATEURS DE L'APPLICATION
 
 ## 🔧 À IMPLÉMENTER APRÈS VOS RÉPONSES
 
-### Phase 1: Authentification complète (EN COURS)
-- [x] Connexion par nom d'utilisateur
-- [x] Hash mots de passe avec bcrypt
-- [x] Tokens JWT sécurisés
-- [x] Système de permissions par rôle
-- [ ] Middleware de protection des routes
-- [ ] Interface admin utilisateurs
-- [ ] Réinitialisation mot de passe
+### Phase 1: Finaliser migration Django (EN COURS)
+- [x] Remplacer toutes les routes `/api/*` Next.js par l’API Django
+- [x] Centraliser la gestion JWT (`lib/api.ts`, `lib/session.ts`)
+- [ ] Automatiser le refresh token côté frontend
+- [ ] Protéger les routes Next.js (middleware / hooks `useSession`)
 
-### Phase 2: Migration des données
-- [ ] Analyser structure ancienne BDD
-- [ ] Script de migration automatique
-- [ ] Import clients
-- [ ] Import exercices
-- [ ] Import risques
-- [ ] Import documents
+### Phase 2: Adaptations pour les archivistes
+- [ ] Recherche guidée Client → Année → Risque → Rubrique → Référence
+- [ ] Templates automatiques de rubriques (ACS → Client, avenants, factures…)
+- [ ] Extension des types de risques (MRP, Voyage, Prévoyance, etc.)
+- [ ] Alias de connexion « Nom + Code »
+
+### Phase 3: Migration des données existantes
+- [ ] Inventaire BDD actuelle + export
+- [ ] Script d’import clients/exercices/risques/documents
 - [ ] Migration fichiers PDF
-- [ ] Validation données
+- [ ] Validation et échantillons de contrôle
 
-### Phase 3: Fonctionnalités avancées
-- [ ] Logs d'activité détaillés
-- [ ] Limitation tentatives connexion
-- [ ] Export PDF/Excel avec vraies données
-- [ ] Notifications système
-- [ ] Backup automatique
-- [ ] Mode hors ligne (PWA)
+### Phase 4: Fonctionnalités avancées & production
+- [ ] Logs d’activité enrichis (IP, navigateur, actions critiques)
+- [ ] Limitation des tentatives de connexion / MFA
+- [ ] Notifications / alertes (ex : archivage automatique)
+- [ ] Sauvegardes planifiées + procédure de restauration
+- [ ] Documentation utilisateur + formation
 
 ---
 
 ## 📊 ÉTAT D'AVANCEMENT ACTUEL
 
-### ✅ TERMINÉ (80%)
-- ✅ Interface utilisateur moderne
-- ✅ Recherche IA avec onglets
-- ✅ Stats temps réel
-- ✅ Timeline activités
-- ✅ Preview PDF
-- ✅ Export PDF/Excel/CSV (démo)
-- ✅ Système d'authentification
-- ✅ Gestion des rôles
+### ✅ TERMINÉ (~85 %)
+- Interface Next.js connectée à l’API Django (clients, utilisateurs, catégories, documents, stats, journal)
+- Page Paramètres (profil + mot de passe) reliée au backend
+- Composants clés migrés (`StatsTempsReel`, `RechercheGlobale`, upload document, journal)
+- Nettoyage des anciennes routes Next.js / Prisma / NextAuth
 
-### ⏳ EN COURS (15%)
-- ⏳ Connexion aux vraies données API
-- ⏳ Protection des routes
-- ⏳ Interface admin
+### ⏳ EN COURS (~10 %)
+- Tests de bout-en-bout (upload, stats, recherche, journal) et retours utilisateurs
+- Documentation projet (AUTHENTIFICATION, README, guides archivistes)
+- Plan d’adaptation métiers (recherche guidée, templates rubriques)
 
-### 📝 À FAIRE (5%)
-- 📝 Migration ancienne BDD
-- 📝 Import fichiers
-- 📝 Formation utilisateurs
+### 📝 À FAIRE (~5 %)
+- Migration des données historiques
+- Formation du personnel et phase pilote
+- Mise en production / plan de support
 
 ---
 
@@ -185,21 +171,18 @@ UTILISATEURS DE L'APPLICATION
 **Email :** [Votre email]
 **Téléphone :** [Votre numéro]
 
-**Pour toute question :**
-1. Lire AUTHENTIFICATION.md pour l'auth
-2. Lire SETUP_DATABASE.md pour la BDD
-3. Contacter le développeur
-
----
+**Pour démarrer :**
+1. Lire `AUTHENTIFICATION.md` (flux Django + helpers front)
+2. Lire `backend/INSTALLATION.md` pour l’API
+3. Lire `README.md` (racine) pour la vue d’ensemble
 
 ## ✅ CHECKLIST AVANT DE CONTINUER
 
-- [ ] J'ai arrêté le serveur dev
-- [ ] J'ai fermé et rouvert VS Code
-- [ ] J'ai lancé `npx prisma generate`
-- [ ] J'ai lancé `npx prisma db push`
-- [ ] J'ai ajouté JWT_SECRET dans .env
-- [ ] J'ai créé le compte admin
+- [ ] Backend opérationnel (`python manage.py runserver` → `/api/` accessible)
+- [ ] Frontend opérationnel (`npm run dev` → `/connexion`, `/documents`, `/activite`)
+- [ ] Tests manuels réalisés (upload, stats, recherche, journal)
+- [ ] Constat utilisateur rédigé (questionnaire archivistes, responsable)
+- [ ] Documentation mise à jour (AUTHENTIFICATION, README, guides)
 - [ ] J'ai testé la connexion
 - [ ] J'ai rempli le questionnaire archivistes
 - [ ] J'ai rempli le questionnaire technique

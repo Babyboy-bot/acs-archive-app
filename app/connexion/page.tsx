@@ -6,6 +6,8 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
+import { apiFetchJson } from '@/lib/api'
+import { enregistrerSession } from '@/lib/session'
 
 export default function PageConnexion() {
   const router = useRouter()
@@ -20,21 +22,36 @@ export default function PageConnexion() {
     setErreur('')
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const { response, data } = await apiFetchJson('/auth/login/', {
         method: 'POST',
+        skipAuth: true,
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ nomUtilisateur, motDePasse }),
+        body: JSON.stringify({
+          nom_utilisateur: nomUtilisateur,
+          mot_de_passe: motDePasse
+        })
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        setErreur(data.erreur || 'Erreur lors de la connexion')
+      if (!response.ok || !data || typeof data !== 'object' || !('success' in data) || !data.success) {
+        setErreur((data as any)?.erreur || (data as any)?.detail || 'Erreur lors de la connexion')
         setChargement(false)
         return
       }
+
+      enregistrerSession({
+        token: (data as any).token,
+        refresh: (data as any).refresh,
+        utilisateur: {
+          id: (data as any).utilisateur.id,
+          nomUtilisateur: (data as any).utilisateur.nomUtilisateur,
+          nom: (data as any).utilisateur.nom,
+          prenom: (data as any).utilisateur.prenom,
+          email: (data as any).utilisateur.email,
+          role: (data as any).utilisateur.role,
+        }
+      })
 
       router.push('/tableau-de-bord')
     } catch (error) {

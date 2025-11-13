@@ -4,8 +4,7 @@
 // Enums (générés par Prisma après prisma generate)
 export enum RoleUtilisateur {
   ADMIN = 'ADMIN',
-  GESTIONNAIRE = 'GESTIONNAIRE',
-  EMPLOYE = 'EMPLOYE',
+  ARCHIVISTE = 'ARCHIVISTE',
   CONSULTANT = 'CONSULTANT'
 }
 
@@ -33,7 +32,12 @@ export enum TypeRisque {
 
 export enum TypeCourrier {
   ACS_VERS_CLIENT = 'ACS_VERS_CLIENT',
-  ACS_VERS_COMPAGNIE = 'ACS_VERS_COMPAGNIE'
+  ACS_VERS_COMPAGNIE = 'ACS_VERS_COMPAGNIE',
+  AVENANT = 'AVENANT',
+  FACTURE = 'FACTURE',
+  REGLEMENT = 'REGLEMENT',
+  DIVERS = 'DIVERS',
+  SINISTRE = 'SINISTRE'
 }
 
 export enum StatutExercice {

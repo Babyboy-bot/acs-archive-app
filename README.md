@@ -1,82 +1,92 @@
-<<<<<<< HEAD
-# ACS Archive - Application de Gestion d'Archives
+# ACS Archive – Application de gestion documentaire
 
-Application web de gestion d'archives pour **ACS - Assureurs Conseils Service**, société de courtage d'assurances en Côte d'Ivoire.
+Application web destinée à **ACS – Assureurs Conseils Service** pour gérer les documents clients, les activités et les statistiques métiers. L’interface est réalisée avec Next.js, tandis que l’API repose désormais sur **Django REST Framework** et une base PostgreSQL.
 
-## 🚀 Stack Technique
+## 🚀 Stack technique
 
-- **Frontend** : Next.js 16 + React 19 + TypeScript
-- **Styling** : TailwindCSS 4
-- **Base de données** : PostgreSQL (à venir)
-- **ORM** : Prisma (à venir)
-- **Authentification** : NextAuth (à venir)
-- **Stockage fichiers** : AWS S3 / Cloudinary (à venir)
-- **Déploiement** : Vercel
+- **Frontend** : Next.js 14 (App Router) · React 18 · TypeScript · Tailwind CSS
+- **Backend** : Django 5 · Django REST Framework · Simple JWT
+- **Base de données** : PostgreSQL
+- **Stockage fichiers** : système de fichiers local (développement) – support S3 à prévoir
 
-## 👥 Équipe
-
-- **KASSI ELIE EMMANUEL** (Babyboy-bot)
-- **ASSINYO RODRIGUE**
-
-## 📋 Documentation
-
-Consultez le [Cahier des Charges](./CAHIER_DES_CHARGES.md) pour les spécifications complètes.
-
-## 🛠️ Installation
-
-```bash
-# Installer les dépendances
-npm install
-
-# Lancer le serveur de développement
-npm run dev
-
-# Ouvrir http://localhost:3000
-```
-
-## 📦 Scripts Disponibles
-
-- `npm run dev` - Lancer en mode développement
-- `npm run build` - Build de production
-- `npm run start` - Lancer en production
-- `npm run lint` - Vérifier le code
-
-## 📁 Structure du Projet
+## 🗂 Structure du dépôt
 
 ```
 acs-archive-app/
-├── app/                    # Next.js App Router
-│   ├── layout.tsx         # Layout principal
-│   ├── page.tsx           # Page d'accueil
-│   └── globals.css        # Styles globaux
-├── components/            # Composants réutilisables (à venir)
-├── lib/                   # Utilitaires et config (à venir)
-├── public/                # Assets statiques (à venir)
-├── CAHIER_DES_CHARGES.md # Documentation projet
-└── README.md              # Ce fichier
-
+├── app/                 # Pages Next.js (App Router)
+├── components/          # Composants réutilisables
+├── lib/                 # Helpers (API, session, etc.)
+├── backend/             # Projet Django (acs_backend)
+│   ├── api/             # App REST (vues, serializers, tests…)
+│   ├── acs_backend/     # Paramétrage du projet Django
+│   └── INSTALLATION.md  # Guide détaillé d’installation backend
+└── README.md            # Ce fichier
 ```
 
-## 🎯 Fonctionnalités Prévues
+## ⚙️ Installation & démarrage
 
-- ✅ Configuration initiale du projet
-- ⏳ Authentification et gestion des utilisateurs
-- ⏳ Upload et gestion des documents
-- ⏳ Recherche et filtrage avancés
-- ⏳ Système de permissions
-- ⏳ Audit trail et traçabilité
-- ⏳ Dashboard et statistiques
+### 1. Backend Django
 
-## 📝 Statut
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # ou .venv\Scripts\activate sous Windows
+pip install -r requirements.txt
 
-**Phase** : Conception et analyse  
-**Version** : 1.0.0  
-**Date** : Novembre 2025
+# Variables d’environnement
+cp .env.example .env  # puis renseigner SECRET_KEY, DB_*, JWT_*
+
+python manage.py migrate
+python manage.py createsuperuser  # si nécessaire
+python manage.py runserver
+```
+
+Par défaut, l’API est servie sur `http://127.0.0.1:8000/api/`.
+
+### 2. Frontend Next.js
+
+```bash
+npm install
+
+# Config front
+cp .env.example .env.local
+echo "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api" >> .env.local
+
+npm run dev
+# Ouvrir http://localhost:3000
+```
+
+## 🔑 Points d’intégration principaux
+
+- Authentification : `/auth/login/` (JWT), stocké dans `lib/session.ts`
+- Gestion utilisateurs : `/utilisateurs/`
+- Documents : `/documents/`, `/documents/upload/`, `/documents/{id}/`
+- Statistiques : `/stats/`
+
+Toute requête frontend doit passer par `lib/api.ts` (`apiFetch` / `apiFetchJson`) afin d’injecter automatiquement le token JWT.
+
+## ✅ Fonctionnalités actuelles
+
+- Connexion / stockage JWT navigateur
+- Paramètres utilisateur (profil + changement mot de passe)
+- CRUD utilisateurs, clients, catégories, documents (via API Django)
+- Téléversement de documents multi-fichiers
+- Timeline des activités + statistiques temps réel
+- Recherche rapide de documents
+
+## 🔧 Scripts utiles
+
+- `npm run dev` : lancer le frontend Next.js
+- `npm run build` / `npm run start`
+- `npm run lint`
+- `python manage.py runserver` : lancer l’API Django
+- `python manage.py test` : exécuter les tests backend
+
+## 📚 Documentation complémentaire
+
+- [backend/INSTALLATION.md](./backend/INSTALLATION.md) – procédure détaillée backend
+- [backend/API_DOCUMENTATION.md](./backend/API_DOCUMENTATION.md) – endpoints REST & exemples
 
 ---
 
-**ACS - Assureurs Conseils Service** © 2025
-=======
-# acs-archive-app
-Application de gestion d'archives pour ACS - Assureurs Conseils Service. Développée avec Next.js, TypeScript et TailwindCSS.
->>>>>>> 6e5fd5df1eff20f80ba402f0a468d11c50342d50
+**ACS – Assureurs Conseils Service** © 2025

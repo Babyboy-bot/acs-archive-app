@@ -3,32 +3,277 @@
 import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { apiFetchJson } from '@/lib/api'
+
+type CategorieDRF = {
+  id: string
+  nom: string
+  description: string | null
+  couleur: string
+  cree_le: string
+  modifie_le: string
+  nombreDocuments?: number
+}
+
+type Categorie = {
+  id: string
+  nom: string
+  description: string | null
+  couleur: string
+  creeLe: string
+  modifieLe: string
+  nombreDocuments: number
+}
+
+function mapCategorie(categorie: CategorieDRF): Categorie {
+  return {
+    id: categorie.id,
+    nom: categorie.nom,
+    description: categorie.description,
+    couleur: categorie.couleur,
+    creeLe: categorie.cree_le,
+    modifieLe: categorie.modifie_le,
+    nombreDocuments: categorie.nombreDocuments ?? 0
+  }
+}
 
 export default function PageCategories() {
   const [recherche, setRecherche] = useState('')
   const [afficherFormulaire, setAfficherFormulaire] = useState(false)
   const [nouveauNom, setNouveauNom] = useState('')
   const [nouvelleCouleur, setNouvelleCouleur] = useState('#D32027')
+  const [nouvelleDescription, setNouvelleDescription] = useState('')
+  const [categories, setCategories] = useState<Categorie[]>([])
+  const [chargement, setChargement] = useState(true)
+  const [erreur, setErreur] = useState<string | null>(null)
+  const [enregistrementEnCours, setEnregistrementEnCours] = useState(false)
+  const [categorieEnEdition, setCategorieEnEdition] = useState<Categorie | null>(null)
+  const [messageSucces, setMessageSucces] = useState<string | null>(null)
+  const [suppressionEnCours, setSuppressionEnCours] = useState<string | null>(null)
 
-  const categories = [
-    { id: 1, nom: 'Automobile', description: 'Assurances véhicules, flottes et transport', couleur: '#D32027', nombreDocuments: 435, tendance: '+12%' },
-    { id: 2, nom: 'Santé', description: 'Assurances santé individuelle et collective', couleur: '#10B981', nombreDocuments: 312, tendance: '+8%' },
-    { id: 3, nom: 'Habitation', description: 'Assurances multirisque habitation', couleur: '#F59E0B', nombreDocuments: 245, tendance: '+15%' },
-    { id: 4, nom: 'Vie', description: 'Assurances vie et garanties décès', couleur: '#8B5CF6', nombreDocuments: 156, tendance: '+5%' },
-    { id: 5, nom: 'Responsabilité Civile', description: 'RC professionnelle et générale', couleur: '#0066B3', nombreDocuments: 99, tendance: '+3%' },
-    { id: 6, nom: 'Entreprise', description: 'Assurances multirisques entreprises', couleur: '#EC4899', nombreDocuments: 78, tendance: '+10%' },
-  ]
+  const formulaireRef = useRef<HTMLFormElement | null>(null)
+  const estEdition = Boolean(categorieEnEdition)
 
-  const categoriesFiltrees = categories.filter(cat =>
-    cat.nom.toLowerCase().includes(recherche.toLowerCase()) ||
-    cat.description.toLowerCase().includes(recherche.toLowerCase())
-  )
+  const texteBoutonPrincipal = afficherFormulaire
+    ? estEdition
+      ? 'Annuler la modification'
+      : 'Annuler'
+    : 'Nouvelle catégorie'
+  const iconeBoutonPrincipal = afficherFormulaire ? 'close' : 'plus'
+  const titreFormulaire = estEdition ? 'Modifier une catégorie' : 'Nouvelle Catégorie'
+  const texteBoutonSoumission = enregistrementEnCours
+    ? estEdition
+      ? 'Enregistrement...'
+      : 'Création...'
+    : estEdition
+      ? 'Enregistrer les modifications'
+      : 'Créer la catégorie'
+
+  function reinitialiserChamps() {
+    setNouveauNom('')
+    setNouvelleDescription('')
+    setNouvelleCouleur('#D32027')
+  }
+
+  function fermerFormulaire() {
+    setAfficherFormulaire(false)
+    setCategorieEnEdition(null)
+    reinitialiserChamps()
+  }
+
+  function ouvrirFormulaireCreation() {
+    setErreur(null)
+    setMessageSucces(null)
+    setCategorieEnEdition(null)
+    reinitialiserChamps()
+    setAfficherFormulaire(true)
+  }
+
+  function preparerEdition(categorie: Categorie) {
+    setErreur(null)
+    setMessageSucces(null)
+    setCategorieEnEdition(categorie)
+    setNouveauNom(categorie.nom)
+    setNouvelleDescription(categorie.description ?? '')
+    setNouvelleCouleur(categorie.couleur)
+    setAfficherFormulaire(true)
+  }
+
+  async function chargerCategories(showLoader = true) {
+    if (showLoader) {
+      setChargement(true)
+    }
+    setErreur(null)
+    try {
+      const { response, data } = await apiFetchJson('/categories/')
+      if (!response.ok) {
+        throw new Error((data as any)?.detail || 'Erreur lors du chargement des catégories')
+      }
+
+      const bruts: CategorieDRF[] = Array.isArray(data)
+        ? data
+        : Array.isArray((data as any)?.results)
+          ? (data as any).results
+          : []
+
+      setCategories(bruts.map(mapCategorie))
+    } catch (error: any) {
+      console.error('Erreur chargement catégories:', error)
+      setErreur(error?.message || 'Impossible de charger les catégories.')
+    } finally {
+      setChargement(false)
+    }
+  }
+
+  useEffect(() => {
+    chargerCategories()
+  }, [])
+
+  const categoriesFiltrees = useMemo(() => {
+    const rechercheMin = recherche.toLowerCase()
+    return categories.filter(cat =>
+      cat.nom.toLowerCase().includes(rechercheMin) ||
+      (cat.description ?? '').toLowerCase().includes(rechercheMin)
+    )
+  }, [categories, recherche])
 
   const couleursPredefinies = [
     '#D32027', '#0066B3', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899',
     '#06B6D4', '#84CC16', '#F97316', '#6366F1'
   ]
+
+  async function soumettreCategorie(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!nouveauNom.trim()) {
+      setErreur('Le nom de la catégorie est obligatoire.')
+      return
+    }
+
+    setErreur(null)
+    setMessageSucces(null)
+    setEnregistrementEnCours(true)
+
+    const payload = {
+      nom: nouveauNom.trim(),
+      couleur: nouvelleCouleur,
+      description: nouvelleDescription.trim() !== '' ? nouvelleDescription.trim() : null
+    }
+
+    const estCreation = !estEdition || !categorieEnEdition
+
+    try {
+      const url = estCreation ? '/categories/' : `/categories/${categorieEnEdition.id}/`
+      const method = estCreation ? 'POST' : 'PUT'
+
+      const { response, data } = await apiFetchJson(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      })
+
+      if (!response.ok) {
+        throw new Error((data as any)?.erreur || (data as any)?.detail || `Erreur lors ${estCreation ? 'de la création' : 'de la mise à jour'} de la catégorie.`)
+      }
+
+      const categorieSource = (data as any)?.categorie ?? data
+      const categorieAPI = categorieSource ? mapCategorie(categorieSource as CategorieDRF) : null
+
+      if (estCreation) {
+        if (categorieAPI) {
+          setCategories(prev => [...prev, categorieAPI].sort((a, b) => a.nom.localeCompare(b.nom)))
+          setMessageSucces(`Catégorie "${categorieAPI.nom}" créée avec succès.`)
+        } else {
+          await chargerCategories(false)
+          setMessageSucces('Catégorie créée avec succès.')
+        }
+      } else {
+        if (categorieAPI) {
+          setCategories(prev => prev
+            .map(cat => (cat.id === categorieAPI.id ? categorieAPI : cat))
+            .sort((a, b) => a.nom.localeCompare(b.nom))
+          )
+          setMessageSucces(`Catégorie "${categorieAPI.nom}" mise à jour.`)
+        } else {
+          await chargerCategories(false)
+          setMessageSucces('Catégorie mise à jour.')
+        }
+      }
+
+      fermerFormulaire()
+    } catch (error: any) {
+      console.error('Erreur soumission catégorie:', error)
+      setErreur(error?.message || `Impossible ${estCreation ? 'de créer' : 'de mettre à jour'} la catégorie.`)
+    } finally {
+      setEnregistrementEnCours(false)
+    }
+  }
+
+  async function supprimerCategorie(id: string) {
+    const categorie = categories.find((cat) => cat.id === id)
+    if (!categorie) {
+      return
+    }
+
+    const confirmation = window.confirm(`Supprimer la catégorie "${categorie.nom}" ?`)
+    if (!confirmation) {
+      return
+    }
+
+    setErreur(null)
+    setMessageSucces(null)
+    setSuppressionEnCours(id)
+
+    try {
+      const { response, data } = await apiFetchJson(`/categories/${id}/`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error((data as any)?.erreur || (data as any)?.detail || 'Erreur lors de la suppression de la catégorie.')
+      }
+
+      setCategories((prev) => prev.filter((cat) => cat.id !== id))
+      setMessageSucces(`Catégorie "${categorie.nom}" supprimée.`)
+      if (categorieEnEdition?.id === id) {
+        fermerFormulaire()
+      }
+    } catch (error: any) {
+      console.error('Erreur suppression catégorie:', error)
+      setErreur(error?.message || 'Impossible de supprimer la catégorie.')
+    } finally {
+      setSuppressionEnCours(null)
+    }
+  }
+
+  const statsGlobales = useMemo(() => {
+    if (categories.length === 0) {
+      return {
+        total: 0,
+        totalDocuments: 0,
+        moyenne: 0,
+        plusPopulaire: null as Categorie | null
+      }
+    }
+
+    const totalDocuments = categories.reduce((sum, cat) => sum + cat.nombreDocuments, 0)
+    const plusPopulaire = categories.reduce((prev, current) =>
+      current.nombreDocuments > prev.nombreDocuments ? current : prev
+    , categories[0])
+
+    return {
+      total: categories.length,
+      totalDocuments,
+      moyenne: Math.round(totalDocuments / categories.length),
+      plusPopulaire
+    }
+  }, [categories])
+
+  const maxDocumentsCategorie = categories.length > 0
+    ? Math.max(...categories.map((cat) => cat.nombreDocuments))
+    : 0
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -51,11 +296,11 @@ export default function PageCategories() {
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setAfficherFormulaire(!afficherFormulaire)}
+              onClick={() => (afficherFormulaire ? fermerFormulaire() : ouvrirFormulaireCreation())}
               className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
             >
-              <Icon name={afficherFormulaire ? 'close' : 'plus'} size="sm" />
-              {afficherFormulaire ? 'Annuler' : 'Nouvelle catégorie'}
+              <Icon name={iconeBoutonPrincipal} size="sm" />
+              {texteBoutonPrincipal}
             </motion.button>
           </div>
         </motion.div>
@@ -80,6 +325,36 @@ export default function PageCategories() {
           </div>
         </motion.div>
 
+        {erreur && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+          >
+            {erreur}
+          </motion.div>
+        )}
+
+        {messageSucces && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700"
+          >
+            {messageSucces}
+          </motion.div>
+        )}
+
+        {chargement && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-6 rounded-2xl border border-gray-200 bg-white p-6 text-center text-gray-500"
+          >
+            Chargement des catégories...
+          </motion.div>
+        )}
+
         {afficherFormulaire && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
@@ -87,10 +362,10 @@ export default function PageCategories() {
             className="bg-gradient-to-br from-red-50 to-blue-50 rounded-2xl shadow-lg p-8 mb-8 border-2 border-red-200"
           >
             <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-              <Icon name="plus" size="md" />
-              Nouvelle Catégorie
+              <Icon name={estEdition ? 'edit' : 'plus'} size="md" />
+              {titreFormulaire}
             </h3>
-            <form className="space-y-6">
+            <form ref={formulaireRef} className="space-y-6" onSubmit={soumettreCategorie}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Nom de la catégorie *</label>
@@ -129,21 +404,33 @@ export default function PageCategories() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Description</label>
+                <textarea
+                  value={nouvelleDescription}
+                  onChange={(e) => setNouvelleDescription(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                  rows={3}
+                  placeholder="Décrivez l'usage de cette catégorie"
+                />
+              </div>
+
               <div className="flex gap-4">
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   type="submit"
-                  className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg flex items-center gap-2"
+                  disabled={enregistrementEnCours}
+                  className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Icon name="check" size="sm" />
-                  Créer la catégorie
+                  {texteBoutonSoumission}
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   type="button"
-                  onClick={() => setAfficherFormulaire(false)}
+                  onClick={fermerFormulaire}
                   className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
                 >
                   Annuler
@@ -153,8 +440,23 @@ export default function PageCategories() {
           </motion.div>
         )}
 
+        {!chargement && categoriesFiltrees.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500"
+          >
+            Aucune catégorie pour le moment. Créez votre première catégorie pour organiser vos documents.
+          </motion.div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {categoriesFiltrees.map((cat, index) => (
+          {categoriesFiltrees.map((cat, index) => {
+            const ratioRemplissage = maxDocumentsCategorie > 0
+              ? Math.round((cat.nombreDocuments / maxDocumentsCategorie) * 100)
+              : 0
+
+            return (
             <motion.div
               key={cat.id}
               initial={{ opacity: 0, y: 20 }}
@@ -168,14 +470,6 @@ export default function PageCategories() {
                 style={{ background: `linear-gradient(135deg, ${cat.couleur}dd 0%, ${cat.couleur} 100%)` }}
               >
                 <Icon name="tag" size="xl" className="text-white opacity-90 group-hover:scale-110 transition-transform" />
-                <div className="absolute top-4 right-4">
-                  <motion.span 
-                    whileHover={{ scale: 1.1 }}
-                    className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-white text-xs font-semibold"
-                  >
-                    {cat.tendance}
-                  </motion.span>
-                </div>
               </div>
 
               <div className="p-6">
@@ -183,7 +477,7 @@ export default function PageCategories() {
                   {cat.nom}
                 </h3>
                 <p className="text-sm text-gray-600 mb-4 h-10">
-                  {cat.description}
+                  {cat.description || 'Aucune description fournie'}
                 </p>
 
                 <div className="flex items-center justify-between mb-6">
@@ -200,7 +494,7 @@ export default function PageCategories() {
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                     <motion.div
                       initial={{ width: 0 }}
-                      animate={{ width: `${(cat.nombreDocuments / 435) * 100}%` }}
+                      animate={{ width: `${ratioRemplissage}%` }}
                       transition={{ delay: 0.5 + index * 0.1, duration: 1 }}
                       className="h-full rounded-full"
                       style={{ backgroundColor: cat.couleur }}
@@ -212,63 +506,68 @@ export default function PageCategories() {
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-1"
-                  >
-                    <Icon name="chart" size="sm" />
-                    Stats
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    onClick={() => preparerEdition(cat)}
                     className="flex-1 py-2 rounded-lg font-medium text-sm text-white transition-all hover:shadow-lg flex items-center justify-center gap-1"
                     style={{ background: `linear-gradient(135deg, ${cat.couleur}dd 0%, ${cat.couleur} 100%)` }}
                   >
                     <Icon name="edit" size="sm" />
                     Modifier
                   </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    disabled={suppressionEnCours === cat.id}
+                    onClick={() => supprimerCategorie(cat.id)}
+                    className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <Icon name="trash" size="sm" />
+                    {suppressionEnCours === cat.id ? 'Suppression...' : 'Supprimer'}
+                  </motion.button>
                 </div>
               </div>
             </motion.div>
-          ))}
+          )})}
         </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8 }}
-          className="mt-8 bg-white rounded-2xl shadow-lg p-8"
-        >
-          <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-            <Icon name="chart" size="md" />
-            Statistiques Globales
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            <div className="text-center">
-              <p className="text-4xl font-bold bg-gradient-to-r from-red-600 to-red-700 bg-clip-text text-transparent mb-2">
-                {categories.length}
-              </p>
-              <p className="text-sm text-gray-600">Catégories</p>
+        {categories.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.8 }}
+            className="mt-8 bg-white rounded-2xl shadow-lg p-8"
+          >
+            <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <Icon name="chart" size="md" />
+              Statistiques Globales
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <div className="text-center">
+                <p className="text-4xl font-bold bg-gradient-to-r from-red-600 to-red-700 bg-clip-text text-transparent mb-2">
+                  {statsGlobales.total}
+                </p>
+                <p className="text-sm text-gray-600">Catégories</p>
+              </div>
+              <div className="text-center">
+                <p className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent mb-2">
+                  {statsGlobales.totalDocuments}
+                </p>
+                <p className="text-sm text-gray-600">Total Documents</p>
+              </div>
+              <div className="text-center">
+                <p className="text-4xl font-bold bg-gradient-to-r from-green-600 to-green-700 bg-clip-text text-transparent mb-2">
+                  {statsGlobales.moyenne}
+                </p>
+                <p className="text-sm text-gray-600">Moyenne/Catégorie</p>
+              </div>
+              <div className="text-center">
+                <p className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-purple-700 bg-clip-text text-transparent mb-2">
+                  {statsGlobales.plusPopulaire?.nom ?? '—'}
+                </p>
+                <p className="text-sm text-gray-600">Plus Populaire</p>
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent mb-2">
-                {categories.reduce((sum, cat) => sum + cat.nombreDocuments, 0)}
-              </p>
-              <p className="text-sm text-gray-600">Total Documents</p>
-            </div>
-            <div className="text-center">
-              <p className="text-4xl font-bold bg-gradient-to-r from-green-600 to-green-700 bg-clip-text text-transparent mb-2">
-                {Math.round(categories.reduce((sum, cat) => sum + cat.nombreDocuments, 0) / categories.length)}
-              </p>
-              <p className="text-sm text-gray-600">Moyenne/Catégorie</p>
-            </div>
-            <div className="text-center">
-              <p className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-purple-700 bg-clip-text text-transparent mb-2">
-                {categories[0].nom}
-              </p>
-              <p className="text-sm text-gray-600">Plus Populaire</p>
-            </div>
-          </div>
-        </motion.div>
+          </motion.div>
+        )}
       </main>
     </div>
   )

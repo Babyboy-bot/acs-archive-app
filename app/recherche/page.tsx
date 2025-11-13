@@ -4,61 +4,174 @@ import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { apiFetchJson } from '@/lib/api'
+import { format } from 'date-fns'
+import { fr } from 'date-fns/locale'
+import { formatDistanceToNow } from 'date-fns'
+
+type ClientApi = {
+  id: string
+  nom: string
+}
+
+type ExerciceApi = {
+  id: string
+  annee: number
+  client: string
+  client_nom?: string
+}
+
+type RisqueApi = {
+  id: string
+  type: string
+}
+
+type DocumentApi = {
+  id: string
+  titre: string
+  reference?: string | null
+  type_courrier: 'ACS_VERS_CLIENT' | 'ACS_VERS_COMPAGNIE'
+  date_document?: string | null
+  cree_le: string
+  taille_fichier?: number
+  risque_detail?: {
+    type?: string | null
+    exercice_info?: {
+      annee?: number | null
+      client?: string | null
+    } | null
+  } | null
+}
 
 export default function PageRecherche() {
   const [client, setClient] = useState('')
   const [exercice, setExercice] = useState('')
   const [risque, setRisque] = useState('')
   const [typeCourrier, setTypeCourrier] = useState('')
-  const [motCle, setMotCle] = useState('')
   const [afficherResultats, setAfficherResultats] = useState(false)
+  const [chargement, setChargement] = useState(false)
+  const [erreur, setErreur] = useState<string | null>(null)
+  const [clients, setClients] = useState<ClientApi[]>([])
+  const [exercicesDisponibles, setExercicesDisponibles] = useState<number[]>([])
+  const [typesRisqueDisponibles, setTypesRisqueDisponibles] = useState<string[]>([])
+  const [resultats, setResultats] = useState<DocumentApi[]>([])
+  const [anneeMaxDisponible, setAnneeMaxDisponible] = useState<number | null>(null)
 
-  const typesRisque = [
-    { value: '', label: 'Tous les risques', color: '#6B7280' },
-    { value: 'AUTOMOBILE', label: 'Automobile', color: '#D32027' },
-    { value: 'SANTE', label: 'Santé', color: '#10B981' },
-    { value: 'HABITATION', label: 'Habitation', color: '#F59E0B' },
-    { value: 'VIE', label: 'Vie', color: '#8B5CF6' },
-    { value: 'RESPONSABILITE_CIVILE', label: 'RC', color: '#0066B3' },
-  ]
-
-  const typesCourrier = [
+  const typesCourrier = useMemo(() => ([
     { value: '', label: 'Tous les courriers' },
     { value: 'ACS_VERS_CLIENT', label: 'ACS → Client' },
     { value: 'ACS_VERS_COMPAGNIE', label: 'ACS → Compagnie' },
-  ]
+  ]), [])
 
-  const resultats = [
-    {
-      id: 1,
-      client: 'Entreprise ABC',
-      exercice: 2025,
-      risque: 'AUTOMOBILE',
-      typeCourrier: 'ACS_VERS_CLIENT',
-      titre: 'Police Auto - Contrat 2025',
-      reference: 'POL-AUTO-2025-001',
-      date: '2025-11-01',
-      chemin: 'ABC / 2025 / Automobile / ACS→Client',
-      taille: '2.4 MB',
-    },
-    {
-      id: 2,
-      client: 'Entreprise ABC',
-      exercice: 2025,
-      risque: 'AUTOMOBILE',
-      typeCourrier: 'ACS_VERS_COMPAGNIE',
-      titre: 'Demande cotation - Compagnie XYZ',
-      reference: 'COT-AUTO-2025-012',
-      date: '2025-10-28',
-      chemin: 'ABC / 2025 / Automobile / ACS→Compagnie',
-      taille: '850 KB',
-    },
-  ]
+  const couleurParRisque: Record<string, string> = useMemo(() => ({
+    AUTOMOBILE: '#D32027',
+    SANTE: '#10B981',
+    HABITATION: '#F59E0B',
+    VIE: '#8B5CF6',
+    RESPONSABILITE_CIVILE: '#0066B3',
+    MRP: '#9333EA',
+    TRANSPORT: '#0EA5E9',
+  }), [])
 
-  const gererRecherche = (e: React.FormEvent) => {
+  const labelRisque = (type?: string | null) => {
+    if (!type) return 'Risque inconnu'
+    return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+
+  const couleurRisque = (type?: string | null) => {
+    const cle = (type || '').toUpperCase()
+    return couleurParRisque[cle] ?? '#6B7280'
+  }
+
+  useEffect(() => {
+    let ignore = false
+
+    const chargerOptions = async () => {
+      try {
+        const [clientsRes, exercicesRes, risquesRes] = await Promise.all([
+          apiFetchJson<{ results?: ClientApi[] }>('/clients/?page_size=500&ordering=nom'),
+          apiFetchJson<{ results?: ExerciceApi[] }>('/exercices/?page_size=500&ordering=-annee'),
+          apiFetchJson<{ results?: RisqueApi[] }>('/risques/?page_size=500'),
+        ])
+
+        if (ignore) return
+
+        setClients(Array.isArray(clientsRes.data?.results) ? clientsRes.data!.results : [])
+
+        const exercicesList = Array.isArray(exercicesRes.data?.results)
+          ? exercicesRes.data!.results
+              .map((ex) => ex.annee)
+              .filter((annee): annee is number => typeof annee === 'number')
+          : []
+        const uniques = Array.from(new Set(exercicesList)).sort((a, b) => b - a)
+        setExercicesDisponibles(uniques)
+        if (uniques.length > 0) {
+          setAnneeMaxDisponible(Math.max(...uniques))
+        }
+
+        const risquesList = Array.isArray(risquesRes.data?.results)
+          ? risquesRes.data!.results
+              .map((r) => r.type)
+              .filter((type): type is string => Boolean(type))
+          : []
+        setTypesRisqueDisponibles(Array.from(new Set(risquesList)))
+      } catch (error) {
+        if (!ignore) {
+          console.error('Erreur chargement options recherche', error)
+          setErreur("Impossible de charger les filtres de recherche")
+        }
+      }
+    }
+
+    chargerOptions()
+
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  const gererRecherche = async (e: React.FormEvent) => {
     e.preventDefault()
-    setAfficherResultats(true)
+    setChargement(true)
+    setErreur(null)
+
+    try {
+      const { data, response } = await apiFetchJson<{ results?: DocumentApi[] }>('/documents/?page_size=400&ordering=-cree_le')
+      if (!response.ok) {
+        throw new Error('Réponse invalide de l’API documents')
+      }
+
+      const docs = Array.isArray(data?.results) ? data!.results : []
+
+      const filtrerTexte = (source?: string | null, valeur?: string) => {
+        if (!valeur) return true
+        if (!source) return false
+        return source.toLowerCase().includes(valeur.toLowerCase())
+      }
+
+      const resultatFiltre = docs.filter((doc) => {
+        const info = doc.risque_detail?.exercice_info
+        const clientDoc = info?.client ?? ''
+        const anneeDoc = info?.annee ? String(info.annee) : ''
+        const risqueDoc = (doc.risque_detail?.type ?? '').toUpperCase()
+        const typeCourrierDoc = doc.type_courrier ?? ''
+
+        const matchClient = filtrerTexte(clientDoc, client)
+        const matchExercice = exercice ? anneeDoc === exercice : true
+        const matchRisque = risque ? risqueDoc === risque.toUpperCase() : true
+        const matchTypeCourrier = typeCourrier ? typeCourrierDoc === typeCourrier : true
+        return matchClient && matchExercice && matchRisque && matchTypeCourrier
+      })
+
+      setResultats(resultatFiltre)
+      setAfficherResultats(true)
+    } catch (error) {
+      console.error('Erreur recherche documents', error)
+      setErreur("Impossible de récupérer les documents.")
+    } finally {
+      setChargement(false)
+    }
   }
 
   const reinitialiser = () => {
@@ -66,11 +179,58 @@ export default function PageRecherche() {
     setExercice('')
     setRisque('')
     setTypeCourrier('')
-    setMotCle('')
     setAfficherResultats(false)
+    setResultats([])
+    setErreur(null)
   }
 
-  const getRisqueInfo = (type: string) => typesRisque.find(r => r.value === type) || typesRisque[0]
+  const resultatsAffiches = useMemo(() => {
+    return resultats.map((doc) => {
+      const info = doc.risque_detail?.exercice_info
+      const risqueType = (doc.risque_detail?.type ?? '').toUpperCase()
+      const dateDocument = doc.date_document || doc.cree_le
+      const taille = typeof doc.taille_fichier === 'number' ? doc.taille_fichier : undefined
+
+      return {
+        id: doc.id,
+        chemin: [info?.client, info?.annee, doc.risque_detail?.type ?? '', doc.type_courrier === 'ACS_VERS_CLIENT' ? 'ACS→Client' : 'ACS→Compagnie']
+          .filter(Boolean)
+          .join(' / '),
+        titre: doc.titre,
+        client: info?.client ?? 'Client inconnu',
+        risque: risqueType,
+        reference: doc.reference ?? 'Référence inconnue',
+        date: dateDocument ? format(new Date(dateDocument), 'yyyy-MM-dd', { locale: fr }) : 'Date inconnue',
+        taille: taille ? formatTaille(taille) : '—',
+        couleur: couleurRisque(risqueType),
+        risqueLabel: labelRisque(risqueType),
+        creeIlYA: dateDocument ? formatDistanceToNow(new Date(dateDocument), { addSuffix: true, locale: fr }) : null,
+      }
+    })
+  }, [resultats, couleurParRisque])
+
+  const typesRisque = useMemo(() => {
+    const typesNorm = typesRisqueDisponibles.map((type) => type.toUpperCase())
+    return [''].concat(typesNorm.length > 0 ? typesNorm : ['AUTOMOBILE', 'SANTE', 'HABITATION', 'VIE', 'RESPONSABILITE_CIVILE'])
+  }, [typesRisqueDisponibles])
+
+  function anneesFallback() {
+    const current = new Date().getFullYear()
+    const start = 2022
+    const max = Math.max(current, anneeMaxDisponible ?? current)
+    const annees: number[] = []
+    for (let annee = max; annee >= start; annee -= 1) {
+      annees.push(annee)
+    }
+    return annees
+  }
+
+  function formatTaille(bytes: number) {
+    if (bytes < 1024) return `${bytes} o`
+    const kb = bytes / 1024
+    if (kb < 1024) return `${kb.toFixed(1)} KB`
+    return `${(kb / 1024).toFixed(1)} MB`
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -97,16 +257,6 @@ export default function PageRecherche() {
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">Critères de recherche</h2>
-            <Link href="/recherche/navigation">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="px-4 py-2 bg-blue-100 text-blue-700 rounded-xl font-medium hover:bg-blue-200 transition-colors flex items-center gap-2"
-              >
-                <Icon name="folder" size="sm" />
-                Vue hiérarchique
-              </motion.button>
-            </Link>
           </div>
 
           <form onSubmit={gererRecherche} className="space-y-6">
@@ -127,7 +277,13 @@ export default function PageRecherche() {
                 onChange={(e) => setClient(e.target.value)}
                 placeholder="Nom du client..."
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                list="liste-clients"
               />
+              <datalist id="liste-clients">
+                {clients.map((c) => (
+                  <option key={c.id} value={c.nom} />
+                ))}
+              </datalist>
             </motion.div>
 
             <motion.div
@@ -142,7 +298,7 @@ export default function PageRecherche() {
                 Exercice (Année)
               </label>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[2025, 2024, 2023, 2022].map((annee) => (
+                {(exercicesDisponibles.length > 0 ? exercicesDisponibles : anneesFallback()).map((annee) => (
                   <motion.button
                     key={annee}
                     type="button"
@@ -176,20 +332,20 @@ export default function PageRecherche() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {typesRisque.map((type) => (
                   <motion.button
-                    key={type.value}
+                    key={type || 'tous'}
                     type="button"
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={() => setRisque(type.value)}
+                    onClick={() => setRisque(type)}
                     className={`py-3 px-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
-                      risque === type.value
+                      risque === type
                         ? 'text-white shadow-lg'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
-                    style={risque === type.value ? { backgroundColor: type.color } : {}}
+                    style={risque === type ? { backgroundColor: couleurRisque(type) } : {}}
                   >
                     <Icon name="shield" size="sm" />
-                    {type.label}
+                    {type ? labelRisque(type) : 'Tous les risques'}
                   </motion.button>
                 ))}
               </div>
@@ -227,34 +383,16 @@ export default function PageRecherche() {
               </div>
             </motion.div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 }}
-              className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-6"
-            >
-              <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                <Icon name="search" size="sm" />
-                Mot-clé supplémentaire (optionnel)
-              </label>
-              <input
-                type="text"
-                value={motCle}
-                onChange={(e) => setMotCle(e.target.value)}
-                placeholder="Référence, titre du document..."
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all outline-none"
-              />
-            </motion.div>
-
             <div className="flex gap-4 pt-4">
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 type="submit"
                 className="flex-1 py-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
+                disabled={chargement}
               >
                 <Icon name="search" size="sm" />
-                Rechercher
+                {chargement ? 'Recherche en cours...' : 'Rechercher'}
               </motion.button>
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -278,14 +416,19 @@ export default function PageRecherche() {
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <Icon name="folder" size="md" />
-                Résultats ({resultats.length} document{resultats.length > 1 ? 's' : ''})
+                Résultats ({resultatsAffiches.length} document{resultatsAffiches.length > 1 ? 's' : ''})
               </h2>
             </div>
 
-            <div className="space-y-4">
-              {resultats.map((doc, index) => {
-                const risqueInfo = getRisqueInfo(doc.risque)
-                return (
+            {erreur ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {erreur}
+              </div>
+            ) : resultatsAffiches.length === 0 ? (
+              <div className="text-center text-gray-500 py-10">Aucun document ne correspond aux critères sélectionnés.</div>
+            ) : (
+              <div className="space-y-4">
+                {resultatsAffiches.map((doc, index) => (
                   <motion.div
                     key={doc.id}
                     initial={{ opacity: 0, x: -20 }}
@@ -298,7 +441,7 @@ export default function PageRecherche() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 text-sm text-gray-500 mb-3">
                           <Icon name="folder" size="xs" />
-                          <span className="font-mono">{doc.chemin}</span>
+                          <span className="font-mono">{doc.chemin || 'Chemin indisponible'}</span>
                         </div>
 
                         <h3 className="font-bold text-xl text-gray-900 mb-3 hover:text-red-600 transition-colors">
@@ -308,10 +451,10 @@ export default function PageRecherche() {
                         <div className="flex flex-wrap items-center gap-3">
                           <span 
                             className="px-4 py-2 rounded-full font-semibold text-white text-sm flex items-center gap-2"
-                            style={{ backgroundColor: risqueInfo.color }}
+                            style={{ backgroundColor: doc.couleur }}
                           >
                             <Icon name="shield" size="xs" />
-                            {risqueInfo.label}
+                            {doc.risqueLabel}
                           </span>
                           <span className="px-4 py-2 bg-gray-100 text-gray-700 rounded-full text-sm font-medium flex items-center gap-2">
                             <Icon name="tag" size="xs" />
@@ -325,6 +468,11 @@ export default function PageRecherche() {
                             <Icon name="inbox" size="xs" />
                             {doc.taille}
                           </span>
+                          {doc.creeIlYA ? (
+                            <span className="px-4 py-2 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
+                              Ajouté {doc.creeIlYA}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 
@@ -346,9 +494,9 @@ export default function PageRecherche() {
                       </div>
                     </div>
                   </motion.div>
-                )
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </motion.div>
         )}
 

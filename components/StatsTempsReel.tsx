@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Icon } from './Icon'
 import { motion } from 'framer-motion'
+import { apiFetchJson } from '@/lib/api'
 
 interface StatTempsReel {
   label: string
@@ -20,9 +21,7 @@ interface StatsTempsReelProps {
 export function StatsTempsReel({ intervalMs = 5000 }: StatsTempsReelProps) {
   const [stats, setStats] = useState<StatTempsReel[]>([
     { label: 'Documents', valeur: 0, variation: 0, icone: 'folder', couleur: '#D32027', unite: '' },
-    { label: 'Utilisateurs actifs', valeur: 0, variation: 0, icone: 'users', couleur: '#0066B3', unite: '' },
-    { label: 'Uploads aujourd\'hui', valeur: 0, variation: 0, icone: 'upload', couleur: '#10B981', unite: '' },
-    { label: 'Consultations/h', valeur: 0, variation: 0, icone: 'eye', couleur: '#F59E0B', unite: '/h' },
+    { label: "Uploads aujourd'hui", valeur: 0, variation: 0, icone: 'upload', couleur: '#10B981', unite: '' },
   ])
   
   const [derniereMAJ, setDerniereMAJ] = useState(new Date())
@@ -35,17 +34,18 @@ export function StatsTempsReel({ intervalMs = 5000 }: StatsTempsReelProps) {
 
   const chargerStats = async () => {
     try {
-      const response = await fetch('/api/stats')
-      const data = await response.json()
-      
-      if (data.success) {
-        setStats(prevStats => [
-          { ...prevStats[0], valeur: data.stats.documents, variation: 0 },
-          { ...prevStats[1], valeur: data.stats.utilisateursActifs, variation: 0 },
-          { ...prevStats[2], valeur: data.stats.uploadsAujourdhui, variation: 0 },
-          { ...prevStats[3], valeur: data.stats.consultationsHeure, variation: 0 },
-        ])
+      const { response, data } = await apiFetchJson('/stats/')
+      if (!response.ok || !data || typeof data !== 'object') {
+        throw new Error((data as any)?.erreur || (data as any)?.detail || 'Erreur lors du chargement des statistiques')
       }
+
+      const documents = Number((data as any).documents ?? 0)
+      const uploads = Number((data as any).uploadsAujourdhui ?? 0)
+
+      setStats(prevStats => [
+        { ...prevStats[0], valeur: documents, variation: documents - prevStats[0].valeur },
+        { ...prevStats[1], valeur: uploads, variation: uploads - prevStats[1].valeur },
+      ])
     } catch (error) {
       console.error('Erreur chargement stats:', error)
     }
