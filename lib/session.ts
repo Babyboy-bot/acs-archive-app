@@ -1,11 +1,15 @@
+import { RoleUtilisateur } from '@/types'
+
 export type SessionUtilisateur = {
   id: string
   nomUtilisateur: string
   nom: string
   prenom: string
   email: string | null
-  role: 'ADMIN' | 'GESTIONNAIRE' | 'EMPLOYE' | 'CONSULTANT'
+  role: RoleUtilisateur
 }
+
+export type RoleUtilisateurCode = SessionUtilisateur['role']
 
 const TOKEN_KEY = 'authToken'
 const REFRESH_KEY = 'refreshToken'

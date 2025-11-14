@@ -3,21 +3,58 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Icon, IconName } from './Icon'
 import { RechercheGlobale } from './RechercheGlobale'
+import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
+import { canAccessSection, hasPermission, PermissionRessource } from '@/lib/permissions'
+import { RoleUtilisateur } from '@/types'
+
+type MenuItem = {
+  href: string
+  label: string
+  icone: IconName
+  ressource?: PermissionRessource
+  action?: 'voir'
+  roles?: RoleUtilisateur[]
+}
+
+const MENU_ITEMS: MenuItem[] = [
+  { href: '/tableau-de-bord', label: 'Tableau de bord', icone: 'chart', ressource: 'stats', action: 'voir' },
+  { href: '/documents', label: 'Documents', icone: 'folder', ressource: 'documents', action: 'voir' },
+  { href: '/recherche', label: 'Recherche avancée', icone: 'search', ressource: 'documents', action: 'voir' },
+  { href: '/clients', label: 'Clients', icone: 'building', ressource: 'documents', action: 'voir' },
+  {
+    href: '/utilisateurs',
+    label: 'Utilisateurs',
+    icone: 'users',
+    ressource: 'utilisateurs',
+    action: 'voir',
+    roles: [RoleUtilisateur.ADMIN, RoleUtilisateur.ARCHIVISTE],
+  },
+]
 
 export function Navigation() {
   const cheminActuel = usePathname()
+  const utilisateur = useUtilisateurCourant()
+  const role = utilisateur?.role ?? null
 
-  const elementsMenu: Array<{ href: string; label: string; icone: IconName }> = [
-    { href: '/tableau-de-bord', label: 'Tableau de bord', icone: 'chart' },
-    { href: '/documents', label: 'Documents', icone: 'folder' },
-    { href: '/recherche', label: 'Recherche avancée', icone: 'search' },
-    { href: '/clients', label: 'Clients', icone: 'building' },
-    { href: '/categories', label: 'Catégories', icone: 'tag' },
-    { href: '/utilisateurs', label: 'Utilisateurs', icone: 'users' },
-  ]
+  const elementsMenu = useMemo(() => {
+    return MENU_ITEMS.filter((item) => {
+      if (item.roles && (!role || !item.roles.includes(role))) {
+        return false
+      }
+
+      if (item.ressource) {
+        const action = item.action ?? 'voir'
+        return hasPermission(role, item.ressource, action)
+      }
+
+      return true
+    })
+  }, [role])
+
+  const peutRechercher = canAccessSection(role, 'documents')
 
   return (
     <nav className="bg-white shadow-sm">
@@ -61,17 +98,21 @@ export function Navigation() {
 
           {/* Menu utilisateur */}
           <div className="flex items-center gap-3">
-            <RechercheGlobale />
+            {peutRechercher ? <RechercheGlobale /> : null}
             <Link
               href="/parametres"
               className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors"
             >
               <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold" style={{ background: 'linear-gradient(135deg, #D32027 0%, #0066B3 100%)' }}>
-                U
+                {(utilisateur?.prenom?.[0] ?? '?').toUpperCase()}
               </div>
               <div className="hidden md:block">
-                <div className="text-sm font-medium text-gray-900">Utilisateur</div>
-                <div className="text-xs text-gray-500">Admin</div>
+                <div className="text-sm font-medium text-gray-900">
+                  {utilisateur ? `${utilisateur.prenom} ${utilisateur.nom}` : 'Utilisateur'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {utilisateur ? roleToLabel(utilisateur.role) : 'Profil'}
+                </div>
               </div>
             </Link>
           </div>
@@ -79,4 +120,17 @@ export function Navigation() {
       </div>
     </nav>
   )
+}
+
+function roleToLabel(role: RoleUtilisateur): string {
+  switch (role) {
+    case 'ADMIN':
+      return 'Administrateur'
+    case 'ARCHIVISTE':
+      return 'Archiviste'
+    case 'CONSULTANT':
+      return 'Consultant'
+    default:
+      return role
+  }
 }

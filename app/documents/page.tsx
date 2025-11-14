@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
+import { hasPermission } from '@/lib/permissions'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 
@@ -8,6 +10,8 @@ import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
 import { PreviewPDF } from '@/components/PreviewPDF'
 import { apiFetchJson, buildApiUrl } from '@/lib/api'
+import { getToken } from '@/lib/session'
+import { printBlob } from '@/lib/print'
 import { exporterCSV, exporterExcel, exporterPDF } from '@/lib/export'
 
 type DocumentUI = {
@@ -17,6 +21,7 @@ type DocumentUI = {
   client: string
   exercice: string
   risque: string
+  risqueKey: string
   typeCourrier: string
   date: string
   taille: string
@@ -36,6 +41,8 @@ const RISQUE_COLORS: Record<string, string> = {
   HABITATION: '#F59E0B',
   VIE: '#8B5CF6',
   RESPONSABILITE_CIVILE: '#0066B3',
+  MRP: '#7C3AED',
+  TRANSPORT: '#0EA5E9',
 }
 
 const COURRIER_LABELS: Record<string, string> = {
@@ -59,7 +66,80 @@ const formatTaille = (brut?: number | null) => {
   return `${brut} B`
 }
 
-const determinerCouleurRisque = (risque: string) => RISQUE_COLORS[risque] ?? '#4B5563'
+const hashString = (input: string) => {
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) & 0x7fffffff
+  }
+  return hash
+}
+
+const hslToHex = (h: number, s: number, l: number) => {
+  const hue = h % 360
+  const saturation = Math.max(0, Math.min(100, s)) / 100
+  const lightness = Math.max(0, Math.min(100, l)) / 100
+
+  const c = (1 - Math.abs(2 * lightness - 1)) * saturation
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1))
+  const m = lightness - c / 2
+
+  let r = 0
+  let g = 0
+  let b = 0
+
+  if (hue < 60) {
+    r = c
+    g = x
+    b = 0
+  } else if (hue < 120) {
+    r = x
+    g = c
+    b = 0
+  } else if (hue < 180) {
+    r = 0
+    g = c
+    b = x
+  } else if (hue < 240) {
+    r = 0
+    g = x
+    b = c
+  } else if (hue < 300) {
+    r = x
+    g = 0
+    b = c
+  } else {
+    r = c
+    g = 0
+    b = x
+  }
+
+  const toHex = (value: number) => {
+    const hex = Math.round((value + m) * 255).toString(16).padStart(2, '0')
+    return hex
+  }
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`
+}
+
+const genererCouleurRisque = (key: string) => {
+  const baseKey = key || 'DEFAULT'
+  const hash = hashString(baseKey)
+  const hue = hash % 360
+  const saturation = 65
+  const lightness = 48
+  return hslToHex(hue, saturation, lightness)
+}
+
+const determinerCouleurRisque = (risque: string) => {
+  const key = normalizeRisqueKey(risque)
+  if (!key) {
+    return '#4B5563'
+  }
+  if (RISQUE_COLORS[key]) {
+    return RISQUE_COLORS[key]
+  }
+  return genererCouleurRisque(key)
+}
 
 const libelleCourrier = (typeCourrier: string) => COURRIER_LABELS[typeCourrier] ?? typeCourrier ?? '—'
 
@@ -72,11 +152,47 @@ const formatDate = (value?: string | null) => {
   return date.toLocaleDateString()
 }
 
+const RISQUE_FALLBACK_TYPES = ['AUTOMOBILE', 'SANTE', 'HABITATION', 'VIE', 'RESPONSABILITE_CIVILE', 'AUTRE'] as const
+
+const normalizeRisqueKey = (value?: string | null) => {
+  if (!value) return ''
+  return value
+    .toString()
+    .normalize('NFD')
+    .replace(/[^0-9a-zA-Z\s-]/g, '')
+    .replace(/[\s-]+/g, '_')
+    .normalize('NFC')
+    .toUpperCase()
+}
+
+const formatRisqueLabel = (value?: string | null) => {
+  if (!value) return 'Autre'
+  const sanitized = value.toString().trim().replace(/[_\s]+/g, ' ')
+  if (!sanitized) return 'Autre'
+  return sanitized
+    .split(' ')
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() : ''))
+    .join(' ')
+}
+
 export default function PageDocuments() {
+  const utilisateur = useUtilisateurCourant()
+  const role = utilisateur?.role ?? null
+  const peutVoirDocuments = hasPermission(role, 'documents', 'voir')
+  const peutCreerDocuments = hasPermission(role, 'documents', 'creer')
+  const peutModifierDocuments = hasPermission(role, 'documents', 'modifier')
+  const peutSupprimerDocuments = hasPermission(role, 'documents', 'supprimer')
+
   const [recherche, setRecherche] = useState('')
   const [filtreRisque, setFiltreRisque] = useState('')
   const [filtreCourrier, setFiltreCourrier] = useState('')
-  const [vueMode, setVueMode] = useState<'grille' | 'liste'>('grille')
+  const [vueMode, setVueMode] = useState<'grille' | 'liste'>(() => {
+    if (typeof window === 'undefined') {
+      return 'grille'
+    }
+    const stored = window.localStorage.getItem('documents/vue-mode')
+    return stored === 'liste' ? 'liste' : 'grille'
+  })
   const [documents, setDocuments] = useState<DocumentUI[]>([])
   const [menuExportOuvert, setMenuExportOuvert] = useState(false)
   const [previewOuvert, setPreviewOuvert] = useState(false)
@@ -87,6 +203,14 @@ export default function PageDocuments() {
 
   useEffect(() => {
     let annule = false
+
+    if (!peutVoirDocuments) {
+      setChargement(false)
+      setDocuments([])
+      return () => {
+        annule = true
+      }
+    }
 
     const chargerDocuments = async () => {
       setChargement(true)
@@ -108,7 +232,9 @@ export default function PageDocuments() {
           const exerciceInfo = risqueDetail?.exercice_info ?? risqueDetail?.exerciceInfo ?? {}
           const clientNom = exerciceInfo?.client ?? doc.client ?? 'Client inconnu'
           const annee = exerciceInfo?.annee ?? doc.exercice ?? '—'
-          const typeRisque = (risqueDetail?.type ?? doc.risque ?? 'AUTRE') as string
+          const typeRisqueBrut = (risqueDetail?.type ?? doc.risque ?? 'AUTRE') as string
+          const risqueKey = normalizeRisqueKey(typeRisqueBrut) || 'AUTRE'
+          const risqueLabel = formatRisqueLabel(typeRisqueBrut || 'Autre')
           const creeLe = doc.cree_le ?? doc.creeLe ?? null
           const fichierUrl = doc.fichier_url ?? doc.fichierUrl ?? null
           const typeCourrier = doc.type_courrier ?? doc.typeCourrier ?? 'AUTRE'
@@ -120,11 +246,12 @@ export default function PageDocuments() {
             reference: doc.reference ?? '',
             client: clientNom,
             exercice: String(annee),
-            risque: typeRisque,
+            risque: risqueLabel,
+            risqueKey,
             typeCourrier,
             date: formatDate(creeLe),
             taille: formatTaille(typeof tailleBrute === 'number' ? tailleBrute : Number(tailleBrute)),
-            color: determinerCouleurRisque(typeRisque),
+            color: determinerCouleurRisque(risqueKey),
             urlFichier: fichierUrl,
             source: doc,
           } as DocumentUI
@@ -150,7 +277,14 @@ export default function PageDocuments() {
     return () => {
       annule = true
     }
-  }, [])
+  }, [peutVoirDocuments])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.localStorage.setItem('documents/vue-mode', vueMode)
+  }, [vueMode])
 
   const documentsFiltres = useMemo(() => {
     const rechercheNorm = recherche.trim().toLowerCase()
@@ -161,12 +295,33 @@ export default function PageDocuments() {
         doc.client.toLowerCase().includes(rechercheNorm) ||
         doc.reference.toLowerCase().includes(rechercheNorm)
 
-      const matchRisque = !filtreRisque || doc.risque === filtreRisque
+      const matchRisque = !filtreRisque || doc.risqueKey === filtreRisque
       const matchCourrier = !filtreCourrier || doc.typeCourrier === filtreCourrier
 
       return matchRecherche && matchRisque && matchCourrier
     })
   }, [documents, recherche, filtreCourrier, filtreRisque])
+
+  const risqueOptions = useMemo(() => {
+    const uniques = new Map<string, string>()
+
+    for (const base of RISQUE_FALLBACK_TYPES) {
+      const key = normalizeRisqueKey(base)
+      if (!key || uniques.has(key)) continue
+      uniques.set(key, formatRisqueLabel(base))
+    }
+
+    for (const doc of documents) {
+      if (!doc.risqueKey) continue
+      if (!uniques.has(doc.risqueKey)) {
+        uniques.set(doc.risqueKey, doc.risque || formatRisqueLabel(doc.risqueKey))
+      }
+    }
+
+    return Array.from(uniques.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }))
+  }, [documents])
 
   const extraireUrlDocument = (doc: DocumentUI) =>
     doc.source?.fichier_url ?? doc.source?.fichierUrl ?? doc.urlFichier ?? null
@@ -193,6 +348,61 @@ export default function PageDocuments() {
     if (typeof window !== 'undefined') {
       window.open(url, '_blank', 'noopener,noreferrer')
     }
+  }
+
+  const imprimerDocument = (doc: DocumentUI) => {
+    const url = extraireUrlDocument(doc)
+    if (!url) {
+      setErreur('Document introuvable sur le serveur')
+      return
+    }
+
+    setErreur('')
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const resolvedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : buildApiUrl(url)
+    const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`
+
+    const startPrint = async () => {
+      try {
+        const headers = new Headers({ Accept: 'application/pdf,image/*' })
+        const token = getToken()
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`)
+        }
+
+        const response = await fetch(proxyUrl, {
+          credentials: 'include',
+          headers,
+        })
+
+        if (!response.ok) {
+          throw new Error(`Erreur ${response.status}`)
+        }
+
+        const blob = await response.blob()
+
+        await printBlob({
+          blob,
+          title: doc.titre || 'Document',
+          mimeType: response.headers.get('content-type'),
+          sourceUrl: doc.urlFichier ?? resolvedUrl ?? null,
+          fallbackUrl: resolvedUrl,
+        })
+      } catch (error: any) {
+        console.error('Impression document', error)
+        setErreur(error?.message ?? "Impossible d'imprimer le document")
+        if (error instanceof Error && error.name === 'SecurityError') {
+          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+          return
+        }
+        window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+      }
+    }
+
+    void startPrint()
   }
 
   const telechargerDocument = (doc: DocumentUI) => {
@@ -239,6 +449,10 @@ export default function PageDocuments() {
   }
 
   const supprimerDocument = async (doc: DocumentUI) => {
+    if (!peutSupprimerDocuments) {
+      setErreur("Vous n'avez pas la permission de supprimer ce document")
+      return
+    }
     const confirmation = window.confirm(`Supprimer définitivement « ${doc.titre} » ?`)
     if (!confirmation) return
 
@@ -264,21 +478,16 @@ export default function PageDocuments() {
     }
   }
 
-  const risques = [
-    { value: '', label: 'Tous les risques' },
-    { value: 'AUTOMOBILE', label: 'Automobile' },
-    { value: 'SANTE', label: 'Santé' },
-    { value: 'HABITATION', label: 'Habitation' },
-    { value: 'VIE', label: 'Vie' },
-    { value: 'RESPONSABILITE_CIVILE', label: 'Responsabilité civile' },
-  ]
-
   const courriers = [
     { value: '', label: 'Tous les types' },
     ...Object.entries(COURRIER_LABELS).map(([value, label]) => ({ value, label })),
   ]
 
   const handleExport = (type: 'pdf' | 'excel' | 'csv') => {
+    if (!peutVoirDocuments) {
+      setErreur("Vous n'avez pas la permission d'exporter ces documents")
+      return
+    }
     if (!documentsFiltres.length) {
       setErreur('Aucun document à exporter avec les filtres actuels')
       return
@@ -319,56 +528,60 @@ export default function PageDocuments() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="relative">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setMenuExportOuvert((prev) => !prev)}
-                className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-              >
-                <Icon name="download" size="sm" />
-                Exporter
-              </motion.button>
-              {menuExportOuvert && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-10"
+            {peutVoirDocuments ? (
+              <div className="relative">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setMenuExportOuvert((prev) => !prev)}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
                 >
-                  <button
-                    onClick={() => handleExport('pdf')}
-                    className="w-full px-4 py-3 hover:bg-red-50 transition-colors text-left flex items-center gap-2"
+                  <Icon name="download" size="sm" />
+                  Exporter
+                </motion.button>
+                {menuExportOuvert && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-10"
                   >
-                    <Icon name="document" size="sm" className="text-red-600" />
-                    <span className="font-medium">Export PDF</span>
-                  </button>
-                  <button
-                    onClick={() => handleExport('excel')}
-                    className="w-full px-4 py-3 hover:bg-green-50 transition-colors text-left flex items-center gap-2"
-                  >
-                    <Icon name="card" size="sm" className="text-green-600" />
-                    <span className="font-medium">Export Excel</span>
-                  </button>
-                  <button
-                    onClick={() => handleExport('csv')}
-                    className="w-full px-4 py-3 hover:bg-blue-50 transition-colors text-left flex items-center gap-2"
-                  >
-                    <Icon name="document" size="sm" className="text-blue-600" />
-                    <span className="font-medium">Export CSV</span>
-                  </button>
-                </motion.div>
-              )}
-            </div>
-            <Link href="/documents/nouveau">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-              >
-                <Icon name="upload" size="sm" />
-                Nouveau document
-              </motion.button>
-            </Link>
+                    <button
+                      onClick={() => handleExport('pdf')}
+                      className="w-full px-4 py-3 hover:bg-red-50 transition-colors text-left flex items-center gap-2"
+                    >
+                      <Icon name="document" size="sm" className="text-red-600" />
+                      <span className="font-medium">Export PDF</span>
+                    </button>
+                    <button
+                      onClick={() => handleExport('excel')}
+                      className="w-full px-4 py-3 hover:bg-green-50 transition-colors text-left flex items-center gap-2"
+                    >
+                      <Icon name="card" size="sm" className="text-green-600" />
+                      <span className="font-medium">Export Excel</span>
+                    </button>
+                    <button
+                      onClick={() => handleExport('csv')}
+                      className="w-full px-4 py-3 hover:bg-blue-50 transition-colors text-left flex items-center gap-2"
+                    >
+                      <Icon name="document" size="sm" className="text-blue-600" />
+                      <span className="font-medium">Export CSV</span>
+                    </button>
+                  </motion.div>
+                )}
+              </div>
+            ) : null}
+            {peutCreerDocuments ? (
+              <Link href="/documents/nouveau">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+                >
+                  <Icon name="upload" size="sm" />
+                  Nouveau document
+                </motion.button>
+              </Link>
+            ) : null}
           </div>
         </motion.header>
 
@@ -386,7 +599,7 @@ export default function PageDocuments() {
                   value={recherche}
                   onChange={(e) => setRecherche(e.target.value)}
                   placeholder="Rechercher par titre, client, référence..."
-                  className="w/full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                  className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
                 />
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
                   <Icon name="search" size="sm" />
@@ -399,27 +612,17 @@ export default function PageDocuments() {
               onChange={(e) => setFiltreRisque(e.target.value)}
               className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none"
             >
-              {risques.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
+              <option value="">Tous les risques</option>
+              {risqueOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
 
-            <select
-              value={filtreCourrier}
-              onChange={(e) => setFiltreCourrier(e.target.value)}
-              className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none"
-            >
-              {courriers.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
             <span className="text-sm text-gray-600">Affichage :</span>
             <button
               onClick={() => setVueMode('grille')}
@@ -539,6 +742,16 @@ export default function PageDocuments() {
                       <motion.button
                         whileHover={{ scale: 1.03 }}
                         whileTap={{ scale: 0.97 }}
+                        onClick={() => imprimerDocument(doc)}
+                        disabled={!fichierUrl}
+                        className="flex-1 py-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <Icon name="print" size="sm" />
+                        Imprimer
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
                         onClick={() => ouvrirDansNouvelOnglet(doc)}
                         disabled={!fichierUrl}
                         className="flex-1 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
@@ -546,16 +759,18 @@ export default function PageDocuments() {
                         <Icon name="eye" size="sm" />
                         Voir
                       </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => supprimerDocument(doc)}
-                        disabled={suppressionEnCours === doc.id}
-                        className="py-2 px-3 bg-white border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
-                      >
-                        <Icon name="trash" size="sm" />
-                        {suppressionEnCours === doc.id ? 'Suppression…' : 'Supprimer'}
-                      </motion.button>
+                      {peutSupprimerDocuments ? (
+                        <motion.button
+                          whileHover={{ scale: 1.03 }}
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => supprimerDocument(doc)}
+                          disabled={suppressionEnCours === doc.id}
+                          className="py-2 px-3 bg-white border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                        >
+                          <Icon name="trash" size="sm" />
+                          {suppressionEnCours === doc.id ? 'Suppression…' : 'Supprimer'}
+                        </motion.button>
+                      ) : null}
                     </div>
                   </div>
                 </motion.div>
@@ -628,6 +843,15 @@ export default function PageDocuments() {
                             </motion.button>
                             <motion.button
                               whileHover={{ scale: 1.05 }}
+                              onClick={() => imprimerDocument(doc)}
+                              disabled={!fichierUrl}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                              title="Imprimer"
+                            >
+                              <Icon name="print" size="sm" />
+                            </motion.button>
+                            <motion.button
+                              whileHover={{ scale: 1.05 }}
                               onClick={() => ouvrirDansNouvelOnglet(doc)}
                               disabled={!fichierUrl}
                               className="p-2 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
@@ -635,15 +859,17 @@ export default function PageDocuments() {
                             >
                               <Icon name="eye" size="sm" />
                             </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.05 }}
-                              onClick={() => supprimerDocument(doc)}
-                              disabled={suppressionEnCours === doc.id}
-                              className="p-2 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-60"
-                              title="Supprimer"
-                            >
-                              <Icon name="trash" size="sm" className="text-red-600" />
-                            </motion.button>
+                            {peutSupprimerDocuments ? (
+                              <motion.button
+                                whileHover={{ scale: 1.05 }}
+                                onClick={() => supprimerDocument(doc)}
+                                disabled={suppressionEnCours === doc.id}
+                                className="p-2 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-60"
+                                title="Supprimer"
+                              >
+                                <Icon name="trash" size="sm" className="text-red-600" />
+                              </motion.button>
+                            ) : null}
                           </div>
                         </td>
                       </motion.tr>

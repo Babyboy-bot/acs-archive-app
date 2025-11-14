@@ -2,9 +2,11 @@
 
 import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
+import { apiFetchJson } from '@/lib/api'
+import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
+import { hasPermission } from '@/lib/permissions'
 import { motion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
-import { apiFetchJson } from '@/lib/api'
 
 type UtilisateurAPI = {
   id: string
@@ -83,6 +85,14 @@ function formatRelativeDate(isoDate: string | null) {
 }
 
 export default function PageUtilisateurs() {
+  const utilisateurCourant = useUtilisateurCourant()
+  const role = utilisateurCourant?.role ?? null
+  const peutVoirUtilisateurs = hasPermission(role, 'utilisateurs', 'voir')
+  const peutGerersUtilisateurs =
+    hasPermission(role, 'utilisateurs', 'creer') ||
+    hasPermission(role, 'utilisateurs', 'modifier') ||
+    hasPermission(role, 'utilisateurs', 'supprimer')
+
   const [recherche, setRecherche] = useState('')
   const [filtreRole, setFiltreRole] = useState('')
   const [afficherFormulaire, setAfficherFormulaire] = useState(false)
@@ -137,8 +147,13 @@ export default function PageUtilisateurs() {
   }
 
   useEffect(() => {
+    if (!peutVoirUtilisateurs) {
+      setChargement(false)
+      setUtilisateurs([])
+      return
+    }
     chargerUtilisateurs()
-  }, [])
+  }, [peutVoirUtilisateurs])
 
   const roles = [
     { value: '', label: 'Tous les rôles', couleur: '#6B7280' },
@@ -185,6 +200,7 @@ export default function PageUtilisateurs() {
   }
 
   function ouvrirEdition(utilisateur: UtilisateurAffiche) {
+    if (!peutGerersUtilisateurs) return
     setAfficherFormulaire(true)
     setFormulaireUtilisateur({
       id: utilisateur.id,
@@ -199,6 +215,7 @@ export default function PageUtilisateurs() {
   }
 
   function ouvrirCreation() {
+    if (!peutGerersUtilisateurs) return
     setAfficherFormulaire(true)
     setFormulaireUtilisateur({
       nom: '',
@@ -220,6 +237,7 @@ export default function PageUtilisateurs() {
   }
 
   async function basculerActivation(utilisateur: UtilisateurAffiche) {
+    if (!peutGerersUtilisateurs) return
     setActionEnCours(utilisateur.id)
     setErreur('')
     setMessageSucces('')
@@ -246,6 +264,10 @@ export default function PageUtilisateurs() {
 
   async function soumettreUtilisateur(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!peutGerersUtilisateurs) {
+      setErreur("Vous n'avez pas la permission de modifier les utilisateurs.")
+      return
+    }
     if (!formulaireUtilisateur) return
 
     if (!formulaireUtilisateur.nom.trim() || !formulaireUtilisateur.prenom.trim()) {
@@ -311,6 +333,23 @@ export default function PageUtilisateurs() {
     }
   }
 
+  if (!peutVoirUtilisateurs) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <main className="container mx-auto px-4 py-16 flex flex-col items-center text-center gap-6">
+          <div className="flex items-center gap-3 text-red-600">
+            <Icon name="shield" size="lg" />
+            <h1 className="text-3xl font-bold text-gray-900">Accès restreint</h1>
+          </div>
+          <p className="text-gray-600 max-w-xl">
+            Vous n'avez pas la permission de consulter la gestion des utilisateurs. Veuillez contacter un administrateur si vous pensez qu'il s'agit d'une erreur.
+          </p>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
@@ -329,15 +368,15 @@ export default function PageUtilisateurs() {
               </h1>
               <p className="text-gray-600">{utilisateursFiltres.length} utilisateur{utilisateursFiltres.length > 1 ? 's' : ''} • {stats.actifs} actif{stats.actifs > 1 ? 's' : ''}</p>
             </div>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => (afficherFormulaire ? fermerFormulaire() : ouvrirCreation())}
-              className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-            >
-              <Icon name={afficherFormulaire ? 'close' : 'plus'} size="sm" />
-              {afficherFormulaire ? 'Annuler' : 'Nouvel utilisateur'}
-            </motion.button>
+            {peutGerersUtilisateurs ? (
+              <button
+                onClick={ouvrirCreation}
+                className="px-5 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+              >
+                <Icon name="user" size="sm" />
+                Nouvel utilisateur
+              </button>
+            ) : null}
           </div>
         </motion.div>
 
@@ -421,72 +460,13 @@ export default function PageUtilisateurs() {
           </div>
         </motion.div>
 
-        {afficherFormulaire && formulaireUtilisateur && (
+        {peutGerersUtilisateurs && afficherFormulaire && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            className="bg-gradient-to-br from-red-50 to-blue-50 rounded-2xl shadow-lg p-8 mb-8 border-2 border-red-200"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
           >
-            <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-              <Icon name={formulaireUtilisateur.id ? 'edit' : 'plus'} size="md" />
-              {formulaireUtilisateur.id ? 'Modifier un utilisateur' : 'Nouvel utilisateur'}
-            </h3>
-            <form className="grid grid-cols-1 md:grid-cols-2 gap-6" onSubmit={soumettreUtilisateur}>
-              <input
-                type="text"
-                placeholder="Nom"
-                value={formulaireUtilisateur.nom}
-                onChange={(e) => setFormulaireUtilisateur(prev => prev ? { ...prev, nom: e.target.value } : prev)}
-                className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Prénom"
-                value={formulaireUtilisateur.prenom}
-                onChange={(e) => setFormulaireUtilisateur(prev => prev ? { ...prev, prenom: e.target.value } : prev)}
-                className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-              />
-              <input
-                type="email"
-                placeholder="Email"
-                value={formulaireUtilisateur.email}
-                onChange={(e) => setFormulaireUtilisateur(prev => prev ? { ...prev, email: e.target.value } : prev)}
-                className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-              />
-              <select
-                value={formulaireUtilisateur.role}
-                onChange={(e) => setFormulaireUtilisateur(prev => prev ? { ...prev, role: e.target.value } : prev)}
-                className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none"
-              >
-                {roles.slice(1).map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-              <label className="md:col-span-2 flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={formulaireUtilisateur.estActif}
-                  onChange={(e) => setFormulaireUtilisateur(prev => prev ? { ...prev, estActif: e.target.checked } : prev)}
-                  className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                />
-                Compte actif
-              </label>
-              <div className="md:col-span-2 flex gap-4">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  type="submit"
-                  disabled={soumissionEnCours}
-                  className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <Icon name="check" size="sm" />
-                  {soumissionEnCours ? 'Enregistrement...' : formulaireUtilisateur.id ? 'Enregistrer' : 'Créer'}
-                </motion.button>
-                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} type="button" onClick={fermerFormulaire} className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors">
-                  Annuler
-                </motion.button>
-              </div>
-            </form>
+            {erreur}
           </motion.div>
         )}
 
@@ -556,27 +536,32 @@ export default function PageUtilisateurs() {
                     <Icon name="eye" size="sm" />
                     Profil
                   </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => ouvrirEdition(user)}
-                    className="flex-1 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-1"
-                  >
-                    <Icon name="edit" size="sm" />
-                    Modifier
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    disabled={actionEnCours === user.id}
-                    onClick={() => basculerActivation(user)}
-                    className={`flex-1 py-2 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-1 ${
-                      user.estActif ? 'bg-orange-100 hover:bg-orange-200 text-orange-700' : 'bg-green-100 hover:bg-green-200 text-green-700'
-                    } disabled:opacity-60 disabled:cursor-not-allowed`}
-                  >
-                    <Icon name={user.estActif ? 'close' : 'check'} size="sm" />
-                    {actionEnCours === user.id ? 'Patientez...' : user.estActif ? 'Désactiver' : 'Activer'}
-                  </motion.button>
+                  {peutGerersUtilisateurs ? (
+                    <>
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => ouvrirEdition(user)}
+                        className="flex-1 py-2 bg-white border border-gray-200 rounded-xl font-medium hover:bg-gray-100 transition-colors"
+                      >
+                        Modifier
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => basculerActivation(user)}
+                        disabled={actionEnCours === user.id}
+                        className={`flex-1 py-2 rounded-xl font-medium transition-colors flex items-center gap-2 ${
+                          user.estActif
+                            ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                            : 'bg-green-50 text-green-600 hover:bg-green-100'
+                        }`}
+                      >
+                        <Icon name={user.estActif ? 'user' : 'check'} size="sm" />
+                        {user.estActif ? 'Désactiver' : 'Activer'}
+                      </motion.button>
+                    </>
+                  ) : null}
                 </div>
               </div>
             </motion.div>
@@ -619,17 +604,19 @@ export default function PageUtilisateurs() {
               </div>
 
               <div className="mt-6 flex justify-end gap-3">
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => {
-                    fermerProfil()
-                    ouvrirEdition(utilisateurSelectionne)
-                  }}
-                  className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg font-semibold hover:bg-blue-200 transition"
-                >
-                  Modifier
-                </motion.button>
+                {peutGerersUtilisateurs ? (
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => {
+                      fermerProfil()
+                      ouvrirEdition(utilisateurSelectionne)
+                    }}
+                    className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg font-semibold hover:bg-blue-200 transition"
+                  >
+                    Modifier
+                  </motion.button>
+                ) : null}
                 <motion.button
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
