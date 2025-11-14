@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 
 export interface Document {
-  id: number
+  id: string | number
   titre: string
   client: string
   risque: string
