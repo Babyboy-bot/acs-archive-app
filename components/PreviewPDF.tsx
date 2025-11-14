@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { Icon } from './Icon'
 import { buildApiUrl } from '@/lib/api'
 import { getToken } from '@/lib/session'
+import { printBlob } from '@/lib/print'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface PreviewPDFProps {
@@ -149,6 +150,48 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
     }
   }, [fetchUrl, resolvedUrl, previewUrl, urlDocument, titre])
 
+  const handlePrint = useCallback(async () => {
+    if (typeof window === 'undefined') return
+
+    const source = fetchUrl ?? resolvedUrl ?? previewUrl ?? urlDocument
+    if (!source) return
+
+    try {
+      const headers = new Headers()
+      const token = getToken()
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`)
+      }
+      headers.set('Accept', 'application/pdf,image/*')
+
+      const response = await fetch(source, {
+        headers,
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        throw new Error(`Erreur ${response.status}`)
+      }
+
+      const blob = await response.blob()
+
+      await printBlob({
+        blob,
+        title: titre || 'Document',
+        mimeType: response.headers.get('content-type'),
+        sourceUrl: resolvedUrl ?? urlDocument ?? null,
+        fallbackUrl: resolvedUrl ?? urlDocument ?? null,
+        knownType: resourceType,
+      })
+    } catch (error: any) {
+      console.error('Impression document', error)
+      setError(error?.message ?? "Impossible d'imprimer le document")
+      if (resolvedUrl) {
+        window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+      }
+    }
+  }, [fetchUrl, resolvedUrl, previewUrl, urlDocument, titre, resourceType])
+
   const scale = zoom / 100
   const viewerWrapperStyle = useMemo<CSSProperties>(() => ({
     transform: `scale(${scale})`,
@@ -220,6 +263,16 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handlePrint}
+                    disabled={!hasDocument}
+                    className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-100 transition-colors flex items-center gap-2 disabled:opacity-60"
+                  >
+                    <Icon name="print" size="sm" />
+                    Imprimer
+                  </motion.button>
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}

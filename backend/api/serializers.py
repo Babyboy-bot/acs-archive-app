@@ -1,8 +1,13 @@
 """
 Serializers pour l'API Django REST Framework
 """
-from rest_framework import serializers
+from urllib.parse import urljoin
+
+from django.conf import settings
+from django.core.files.storage import default_storage
 from django.contrib.auth.password_validation import validate_password
+from rest_framework import serializers
+
 from .models import (
     Utilisateur, Client, Exercice, Risque, 
     Categorie, Document
@@ -19,6 +24,12 @@ class UtilisateurSerializer(serializers.ModelSerializer):
         style={'input_type': 'password'}
     )
     
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Lors d'une mise à jour, le champ mot_de_passe devient optionnel
+        if self.instance is not None:
+            self.fields['mot_de_passe'].required = False
+
     class Meta:
         model = Utilisateur
         fields = [
@@ -162,7 +173,29 @@ class DocumentSerializer(serializers.ModelSerializer):
     auteur_nom = serializers.CharField(source='auteur.get_full_name', read_only=True)
     categorie_nom = serializers.CharField(source='categorie.nom', read_only=True, allow_null=True)
     risque_detail = RisqueSerializer(source='risque', read_only=True)
-    
+    fichier_url = serializers.SerializerMethodField()
+
+    def get_fichier_url(self, obj):
+        if not obj.chemin_fichier:
+            return None
+
+        try:
+            relative_url = default_storage.url(obj.chemin_fichier)
+        except Exception:
+            relative_url = obj.chemin_fichier
+
+        if relative_url.startswith(('http://', 'https://')):
+            return relative_url
+
+        request = self.context.get('request')
+        if request is not None:
+            return request.build_absolute_uri(relative_url)
+
+        media_url = settings.MEDIA_URL
+        if not media_url.endswith('/'):
+            media_url = f'{media_url}/'
+        return urljoin(media_url, obj.chemin_fichier.lstrip('/'))
+
     class Meta:
         model = Document
         fields = '__all__'

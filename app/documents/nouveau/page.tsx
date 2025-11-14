@@ -110,7 +110,25 @@ export default function PageNouveauDocument() {
             ? (data as any).results
             : []
 
-        setClients(bruts)
+        const normalises = bruts.map((client: any) => ({
+          id: client.id,
+          nom: client.nom,
+          exercices: Array.isArray(client.exercices)
+            ? client.exercices.map((exercice: any) => ({
+                id: exercice.id,
+                annee: exercice.annee,
+                risques: Array.isArray(exercice.risques)
+                  ? exercice.risques.map((risque: any) => ({
+                      id: risque.id,
+                      type: risque.type,
+                      numeroPolice: risque.numeroPolice ?? risque.numero_police ?? null
+                    }))
+                  : []
+              }))
+            : []
+        }))
+
+        setClients(normalises)
       } catch (error: any) {
         console.error('Erreur chargement clients:', error)
         setErreur(error?.message || 'Erreur lors du chargement des clients')

@@ -1,0 +1,5 @@
+commande git
+git status
+git add app/documents/page.tsx app/utilisateurs/page.tsx components/Navigation.tsx hooks/useUtilisateurCourant.ts lib/permissions.ts lib/session.ts
+git commit -m "feat: appliquer le contrôle d’accès selon les rôles"
+git push origin main

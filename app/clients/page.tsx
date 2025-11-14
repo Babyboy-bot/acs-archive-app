@@ -21,6 +21,11 @@ type ExerciceResume = {
   risques: RisqueResume[]
 }
 
+type NouveauRisqueSelection = {
+  type: string
+  numeroPolice: string | null
+}
+
 type StatutExercice = 'ACTIF' | 'ARCHIVE' | 'CLOTURE'
 
 type ClientDRF = {
@@ -132,11 +137,13 @@ export default function PageClients() {
   const [clientExerciceId, setClientExerciceId] = useState<string | null>(null)
   const [anneeExercice, setAnneeExercice] = useState<string>(() => String(new Date().getFullYear()))
   const [statutExercice, setStatutExercice] = useState<StatutExercice>('ACTIF')
+  const [exerciceEdite, setExerciceEdite] = useState<ExerciceResume | null>(null)
   const [chargementExercice, setChargementExercice] = useState(false)
   const [clientRisqueId, setClientRisqueId] = useState<string | null>(null)
   const [exerciceRisqueId, setExerciceRisqueId] = useState<string | null>(null)
   const [risqueType, setRisqueType] = useState('')
   const [risqueNumero, setRisqueNumero] = useState('')
+  const [risquesSelectionnes, setRisquesSelectionnes] = useState<NouveauRisqueSelection[]>([])
   const [chargementRisque, setChargementRisque] = useState(false)
 
   useEffect(() => {
@@ -172,15 +179,24 @@ export default function PageClients() {
     setExerciceRisqueId(exercice.id)
     setRisqueType('')
     setRisqueNumero('')
+    setExerciceEdite(null)
     setErreur('')
     setMessageSucces('')
   }
 
-  const soumettreNouveauRisque = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!clientRisqueId || !exerciceRisqueId) return
+  const normaliserTypeRisque = (valeur: string) => valeur.trim()
 
-    const typeNettoye = risqueType.trim()
+  const typeCle = (valeur: string) => normaliserTypeRisque(valeur).toUpperCase()
+
+  const estDejaDansSelection = (selection: NouveauRisqueSelection[], type: string) =>
+    selection.some((risque) => typeCle(risque.type) === typeCle(type))
+
+  const ajouterRisqueSelection = (typeSource?: string, numeroSource?: string | null) => {
+    if (!clientRisqueId || !exerciceRisqueId) {
+      return
+    }
+
+    const typeNettoye = normaliserTypeRisque(typeSource ?? risqueType)
     if (typeNettoye.length < 3) {
       setErreur('Merci de saisir un type de risque (au moins 3 caractères).')
       return
@@ -188,9 +204,98 @@ export default function PageClients() {
 
     const clientCible = clients.find((c) => c.id === clientRisqueId)
     const exerciceCible = clientCible?.exercices.find((ex) => ex.id === exerciceRisqueId)
-    const doublon = exerciceCible?.risques.some((risque) => risque.type.trim().toUpperCase() === typeNettoye.toUpperCase())
-    if (doublon) {
+    const existeDejaDansExercice = exerciceCible?.risques.some(
+      (risque) => typeCle(risque.type) === typeCle(typeNettoye)
+    )
+
+    if (existeDejaDansExercice) {
       setErreur(`L’exercice ${exerciceCible?.annee ?? ''} possède déjà un risque « ${typeNettoye} ». `)
+      return
+    }
+
+    if (estDejaDansSelection(risquesSelectionnes, typeNettoye)) {
+      setErreur(`Le risque « ${typeNettoye} » est déjà dans la sélection.`)
+      return
+    }
+
+    const numeroNettoye = normaliserTypeRisque(numeroSource ?? risqueNumero)
+
+    setRisquesSelectionnes((prev) => [
+      ...prev,
+      {
+        type: typeNettoye,
+        numeroPolice: numeroNettoye ? numeroNettoye : null
+      }
+    ])
+    setRisqueType('')
+    setRisqueNumero('')
+    setErreur('')
+  }
+
+  const retirerRisqueSelection = (type: string) => {
+    setRisquesSelectionnes((prev) => prev.filter((risque) => typeCle(risque.type) !== typeCle(type)))
+  }
+
+  const toggleSuggestionRisque = (suggestion: string) => {
+    const dejaSelectionne = estDejaDansSelection(risquesSelectionnes, suggestion)
+    if (dejaSelectionne) {
+      retirerRisqueSelection(suggestion)
+      return
+    }
+    ajouterRisqueSelection(suggestion, null)
+  }
+
+  const soumettreNouveauRisque = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!clientRisqueId || !exerciceRisqueId) return
+
+    const clientCible = clients.find((c) => c.id === clientRisqueId)
+    const exerciceCible = clientCible?.exercices.find((ex) => ex.id === exerciceRisqueId)
+    if (!exerciceCible) {
+      setErreur('Sélection invalide. Merci de réessayer.')
+      return
+    }
+
+    const selectionInitiale = [...risquesSelectionnes]
+    const typeRestant = normaliserTypeRisque(risqueType)
+
+    if (typeRestant) {
+      if (typeRestant.length < 3) {
+        setErreur('Merci de saisir un type de risque (au moins 3 caractères).')
+        return
+      }
+
+      if (estDejaDansSelection(selectionInitiale, typeRestant)) {
+        setErreur(`Le risque « ${typeRestant} » est déjà dans la sélection.`)
+        return
+      }
+
+      const existeDejaDansExercice = exerciceCible.risques.some(
+        (risque) => typeCle(risque.type) === typeCle(typeRestant)
+      )
+
+      if (existeDejaDansExercice) {
+        setErreur(`L’exercice ${exerciceCible.annee} possède déjà un risque « ${typeRestant} ». `)
+        return
+      }
+
+      selectionInitiale.push({
+        type: typeRestant,
+        numeroPolice: risqueNumero.trim() ? risqueNumero.trim() : null
+      })
+    }
+
+    if (selectionInitiale.length === 0) {
+      setErreur('Merci d’ajouter au moins un risque à la sélection avant de valider.')
+      return
+    }
+
+    const doublonDansExistant = selectionInitiale.find((selection) =>
+      exerciceCible.risques.some((risque) => typeCle(risque.type) === typeCle(selection.type))
+    )
+
+    if (doublonDansExistant) {
+      setErreur(`L’exercice ${exerciceCible.annee} possède déjà un risque « ${doublonDansExistant.type} ». `)
       return
     }
 
@@ -199,26 +304,37 @@ export default function PageClients() {
     setMessageSucces('')
 
     try {
-      const { response, data } = await apiFetchJson('/risques/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: typeNettoye,
-          numero_police: risqueNumero.trim() || null,
-          exercice: exerciceRisqueId
+      for (const risque of selectionInitiale) {
+        const { response, data } = await apiFetchJson('/risques/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: risque.type,
+            numero_police: risque.numeroPolice,
+            exercice: exerciceRisqueId
+          })
         })
-      })
 
-      if (!response.ok) {
-        throw new Error((data as any)?.erreur || (data as any)?.detail || 'Impossible de créer le risque')
+        if (!response.ok) {
+          throw new Error(
+            (data as any)?.erreur || (data as any)?.detail || `Impossible de créer le risque « ${risque.type} ».`
+          )
+        }
       }
 
       await chargerClients()
-      setMessageSucces(`Risque « ${typeNettoye} » ajouté avec succès.`)
+      setMessageSucces(
+        selectionInitiale.length > 1
+          ? `${selectionInitiale.length} risques ajoutés avec succès.`
+          : `Risque « ${selectionInitiale[0].type} » ajouté avec succès.`
+      )
       fermerFormulaireRisque()
+      setRisquesSelectionnes([])
+      setRisqueType('')
+      setRisqueNumero('')
     } catch (error: any) {
       console.error('Erreur création risque:', error)
-      setErreur(error?.message || 'Impossible de créer le risque.')
+      setErreur(error?.message || 'Impossible de créer les risques.')
     } finally {
       setChargementRisque(false)
     }
@@ -378,6 +494,7 @@ export default function PageClients() {
     setClientExerciceId(null)
     setStatutExercice('ACTIF')
     setAnneeExercice(String(new Date().getFullYear()))
+    setExerciceEdite(null)
   }
 
   const ouvrirFormulaireExercice = (client: ClientAPI) => {
@@ -395,13 +512,59 @@ export default function PageClients() {
     setClientExerciceId(client.id)
     setStatutExercice('ACTIF')
     setAnneeExercice(anneeParDefaut)
+    setExerciceEdite(null)
     setErreur('')
     setMessageSucces('')
+  }
+
+  const ouvrirEditionExercice = (client: ClientAPI, exercice: ExerciceResume) => {
+    const estDejaOuvert = exerciceEdite?.id === exercice.id && clientExerciceId === client.id
+    if (estDejaOuvert) {
+      fermerFormulaireExercice()
+      return
+    }
+
+    setClientExerciceId(client.id)
+    setExerciceEdite(exercice)
+    setAnneeExercice(String(exercice.annee))
+    setStatutExercice(exercice.statut as StatutExercice)
+    setErreur('')
+    setMessageSucces('')
+    fermerFormulaireRisque()
   }
 
   const soumettreNouvelExercice = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!clientExerciceId) return
+
+    if (exerciceEdite) {
+      setErreur('')
+      setMessageSucces('')
+      setChargementExercice(true)
+
+      try {
+        const { response, data } = await apiFetchJson(`/exercices/${exerciceEdite.id}/`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ statut: statutExercice })
+        })
+
+        if (!response.ok) {
+          throw new Error((data as any)?.erreur || (data as any)?.detail || "Impossible de mettre à jour l'exercice")
+        }
+
+        await chargerClients()
+        setMessageSucces(`Exercice ${exerciceEdite.annee} mis à jour avec succès.`)
+        fermerFormulaireExercice()
+      } catch (error: any) {
+        console.error('Erreur mise à jour exercice:', error)
+        setErreur(error?.message || "Impossible de mettre à jour l'exercice.")
+      } finally {
+        setChargementExercice(false)
+      }
+
+      return
+    }
 
     const anneeNumerique = Number(anneeExercice)
 
@@ -770,9 +933,17 @@ export default function PageClients() {
                         className="mt-4 border border-green-100 rounded-2xl bg-green-50 p-4"
                         onSubmit={soumettreNouvelExercice}
                       >
-                        <p className="text-sm text-green-800 mb-3 flex items-center gap-2">
-                          <Icon name="info" size="xs" />
-                          Saisissez l’année fiscale (à partir de {ANNEE_MIN_EXERCICE}) et le statut souhaité. Les archivistes peuvent créer plusieurs années à l’avance.
+                        <p className="text-sm text-green-800 mb-3 flex items-start gap-2">
+                          <Icon name="info" size="xs" className="mt-0.5" />
+                          {exerciceEdite ? (
+                            <span>
+                              Mettre à jour le statut de l’exercice <strong>{exerciceEdite.annee}</strong>. Sélectionnez le nouveau statut puis validez.
+                            </span>
+                          ) : (
+                            <span>
+                              Saisissez l’année fiscale (à partir de {ANNEE_MIN_EXERCICE}) et le statut souhaité. Les archivistes peuvent créer plusieurs années à l’avance.
+                            </span>
+                          )}
                         </p>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -782,8 +953,14 @@ export default function PageClients() {
                               type="number"
                               min={ANNEE_MIN_EXERCICE}
                               value={anneeExercice}
+                              readOnly={Boolean(exerciceEdite)}
+                              disabled={Boolean(exerciceEdite)}
                               onChange={(e) => setAnneeExercice(e.target.value)}
-                              className="w-full px-4 py-2 border-2 border-green-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-200 text-sm"
+                              className={`w-full px-4 py-2 border-2 rounded-xl text-sm ${
+                                exerciceEdite
+                                  ? 'border-green-200 bg-green-100 text-green-900 cursor-not-allowed'
+                                  : 'border-green-200 focus:border-green-500 focus:ring-2 focus:ring-green-200'
+                              }`}
                               placeholder="2025"
                             />
                           </div>
@@ -821,7 +998,13 @@ export default function PageClients() {
                             disabled={chargementExercice}
                             className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50"
                           >
-                            {chargementExercice ? 'Création...' : 'Ajouter cet exercice'}
+                            {chargementExercice
+                              ? exerciceEdite
+                                ? 'Mise à jour...'
+                                : 'Création...'
+                              : exerciceEdite
+                                ? 'Mettre à jour le statut'
+                                : 'Ajouter cet exercice'}
                           </motion.button>
                         </div>
                       </motion.form>
@@ -880,7 +1063,7 @@ export default function PageClients() {
                               )}
 
                               <div className="mt-3 space-y-3">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                   <button
                                     type="button"
                                     onClick={() => ouvrirFormulaireRisque(client, exercice)}
@@ -894,6 +1077,21 @@ export default function PageClients() {
                                     {clientRisqueId === client.id && exerciceRisqueId === exercice.id
                                       ? 'Annuler'
                                       : 'Nouveau risque'}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => ouvrirEditionExercice(client, exercice)}
+                                    className={`w-full text-xs font-semibold px-3 py-2 rounded-lg border transition-colors flex items-center justify-center gap-2 ${
+                                      exerciceEdite?.id === exercice.id && clientExerciceId === client.id
+                                        ? 'border-blue-400 bg-blue-50 text-blue-700'
+                                        : 'border-blue-200 text-blue-600 hover:bg-blue-50'
+                                    }`}
+                                  >
+                                    <Icon name="edit" size="xs" />
+                                    {exerciceEdite?.id === exercice.id && clientExerciceId === client.id
+                                      ? 'Annuler l’édition'
+                                      : 'Modifier le statut'}
                                   </button>
 
                                   <button
@@ -936,12 +1134,54 @@ export default function PageClients() {
                                         <button
                                           key={suggestion}
                                           type="button"
-                                          onClick={() => setRisqueType(suggestion)}
-                                          className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium hover:bg-green-200 transition-colors"
+                                          onClick={() => toggleSuggestionRisque(suggestion)}
+                                          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                                            estDejaDansSelection(risquesSelectionnes, suggestion)
+                                              ? 'bg-green-600 text-white'
+                                              : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                          }`}
                                         >
                                           {suggestion}
                                         </button>
                                       ))}
+                                    </div>
+
+                                    {risquesSelectionnes.length > 0 && (
+                                      <div className="border border-green-100 rounded-lg p-3 bg-green-50">
+                                        <p className="text-xs font-semibold text-green-900 mb-2">Sélection en attente ({risquesSelectionnes.length})</p>
+                                        <div className="flex flex-wrap gap-2">
+                                          {risquesSelectionnes.map((risque) => (
+                                            <span
+                                              key={`${risque.type}-${risque.numeroPolice ?? 'sans-numero'}`}
+                                              className="inline-flex items-center gap-2 bg-white text-green-700 border border-green-200 px-3 py-1 rounded-full text-xs"
+                                            >
+                                              <span>{risque.type}</span>
+                                              {risque.numeroPolice && <span className="text-green-500">({risque.numeroPolice})</span>}
+                                              <button
+                                                type="button"
+                                                onClick={() => retirerRisqueSelection(risque.type)}
+                                                className="text-green-500 hover:text-green-700"
+                                                aria-label={`Retirer ${risque.type}`}
+                                              >
+                                                ×
+                                              </button>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div className="flex justify-between items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => ajouterRisqueSelection()}
+                                        className="text-xs font-semibold text-green-600 hover:text-green-700"
+                                      >
+                                        Ajouter à la sélection
+                                      </button>
+                                      <span className="text-[10px] text-gray-500">
+                                        Vous pouvez sélectionner plusieurs risques avant de valider.
+                                      </span>
                                     </div>
 
                                     <div className="flex justify-end gap-2 pt-2">
@@ -957,7 +1197,7 @@ export default function PageClients() {
                                         disabled={chargementRisque}
                                         className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white text-xs font-semibold rounded-lg shadow disabled:opacity-50"
                                       >
-                                        {chargementRisque ? 'Enregistrement...' : 'Ajouter'}
+                                        {chargementRisque ? 'Enregistrement...' : 'Valider'}
                                       </button>
                                     </div>
                                   </form>

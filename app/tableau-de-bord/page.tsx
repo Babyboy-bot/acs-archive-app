@@ -190,7 +190,7 @@ export default function DashboardUltraModerne() {
             <Icon name="bolt" className="text-red-600" />
             Actions Rapides
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <Link href="/documents/nouveau">
               <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-red-50 hover:to-blue-50 transition-all border-2 border-transparent hover:border-red-200">
                 <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center text-white shadow-lg">
@@ -206,15 +206,6 @@ export default function DashboardUltraModerne() {
                   <Icon name="search" size="lg" />
                 </div>
                 <span className="font-medium text-gray-700">Recherche</span>
-              </motion.button>
-            </Link>
-
-            <Link href="/categories">
-              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-purple-50 hover:to-pink-50 transition-all border-2 border-transparent hover:border-purple-200">
-                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                  <Icon name="tag" size="lg" />
-                </div>
-                <span className="font-medium text-gray-700">Catégories</span>
               </motion.button>
             </Link>
 
