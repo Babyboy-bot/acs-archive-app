@@ -73,19 +73,56 @@ Toute requête frontend doit passer par `lib/api.ts` (`apiFetch` / `apiFetchJson
 - Téléversement de documents multi-fichiers
 - Timeline des activités + statistiques temps réel
 - Recherche rapide de documents
+- Interface **Assistant IA (démo)** pour les consultants : suggestions de questions, réponses structurées (synthèse, points clés, recommandations, pièces justificatives) et accès direct aux paramètres
+- Affichage des documents liés avec métadonnées enrichies (badges client/exercice/type/date, détails consultables)
+- Volet statistiques de l’assistant (KPI, top thématiques/clients, volumes mensuels)
+- Journalisation/telemetry des appels assistant (`/api/assistant-demo/telemetry`) et mocks d’IA (`app/api/assistant-demo/llm.ts`)
+- Tests e2e Playwright avec scénarios assistant (`tests/e2e/assistant-demo.spec.ts`)
 
 ## 🔧 Scripts utiles
 
 - `npm run dev` : lancer le frontend Next.js
 - `npm run build` / `npm run start`
 - `npm run lint`
+- `npm run test:e2e` : lancer les tests Playwright (assistant IA)
 - `python manage.py runserver` : lancer l’API Django
 - `python manage.py test` : exécuter les tests backend
+- `node scripts/tail-assistant-logs.cjs` : suivre les traces telemetry assistant IA
 
 ## 📚 Documentation complémentaire
 
 - [backend/INSTALLATION.md](./backend/INSTALLATION.md) – procédure détaillée backend
 - [backend/API_DOCUMENTATION.md](./backend/API_DOCUMENTATION.md) – endpoints REST & exemples
+- [docs/assistant-alerting.md](./docs/assistant-alerting.md) – architecture de journalisation et alertes assistant IA
+
+## 🧠 Assistant IA (démo)
+
+La page `/assistant-demo` propose une expérience dédiée aux consultants :
+
+- Suggestions rapides sous le champ de question pour démarrer la recherche.
+- Résultats structurés en sections (synthèse, narration IA, points marquants, actions, pièces justificatives, statistiques).
+- Suppression des références « catégories » côté interface au profit du terme « thématique ».
+- Accès direct au lien « Mes paramètres » et bouton de déconnexion.
+- Redirections automatiques empêchant les consultants d’accéder aux autres pages administratives.
+
+API associées (mockées côté Next.js) :
+
+- `POST /api/assistant-demo` : requête principale
+- `POST /api/assistant-demo/metrics` : agrégation statistique
+- `POST /api/assistant-demo/telemetry` : journalisation des temps de réponse / modèle
+
+Pour développer ou tester :
+
+```bash
+# Lancer le frontend en mode dev
+npm run dev
+
+# Suivre les logs telemetry
+node scripts/tail-assistant-logs.cjs
+
+# Tests e2e (nécessite le serveur front en route)
+npm run test:e2e
+```
 
 ---
 
