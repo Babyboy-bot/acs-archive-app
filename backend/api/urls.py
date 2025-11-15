@@ -15,7 +15,9 @@ from .views import (
     DocumentViewSet,
     DocumentUploadView,
     stats_view,
-    document_search_view
+    assistant_stats_view,
+    assistant_document_search_view,
+    assistant_document_search_faiss_view,
 )
 
 # Router pour les ViewSets
@@ -33,7 +35,9 @@ urlpatterns = [
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
     path('stats/', stats_view, name='stats'),
-    path('documents/search/', document_search_view, name='document-search'),
+    path('assistant/stats/', assistant_stats_view, name='assistant-stats'),
+    path('assistant/documents/search/tfidf/', assistant_document_search_view, name='assistant-document-search-tfidf'),
+    path('assistant/documents/search/faiss/', assistant_document_search_faiss_view, name='assistant-document-search-faiss'),
     
     # Routes des ViewSets
     path('', include(router.urls)),

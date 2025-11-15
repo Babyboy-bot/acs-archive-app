@@ -8,6 +8,7 @@ import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { apiFetchJson } from '@/lib/api'
 import { enregistrerSession } from '@/lib/session'
+import { RoleUtilisateur } from '@/types'
 
 export default function PageConnexion() {
   const router = useRouter()
@@ -40,6 +41,8 @@ export default function PageConnexion() {
         return
       }
 
+      const role = (data as any).utilisateur.role as RoleUtilisateur
+
       enregistrerSession({
         token: (data as any).token,
         refresh: (data as any).refresh,
@@ -49,11 +52,12 @@ export default function PageConnexion() {
           nom: (data as any).utilisateur.nom,
           prenom: (data as any).utilisateur.prenom,
           email: (data as any).utilisateur.email,
-          role: (data as any).utilisateur.role,
+          role,
         }
       })
 
-      router.push('/tableau-de-bord')
+      const destination = role === RoleUtilisateur.CONSULTANT ? '/assistant-demo' : '/tableau-de-bord'
+      router.push(destination)
     } catch (error) {
       console.error('Erreur de connexion:', error)
       setErreur('Erreur de connexion au serveur')
@@ -197,8 +201,8 @@ export default function PageConnexion() {
           </form>
 
           <div className="mt-6 text-center text-sm text-gray-600">
-            Vous n'avez pas de compte ?{' '}
-            <Link href="/inscription" className="font-medium hover:opacity-80 transition-opacity flex items-center justify-center gap-1 mt-2" style={{ color: '#0066B3' }}>
+            Besoin d'accès ou d'assistance ?{' '}
+            <Link href="/contact-administrateur" className="font-medium hover:opacity-80 transition-opacity flex items-center justify-center gap-1 mt-2" style={{ color: '#0066B3' }}>
               <Icon name="user" size="xs" />
               Contactez l'administrateur
             </Link>

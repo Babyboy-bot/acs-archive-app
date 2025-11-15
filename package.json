@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "logs:assistant": "npx cross-env NODE_ENV=development node scripts/tail-assistant-logs.cjs",
+    "test:e2e": "playwright test"
   },
   "author": "KASSI ELIE EMMANUEL & ASSINYO RODRIGUE ",
   "license": "ISC",
@@ -31,6 +33,8 @@
     "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.3",
+    "cross-env": "^7.0.3",
+    "@playwright/test": "^1.49.0",
     "autoprefixer": "^10.4.22",
     "eslint": "^9.39.1",
     "eslint-config-next": "^16.0.1",

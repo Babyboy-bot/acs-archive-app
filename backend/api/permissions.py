@@ -34,7 +34,7 @@ class RoleBasedPermission(permissions.BasePermission):
         },
         'ARCHIVISTE': {
             'documents': ['voir', 'creer', 'modifier', 'supprimer'],
-            'utilisateurs': ['voir', 'creer', 'modifier', 'supprimer'],
+            'utilisateurs': ['voir'],
             'categories': ['voir', 'creer', 'modifier', 'supprimer'],
             'stats': ['voir']
         },
@@ -73,7 +73,16 @@ class RoleBasedPermission(permissions.BasePermission):
         role = request.user.role
         permissions = self.PERMISSIONS.get(role, {})
         ressource_permissions = permissions.get(ressource, [])
-        
+
+        # Autoriser un utilisateur à modifier son propre profil
+        if ressource == 'utilisateurs' and action == 'modifier':
+            lookup_field = getattr(view, 'lookup_field', 'pk')
+            target_id = None
+            if hasattr(view, 'kwargs') and view.kwargs:
+                target_id = view.kwargs.get(lookup_field)
+            if target_id and str(request.user.id) == str(target_id):
+                return True
+
         return action in ressource_permissions
 
 

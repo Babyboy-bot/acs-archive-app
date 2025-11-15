@@ -45,6 +45,8 @@ import {
   StarIcon,
   CreditCardIcon,
   PrinterIcon,
+  ArrowRightOnRectangleIcon,
+  EnvelopeOpenIcon,
 } from '@heroicons/react/24/outline'
 
 import {
@@ -61,7 +63,8 @@ export type IconName =
   | 'heart' | 'shield' | 'inbox' | 'send' | 'email' | 'lock' | 'key'
   | 'phone' | 'at' | 'sun' | 'moon' | 'language' | 'arrow-right' | 'arrow-left'
   | 'chevron-right' | 'check-circle' | 'warning' | 'info' | 'sparkles'
-  | 'fire' | 'bolt' | 'star' | 'card' | 'print'
+  | 'fire' | 'bolt' | 'star' | 'card' | 'print' | 'logout'
+  | 'mail-open'
   | 'document-solid' | 'folder-solid' | 'user-solid' | 'check-circle-solid'
 
 interface IconProps {
@@ -126,6 +129,8 @@ const icons = {
   star: StarIcon,
   card: CreditCardIcon,
   print: PrinterIcon,
+  logout: ArrowRightOnRectangleIcon,
+  'mail-open': EnvelopeOpenIcon,
   'document-solid': DocumentSolidIcon,
   'folder-solid': FolderSolidIcon,
   'user-solid': UserSolidIcon,

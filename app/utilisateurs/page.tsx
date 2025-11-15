@@ -2,11 +2,13 @@
 
 import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
-import { apiFetchJson } from '@/lib/api'
-import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
-import { hasPermission } from '@/lib/permissions'
 import { motion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
+import { apiFetchJson } from '@/lib/api'
+import { hasPermission, canAccessSection } from '@/lib/permissions'
+import { PreviewPDF } from '@/components/PreviewPDF'
+import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
+import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
 
 type UtilisateurAPI = {
   id: string
@@ -50,10 +52,10 @@ type FormulaireUtilisateur = {
 const PALETTE = ['#D32027', '#0066B3', '#10B981', '#F59E0B', '#8B5CF6', '#6366F1'] as const
 
 function getInitiales(prenom: string | null, nom: string | null) {
-  const parties = `${prenom ?? ''} ${nom ?? ''}`.trim().split(' ')
-  if (!parties.length) return 'NA'
-  if (parties.length === 1) return parties[0].slice(0, 2).toUpperCase()
-  return (parties[0][0] + parties[parties.length - 1][0]).toUpperCase()
+  const parts = `${prenom ?? ''} ${nom ?? ''}`.trim().split(' ').filter(Boolean)
+  if (parts.length === 0) return 'NA'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
 }
 
 function mapUtilisateur(utilisateur: UtilisateurDRF): UtilisateurAPI {
@@ -85,6 +87,7 @@ function formatRelativeDate(isoDate: string | null) {
 }
 
 export default function PageUtilisateurs() {
+  useEnforceNonConsultant()
   const utilisateurCourant = useUtilisateurCourant()
   const role = utilisateurCourant?.role ?? null
   const peutVoirUtilisateurs = hasPermission(role, 'utilisateurs', 'voir')
@@ -234,6 +237,16 @@ export default function PageUtilisateurs() {
     setAfficherFormulaire(false)
     setFormulaireUtilisateur(null)
     setSoumissionEnCours(false)
+  }
+
+  function mettreAJourFormulaire<K extends keyof FormulaireUtilisateur>(champ: K, valeur: FormulaireUtilisateur[K]) {
+    setFormulaireUtilisateur((courant) => {
+      if (!courant) return courant
+      return {
+        ...courant,
+        [champ]: valeur,
+      }
+    })
   }
 
   async function basculerActivation(utilisateur: UtilisateurAffiche) {
@@ -460,15 +473,163 @@ export default function PageUtilisateurs() {
           </div>
         </motion.div>
 
-        {peutGerersUtilisateurs && afficherFormulaire && (
+        {peutGerersUtilisateurs && afficherFormulaire && formulaireUtilisateur ? (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="mb-6 bg-white rounded-2xl shadow-lg border border-red-100"
           >
-            {erreur}
+            <form onSubmit={soumettreUtilisateur} className="p-6 space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <Icon name="user" size="md" />
+                    {formulaireUtilisateur.id ? 'Modifier un utilisateur' : 'Nouvel utilisateur'}
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    {formulaireUtilisateur.id
+                      ? 'Mettre à jour les informations du compte sélectionné.'
+                      : 'Renseignez les informations du consultant à créer.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={fermerFormulaire}
+                  className="px-3 py-2 text-sm font-semibold text-gray-600 hover:text-gray-900"
+                >
+                  Annuler
+                </button>
+              </div>
+
+              {erreur && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+                  {erreur}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Prénom</label>
+                  <input
+                    type="text"
+                    value={formulaireUtilisateur.prenom}
+                    onChange={(event) => mettreAJourFormulaire('prenom', event.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none"
+                    placeholder="Ex. Jeanne"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nom</label>
+                  <input
+                    type="text"
+                    value={formulaireUtilisateur.nom}
+                    onChange={(event) => mettreAJourFormulaire('nom', event.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none"
+                    placeholder="Ex. Martin"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Adresse e-mail</label>
+                  <input
+                    type="email"
+                    value={formulaireUtilisateur.email}
+                    onChange={(event) => mettreAJourFormulaire('email', event.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none"
+                    placeholder="exemple@entreprise.fr"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nom d’utilisateur</label>
+                  <input
+                    type="text"
+                    value={formulaireUtilisateur.nomUtilisateur}
+                    onChange={(event) => mettreAJourFormulaire('nomUtilisateur', event.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none"
+                    placeholder="Identifiant de connexion"
+                    autoComplete="username"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Rôle</label>
+                  <select
+                    value={formulaireUtilisateur.role}
+                    onChange={(event) => mettreAJourFormulaire('role', event.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none"
+                  >
+                    {roles
+                      .filter((role) => role.value)
+                      .map((role) => (
+                        <option key={role.value} value={role.value}>
+                          {role.label}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <label className="flex items-center gap-3 px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={formulaireUtilisateur.estActif}
+                    onChange={(event) => mettreAJourFormulaire('estActif', event.target.checked)}
+                    className="h-5 w-5 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                  />
+                  <span className="text-sm font-semibold text-gray-700">Compte actif</span>
+                </label>
+              </div>
+
+              {!formulaireUtilisateur.id ? (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Mot de passe</label>
+                  <input
+                    type="password"
+                    value={formulaireUtilisateur.motDePasse}
+                    onChange={(event) => mettreAJourFormulaire('motDePasse', event.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
+                    placeholder="Minimum 8 caractères"
+                    autoComplete="new-password"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nouveau mot de passe (optionnel)</label>
+                  <input
+                    type="password"
+                    value={formulaireUtilisateur.motDePasse}
+                    onChange={(event) => mettreAJourFormulaire('motDePasse', event.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
+                    placeholder="Laisser vide pour conserver l’actuel"
+                    autoComplete="new-password"
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={fermerFormulaire}
+                  className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition"
+                  disabled={soumissionEnCours}
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={soumissionEnCours}
+                  className="px-5 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition disabled:opacity-60"
+                >
+                  {soumissionEnCours
+                    ? 'Enregistrement...'
+                    : formulaireUtilisateur.id
+                      ? 'Mettre à jour'
+                      : 'Créer l’utilisateur'}
+                </button>
+              </div>
+            </form>
           </motion.div>
-        )}
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {utilisateursFiltres.map((user, index) => (

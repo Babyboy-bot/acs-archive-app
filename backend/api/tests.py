@@ -1,11 +1,17 @@
 """
 Tests pour l'API
 """
+import json
+from unittest import mock
 from django.test import TestCase
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from django.urls import reverse
-from .models import Utilisateur
+from django.utils import timezone
+from datetime import timedelta
+from unittest import skip
+
+from .models import Utilisateur, Client, Exercice, Risque, Categorie, Document
 
 
 class UtilisateurTests(APITestCase):
@@ -118,3 +124,95 @@ class AuthenticationTests(APITestCase):
         response = self.client.post(url, data, format='json')
         
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class AssistantAPITests(APITestCase):
+    """Tests pour les endpoints de l'assistant IA"""
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='assistant.user',
+            nom='Assistant',
+            prenom='User',
+            password='StrongPass123!',
+            role='ADMIN',
+            email='assistant@test.com'
+        )
+
+        login_response = self.client.post(reverse('login'), {
+            'nom_utilisateur': 'assistant.user',
+            'mot_de_passe': 'StrongPass123!'
+        }, format='json')
+        token = login_response.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+        self.client_obj = Client.objects.create(nom='Test Client')
+        self.exercice = Exercice.objects.create(annee=2024, client=self.client_obj)
+        self.categorie = Categorie.objects.create(nom='Test Catégorie')
+        self.risque = Risque.objects.create(exercice=self.exercice, type='RC')
+
+        self.document = Document.objects.create(
+            titre='Contrat Responsabilité',
+            description='Contrat responsabilité civile 2024',
+            chemin_fichier='documents/test.pdf',
+            type_fichier='application/pdf',
+            taille_fichier=1024,
+            type_courrier='ACS_VERS_CLIENT',
+            risque=self.risque,
+            auteur=self.user,
+            categorie=self.categorie,
+            reference='DOC-001',
+            date_document=timezone.now() - timedelta(days=10)
+        )
+
+    def test_assistant_stats_endpoint(self):
+        response = self.client.get(reverse('assistant-stats'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIn('documents_par_mois', data)
+        self.assertIn('top_categories', data)
+        self.assertIn('kpi', data)
+
+    def test_assistant_tfidf_search(self):
+        response = self.client.get(reverse('assistant-document-search-tfidf'), {'q': 'responsabilité'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIn('results', data)
+        self.assertGreaterEqual(len(data['results']), 1)
+        first = data['results'][0]
+        self.assertIn('score', first)
+        self.assertIn('metadata', first)
+
+    @mock.patch('api.views.faiss')
+    def test_assistant_faiss_search(self, mock_faiss):
+        mock_faiss.IndexFlatIP.return_value = mock.Mock(
+            **{'search.return_value': ([[1.0]], [[0]])}
+        )
+        mock_faiss.normalize_L2.side_effect = lambda x: None
+
+        response = self.client.get(reverse('assistant-document-search-faiss'), {'q': 'responsabilité'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIn('results', data)
+
+    @skip("Le rate limiting est géré côté Next.js pour /api/assistant-demo")
+    def test_assistant_rate_limiting(self):
+        url = reverse('assistant-demo')
+        with mock.patch('api.views.collecterStatistiques', return_value={
+            'documents_par_mois': {},
+            'top_categories': [],
+            'top_clients': [],
+            'kpi': {
+                'taux_conformite': 1,
+                'documents_en_retard': 0,
+                'alertes_peremption': 0,
+            },
+        }):
+            for _ in range(12):
+                response = self.client.post(url, {'question': 'Combien de documents ?'}, format='json')
+                self.assertNotEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+            response = self.client.post(url, {'question': 'Combien de documents ?'}, format='json')
+            self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)

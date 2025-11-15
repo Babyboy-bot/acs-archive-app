@@ -10,10 +10,17 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth import authenticate
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Count
+from django.db.models.functions import Coalesce, TruncMonth
+from datetime import timedelta
 from django.core.files.storage import default_storage
 import mimetypes
 import uuid
+
+import numpy as np
+import faiss
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import linear_kernel
 
 from .models import (
     Utilisateur, Client, Exercice, Risque,
@@ -179,21 +186,24 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         """Modifier le mot de passe d'un utilisateur"""
         utilisateur = self.get_object()
 
-        # Autoriser uniquement l'utilisateur concerné ou un administrateur
-        if request.user.role != 'ADMIN' and str(request.user.id) != str(utilisateur.id):
-            return Response({'erreur': "Vous n'avez pas la permission de modifier ce mot de passe."}, status=status.HTTP_403_FORBIDDEN)
+        if request.user.role != 'ADMIN':
+            return Response({'erreur': "Seuls les administrateurs peuvent modifier les mots de passe."}, status=status.HTTP_403_FORBIDDEN)
 
         ancien_mdp = request.data.get('ancien_mot_de_passe') or request.data.get('ancienMotDePasse')
         nouveau_mdp = request.data.get('nouveau_mot_de_passe') or request.data.get('nouveauMotDePasse')
 
-        if not ancien_mdp or not nouveau_mdp:
-            return Response({'erreur': "Merci de fournir l'ancien et le nouveau mot de passe."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not utilisateur.check_password(ancien_mdp):
-            return Response({'erreur': 'Le mot de passe actuel est incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not nouveau_mdp:
+            return Response({'erreur': 'Le nouveau mot de passe est requis.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if len(nouveau_mdp) < 8:
             return Response({'erreur': 'Le nouveau mot de passe doit contenir au moins 8 caractères.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Si l'administrateur modifie son propre mot de passe, l'ancien est requis par sécurité
+        if str(request.user.id) == str(utilisateur.id):
+            if not ancien_mdp:
+                return Response({'erreur': "Merci d'indiquer votre mot de passe actuel."}, status=status.HTTP_400_BAD_REQUEST)
+            if not utilisateur.check_password(ancien_mdp):
+                return Response({'erreur': 'Le mot de passe actuel est incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
 
         utilisateur.set_password(nouveau_mdp)
         utilisateur.save(update_fields=['password'])
@@ -346,6 +356,323 @@ def stats_view(request):
 
 
 setattr(stats_view, 'ressource', 'stats')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_stats_view(request):
+    """Statistiques agrégées optimisées pour l'assistant IA"""
+
+    base_queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
+
+    total_documents = base_queryset.count()
+
+    date_queryset = base_queryset.annotate(date_ref=Coalesce('date_document', 'cree_le'))
+
+    documents_par_mois_qs = (
+        date_queryset
+        .filter(date_ref__isnull=False)
+        .annotate(mois=TruncMonth('date_ref'))
+        .values('mois')
+        .annotate(total=Count('id'))
+        .order_by('mois')
+    )
+
+    documents_par_mois_list = list(documents_par_mois_qs)
+    if len(documents_par_mois_list) > 6:
+        documents_par_mois_list = documents_par_mois_list[-6:]
+
+    documents_par_mois = {
+        entry['mois'].strftime('%Y-%m') if entry['mois'] else 'Inconnu': entry['total']
+        for entry in documents_par_mois_list
+    }
+
+    top_categories_qs = (
+        base_queryset
+        .values('categorie__nom')
+        .annotate(total=Count('id'))
+        .order_by('-total')[:5]
+    )
+    top_categories = [
+        {
+            'categorie': entry['categorie__nom'] or 'Non catégorisé',
+            'compte': entry['total'],
+        }
+        for entry in top_categories_qs
+    ]
+
+    top_clients_qs = (
+        base_queryset
+        .values('risque__exercice__client__nom')
+        .annotate(total=Count('id'))
+        .order_by('-total')[:5]
+    )
+    top_clients = [
+        {
+            'client': entry['risque__exercice__client__nom'] or 'Client inconnu',
+            'compte': entry['total'],
+        }
+        for entry in top_clients_qs
+    ]
+
+    now = timezone.now()
+    retard_threshold = now - timedelta(days=30)
+    peremption_threshold = now - timedelta(days=5 * 365)
+
+    documents_en_retard = (
+        date_queryset
+        .filter(est_archive=False, date_ref__lt=retard_threshold)
+        .count()
+    )
+
+    alertes_peremption = (
+        date_queryset
+        .filter(date_ref__lt=peremption_threshold)
+        .count()
+    )
+
+    taux_conformite = 1
+    if total_documents:
+        taux_conformite = max(0, min(1, (total_documents - documents_en_retard) / total_documents))
+
+    data = {
+        'documents_par_mois': documents_par_mois,
+        'top_categories': top_categories,
+        'top_clients': top_clients,
+        'kpi': {
+            'taux_conformite': taux_conformite,
+            'documents_en_retard': documents_en_retard,
+            'alertes_peremption': alertes_peremption,
+        },
+    }
+
+    return Response(data)
+
+
+setattr(assistant_stats_view, 'ressource', 'stats')
+
+
+def _build_document_payload(document: Document) -> dict:
+    client_nom = None
+    exercice_annee = None
+    if document.risque and document.risque.exercice:
+        exercice = document.risque.exercice
+        exercice_annee = exercice.annee
+        if exercice.client:
+            client_nom = exercice.client.nom
+
+    categorie_nom = document.categorie.nom if document.categorie else None
+    type_label = document.get_type_courrier_display() if document.type_courrier else None
+
+    return {
+        'id': str(document.id),
+        'titre': document.titre,
+        'description': document.description,
+        'categorie': categorie_nom,
+        'type_courrier': document.type_courrier,
+        'type_courrier_label': type_label,
+        'reference': document.reference,
+        'client': client_nom,
+        'exercice': exercice_annee,
+        'date_document': document.date_document.isoformat() if document.date_document else None,
+        'cree_le': document.cree_le.isoformat() if document.cree_le else None,
+        'est_archive': document.est_archive,
+    }
+
+
+def _build_document_text(payload: dict) -> str:
+    parts = [
+        payload.get('titre'),
+        payload.get('description'),
+        payload.get('categorie'),
+        payload.get('type_courrier_label'),
+        payload.get('reference'),
+        payload.get('client'),
+    ]
+    texte = ' '.join([part for part in parts if part])
+    return texte or payload.get('titre') or ''
+
+
+def _build_document_metadata(payload: dict) -> dict:
+    return {
+        'titre': payload.get('titre'),
+        'description': payload.get('description'),
+        'categorie': payload.get('categorie'),
+        'type': payload.get('type_courrier_label'),
+        'reference': payload.get('reference'),
+        'client': payload.get('client'),
+        'exercice': payload.get('exercice'),
+        'date_document': payload.get('date_document') or payload.get('cree_le'),
+        'statut_archive': payload.get('est_archive'),
+    }
+
+
+def _build_document_highlights(metadata: dict) -> list[str]:
+    highlights = []
+    if metadata.get('client'):
+        highlights.append(f"Client : {metadata['client']}")
+    if metadata.get('categorie'):
+        highlights.append(f"Catégorie : {metadata['categorie']}")
+    if metadata.get('type'):
+        highlights.append(f"Type : {metadata['type']}")
+    if metadata.get('reference'):
+        highlights.append(f"Référence : {metadata['reference']}")
+    if metadata.get('date_document'):
+        highlights.append(f"Date : {metadata['date_document'][:10]}")
+    return highlights
+
+
+def _build_document_content(payload: dict, metadata: dict) -> str:
+    lignes = []
+    if payload.get('description'):
+        lignes.append(payload['description'])
+    if metadata.get('client'):
+        lignes.append(f"Client : {metadata['client']}")
+    if metadata.get('reference'):
+        lignes.append(f"Référence : {metadata['reference']}")
+    if metadata.get('type'):
+        lignes.append(f"Type de courrier : {metadata['type']}")
+    if metadata.get('categorie'):
+        lignes.append(f"Catégorie : {metadata['categorie']}")
+    if metadata.get('date_document'):
+        lignes.append(f"Date : {metadata['date_document'][:10]}")
+    return '\n'.join(lignes) or 'Informations limitées sur ce document.'
+
+
+def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = False) -> dict:
+    metadata = _build_document_metadata(payload)
+    if is_fallback:
+        metadata['isFallback'] = True
+    highlights = _build_document_highlights(metadata)
+    content = _build_document_content(payload, metadata)
+    return {
+        'id': payload['id'],
+        'titre': payload['titre'],
+        'score': round(float(score), 6),
+        'metadata': metadata,
+        'highlights': highlights,
+        'content': content,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_document_search_view(request):
+    """Recherche TF-IDF optimisée pour l'assistant IA"""
+
+    query = (request.query_params.get('q') or '').strip()
+    if not query:
+        return Response({'results': []})
+
+    try:
+        top_k = int(request.query_params.get('top_k') or 5)
+    except ValueError:
+        top_k = 5
+
+    documents = list(
+        Document.objects.select_related('categorie', 'risque__exercice__client').all()
+    )
+
+    if not documents:
+        return Response({'results': []})
+
+    payloads = [_build_document_payload(doc) for doc in documents]
+    corpus = [_build_document_text(payload) for payload in payloads]
+
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(corpus)
+    query_vector = vectorizer.transform([query])
+    scores = linear_kernel(query_vector, tfidf_matrix).flatten()
+
+    indexed_scores = list(enumerate(scores.tolist()))
+    indexed_scores.sort(key=lambda item: item[1], reverse=True)
+
+    results = []
+    for index, score in indexed_scores[: max(top_k, 1)]:
+        if score <= 0:
+            continue
+        payload = payloads[index]
+        results.append(_build_assistant_result(payload, score))
+
+    return Response({'results': results})
+
+
+setattr(assistant_document_search_view, 'ressource', 'documents')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_document_search_faiss_view(request):
+    """Recherche vectorielle via FAISS pour l'assistant IA"""
+
+    query = (request.query_params.get('q') or '').strip()
+    if not query:
+        return Response({'results': []})
+
+    include_fallback = (request.query_params.get('include_fallback') or '').lower() == 'true'
+
+    try:
+        top_k = int(request.query_params.get('top_k') or 5)
+    except ValueError:
+        top_k = 5
+
+    documents = list(
+        Document.objects.select_related('categorie', 'risque__exercice__client').all()
+    )
+
+    if not documents:
+        return Response({'results': []})
+
+    payloads = [_build_document_payload(doc) for doc in documents]
+    corpus = [_build_document_text(payload) for payload in payloads]
+
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(corpus)
+
+    if tfidf_matrix.shape[1] == 0:
+        return Response({'results': []})
+
+    doc_matrix = tfidf_matrix.astype(np.float32).toarray()
+    if doc_matrix.size == 0:
+        return Response({'results': []})
+
+    faiss.normalize_L2(doc_matrix)
+
+    query_vector = vectorizer.transform([query]).astype(np.float32).toarray()
+    if query_vector.size == 0 or not np.any(query_vector):
+        if include_fallback:
+            fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
+            if fallback_document:
+                payload = _build_document_payload(fallback_document)
+                return Response({'results': [_build_assistant_result(payload, 0.0, is_fallback=True)]})
+        return Response({'results': []})
+
+    faiss.normalize_L2(query_vector)
+
+    index = faiss.IndexFlatIP(doc_matrix.shape[1])
+    index.add(doc_matrix)
+
+    distances, indices = index.search(query_vector, max(top_k, 1))
+
+    results = []
+    for idx, score in zip(indices[0], distances[0]):
+        if idx < 0:
+            continue
+        if score <= 0:
+            continue
+        payload = payloads[idx]
+        results.append(_build_assistant_result(payload, float(score)))
+
+    if include_fallback and not results:
+        fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
+        if fallback_document:
+            payload = _build_document_payload(fallback_document)
+            results.append(_build_assistant_result(payload, 0.0, is_fallback=True))
+
+    return Response({'results': results})
+
+
+setattr(assistant_document_search_faiss_view, 'ressource', 'documents')
 
 
 @api_view(['GET'])

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
+import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
 import { hasPermission } from '@/lib/permissions'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
@@ -176,6 +177,7 @@ const formatRisqueLabel = (value?: string | null) => {
 }
 
 export default function PageDocuments() {
+  useEnforceNonConsultant()
   const utilisateur = useUtilisateurCourant()
   const role = utilisateur?.role ?? null
   const peutVoirDocuments = hasPermission(role, 'documents', 'voir')
@@ -186,13 +188,7 @@ export default function PageDocuments() {
   const [recherche, setRecherche] = useState('')
   const [filtreRisque, setFiltreRisque] = useState('')
   const [filtreCourrier, setFiltreCourrier] = useState('')
-  const [vueMode, setVueMode] = useState<'grille' | 'liste'>(() => {
-    if (typeof window === 'undefined') {
-      return 'grille'
-    }
-    const stored = window.localStorage.getItem('documents/vue-mode')
-    return stored === 'liste' ? 'liste' : 'grille'
-  })
+  const [vueMode, setVueMode] = useState<'grille' | 'liste'>('grille')
   const [documents, setDocuments] = useState<DocumentUI[]>([])
   const [menuExportOuvert, setMenuExportOuvert] = useState(false)
   const [previewOuvert, setPreviewOuvert] = useState(false)
@@ -280,10 +276,18 @@ export default function PageDocuments() {
   }, [peutVoirDocuments])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
+    if (typeof window !== 'undefined') {
+      const stored = window.localStorage.getItem('documents/vue-mode')
+      if (stored === 'liste' || stored === 'grille') {
+        setVueMode(stored)
+      }
     }
-    window.localStorage.setItem('documents/vue-mode', vueMode)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('documents/vue-mode', vueMode)
+    }
   }, [vueMode])
 
   const documentsFiltres = useMemo(() => {

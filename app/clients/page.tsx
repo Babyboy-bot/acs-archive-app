@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import { Navigation } from '@/components/Navigation'
 import { Icon } from '@/components/Icon'
 import { apiFetchJson } from '@/lib/api'
+import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
 
 type ClientType = 'ENTREPRISE' | 'PARTICULIER'
 
@@ -121,6 +122,7 @@ function mapClient(client: ClientDRF): ClientAPI {
 }
 
 export default function PageClients() {
+  useEnforceNonConsultant()
   const [clients, setClients] = useState<ClientAPI[]>([])
   const [chargement, setChargement] = useState(true)
   const [erreur, setErreur] = useState('')

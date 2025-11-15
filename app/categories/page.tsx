@@ -5,6 +5,7 @@ import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetchJson } from '@/lib/api'
+import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
 
 type CategorieDRF = {
   id: string
@@ -39,6 +40,7 @@ function mapCategorie(categorie: CategorieDRF): Categorie {
 }
 
 export default function PageCategories() {
+  useEnforceNonConsultant()
   const [recherche, setRecherche] = useState('')
   const [afficherFormulaire, setAfficherFormulaire] = useState(false)
   const [nouveauNom, setNouveauNom] = useState('')

@@ -10,6 +10,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiFetchJson } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { fr } from 'date-fns/locale'
+import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
+import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
+import { canAccessSection, hasPermission } from '@/lib/permissions'
 
 type DocumentApi = {
   id: string
@@ -31,6 +34,15 @@ type RisqueApi = {
 }
 
 export default function DashboardUltraModerne() {
+  useEnforceNonConsultant()
+  const utilisateurCourant = useUtilisateurCourant()
+  const role = utilisateurCourant?.role ?? null
+  const peutVoirStats = hasPermission(role, 'stats', 'voir')
+  const peutVoirDocuments = hasPermission(role, 'documents', 'voir')
+  const peutCreerDocuments = hasPermission(role, 'documents', 'creer')
+  const peutAccederRecherche = canAccessSection(role, 'documents')
+  const peutAccederParametres = hasPermission(role, 'utilisateurs', 'voir')
+
   const [mounted, setMounted] = useState(false)
   const [loading, setLoading] = useState(true)
   const [documentsRecents, setDocumentsRecents] = useState<DocumentApi[]>([])
@@ -142,6 +154,23 @@ export default function DashboardUltraModerne() {
     }))
   }, [documentsRecents])
 
+  if (!peutVoirStats) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <main className="container mx-auto px-4 py-16 flex flex-col items-center text-center gap-6">
+          <div className="flex items-center gap-3 text-red-600">
+            <Icon name="shield" size="lg" />
+            <h1 className="text-3xl font-bold text-gray-900">Accès restreint</h1>
+          </div>
+          <p className="text-gray-600 max-w-xl">
+            Ce tableau de bord est réservé aux administrateurs et archivistes. Veuillez contacter un administrateur si vous avez besoin d'un accès élargi.
+          </p>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
@@ -170,14 +199,16 @@ export default function DashboardUltraModerne() {
         ) : null}
 
         {/* Stats temps réel */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="mb-8"
-        >
-          <StatsTempsReel intervalMs={5000} />
-        </motion.div>
+        {peutVoirStats ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="mb-8"
+          >
+            <StatsTempsReel intervalMs={5000} />
+          </motion.div>
+        ) : null}
 
         {/* Actions rapides */}
         <motion.div 
@@ -191,32 +222,44 @@ export default function DashboardUltraModerne() {
             Actions Rapides
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <Link href="/documents/nouveau">
-              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-red-50 hover:to-blue-50 transition-all border-2 border-transparent hover:border-red-200">
-                <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                  <Icon name="upload" size="lg" />
-                </div>
-                <span className="font-medium text-gray-700">Upload</span>
-              </motion.button>
-            </Link>
+            {peutCreerDocuments ? (
+              <Link href="/documents/nouveau">
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-red-50 hover:to-blue-50 transition-all border-2 border-transparent hover:border-red-200">
+                  <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <Icon name="upload" size="lg" />
+                  </div>
+                  <span className="font-medium text-gray-700">Upload</span>
+                </motion.button>
+              </Link>
+            ) : null}
 
-            <Link href="/recherche">
-              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-blue-50 hover:to-purple-50 transition-all border-2 border-transparent hover:border-blue-200">
-                <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                  <Icon name="search" size="lg" />
-                </div>
-                <span className="font-medium text-gray-700">Recherche</span>
-              </motion.button>
-            </Link>
+            {peutAccederRecherche ? (
+              <Link href="/recherche">
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-blue-50 hover:to-purple-50 transition-all border-2 border-transparent hover:border-blue-200">
+                  <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <Icon name="search" size="lg" />
+                  </div>
+                  <span className="font-medium text-gray-700">Recherche</span>
+                </motion.button>
+              </Link>
+            ) : null}
 
-            <Link href="/parametres">
-              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-green-50 hover:to-teal-50 transition-all border-2 border-transparent hover:border-green-200">
-                <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                  <Icon name="settings" size="lg" />
-                </div>
-                <span className="font-medium text-gray-700">Paramètres</span>
-              </motion.button>
-            </Link>
+            {peutAccederParametres ? (
+              <Link href="/parametres">
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-gradient-to-br hover:from-green-50 hover:to-teal-50 transition-all border-2 border-transparent hover:border-green-200">
+                  <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <Icon name="settings" size="lg" />
+                  </div>
+                  <span className="font-medium text-gray-700">Paramètres</span>
+                </motion.button>
+              </Link>
+            ) : null}
+
+            {!peutCreerDocuments && !peutAccederRecherche && !peutAccederParametres ? (
+              <div className="col-span-full text-sm text-gray-500">
+                Aucune action rapide disponible avec votre rôle actuel.
+              </div>
+            ) : null}
           </div>
         </motion.div>
 

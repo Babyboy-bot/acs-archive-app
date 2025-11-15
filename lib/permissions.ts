@@ -23,7 +23,7 @@ const ROLE_PERMISSIONS: Record<RoleUtilisateur, RolePermissions> = {
   }),
   ARCHIVISTE: buildPermissions({
     documents: ['voir', 'creer', 'modifier', 'supprimer'],
-    utilisateurs: ['voir', 'creer', 'modifier', 'supprimer'],
+    utilisateurs: ['voir'],
     categories: ['voir', 'creer', 'modifier', 'supprimer'],
     stats: ['voir'],
   }),

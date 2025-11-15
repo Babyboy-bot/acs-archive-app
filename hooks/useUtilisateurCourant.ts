@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getUtilisateurActif, SessionUtilisateur } from '@/lib/session'
 
 export function useUtilisateurCourant() {
-  const [utilisateur, setUtilisateur] = useState<SessionUtilisateur | null>(() => getUtilisateurActif())
+  const [utilisateur, setUtilisateur] = useState<SessionUtilisateur | null>(null)
 
   useEffect(() => {
     setUtilisateur(getUtilisateurActif())
