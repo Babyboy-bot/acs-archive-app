@@ -39,3 +39,8 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+# AI experiments
+experiments/assistant-ia/indexes/
+experiments/assistant-ia/.env
+experiments/assistant-ia/.cache

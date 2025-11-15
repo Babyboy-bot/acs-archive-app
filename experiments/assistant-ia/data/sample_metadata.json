@@ -1,0 +1,52 @@
+{
+  "clients": [
+    {
+      "id": "CLI-001",
+      "nom": "Société Horizon",
+      "secteur": "Industrie",
+      "contact": "pauline.dupont@horizon.fr"
+    },
+    {
+      "id": "CLI-002",
+      "nom": "Mutuelle Santé+",
+      "secteur": "Santé",
+      "contact": "info@mutuellesanteplus.fr"
+    }
+  ],
+  "documents": [
+    {
+      "id": "DOC-2025-0001",
+      "client_id": "CLI-001",
+      "type": "CONTRAT",
+      "categorie": "Responsabilité civile",
+      "risque": "RESPONSABILITE_CIVILE",
+      "exercice": 2024,
+      "date_archivage": "2025-01-04T10:12:00Z",
+      "resume": "Contrat cadre RC signé avec Horizon",
+      "statut_legal": "CONSERVER_10_ANS"
+    },
+    {
+      "id": "DOC-2025-0002",
+      "client_id": "CLI-002",
+      "type": "SINISTRE",
+      "categorie": "Santé",
+      "risque": "SANTE",
+      "exercice": 2023,
+      "date_archivage": "2025-02-15T08:45:00Z",
+      "resume": "Dossier sinistre hospitalisation",
+      "statut_legal": "CONSERVER_5_ANS"
+    }
+  ],
+  "statistiques": {
+    "documents_par_mois": {
+      "2025-01": 28,
+      "2025-02": 34,
+      "2025-03": 19
+    },
+    "top_categories": [
+      { "categorie": "Santé", "compte": 45 },
+      { "categorie": "Responsabilité civile", "compte": 32 },
+      { "categorie": "Automobile", "compte": 21 }
+    ]
+  }
+}
