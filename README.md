@@ -1,129 +1,88 @@
-# ACS Archive – Application de gestion documentaire
+# ACS Archive App
 
-Application web destinée à **ACS – Assureurs Conseils Service** pour gérer les documents clients, les activités et les statistiques métiers. L’interface est réalisée avec Next.js, tandis que l’API repose désormais sur **Django REST Framework** et une base PostgreSQL.
+Application d’archivage documentaire moderne avec interface web (Next.js) et backend (Django), intégrant un assistant IA conversationnel, la gestion avancée des thèmes (clair/sombre), un logo personnalisable et une expérience utilisateur optimisée.
 
-## 🚀 Stack technique
-
-- **Frontend** : Next.js 14 (App Router) · React 18 · TypeScript · Tailwind CSS
-- **Backend** : Django 5 · Django REST Framework · Simple JWT
-- **Base de données** : PostgreSQL
-- **Stockage fichiers** : système de fichiers local (développement) – support S3 à prévoir
-
-## 🗂 Structure du dépôt
+## Structure du projet
 
 ```
-acs-archive-app/
-├── app/                 # Pages Next.js (App Router)
-├── components/          # Composants réutilisables
-├── lib/                 # Helpers (API, session, etc.)
-├── backend/             # Projet Django (acs_backend)
-│   ├── api/             # App REST (vues, serializers, tests…)
-│   ├── acs_backend/     # Paramétrage du projet Django
-│   └── INSTALLATION.md  # Guide détaillé d’installation backend
-└── README.md            # Ce fichier
+/acs-archive-app/
+├── front/          # Frontend Next.js (App Router, TypeScript, TailwindCSS)
+│   ├── app/        # Pages (dashboard, documents, assistant, paramètres...)
+│   ├── components/ # Composants React réutilisables
+│   ├── lib/        # Utilitaires (API, session, thème, etc.)
+│   ├── public/     # Fichiers statiques (logo, images)
+│   └── ...
+└── back/           # Backend Django (API REST)
+    ├── backend/
+    │   ├── api/    # Vues, serializers, urls, modèles
+    │   ├── acs_backend/
+    │   └── manage.py
+    └── .venv/      # Environnement virtuel Python
 ```
 
-## ⚙️ Installation & démarrage
+## Démarrage rapide
 
-### 1. Backend Django
-
+### Backend (Django)
 ```bash
-cd backend
+cd back
 python -m venv .venv
-source .venv/bin/activate  # ou .venv\Scripts\activate sous Windows
-pip install -r requirements.txt
-
-# Variables d’environnement
-cp .env.example .env  # puis renseigner SECRET_KEY, DB_*, JWT_*
-
+.venv\Scripts\activate
+pip install -r backend/requirements.txt
+cd backend
 python manage.py migrate
-python manage.py createsuperuser  # si nécessaire
 python manage.py runserver
 ```
 
-Par défaut, l’API est servie sur `http://127.0.0.1:8000/api/`.
-
-### 2. Frontend Next.js
-
+### Frontend (Next.js)
 ```bash
+cd front
 npm install
-
-# Config front
-cp .env.example .env.local
-echo "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api" >> .env.local
-
 npm run dev
-# Ouvrir http://localhost:3000
 ```
 
-## 🔑 Points d’intégration principaux
+## Variables d’environnement
 
-- Authentification : `/auth/login/` (JWT), stocké dans `lib/session.ts`
-- Gestion utilisateurs : `/utilisateurs/`
-- Documents : `/documents/`, `/documents/upload/`, `/documents/{id}/`
-- Statistiques : `/stats/`
+- Dans `front/.env.local` :
+  ```bash
+  NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api
+  ASSISTANT_LLM_PROVIDER=openai
+  ASSISTANT_LLM_API_KEY=sk-...
+  ASSISTANT_LLM_MODEL=gpt-4o-mini
+  ASSISTANT_LLM_ENABLED=true
+  ```
+- Dans `back/backend/.env` (optionnel) :
+  ```bash
+  DEBUG=True
+  SECRET_KEY=...
+  DATABASE_URL=sqlite:///db.sqlite3
+  ```
 
-Toute requête frontend doit passer par `lib/api.ts` (`apiFetch` / `apiFetchJson`) afin d’injecter automatiquement le token JWT.
+## Fonctionnalités principales
 
-## ✅ Fonctionnalités actuelles
+- Authentification JWT multi-rôles (admin, archiviste, consultant)
+- Gestion complète des documents, clients, exercices, risques
+- Assistant IA conversationnel (OpenAI, configurable, historique persistant)
+- Recherche sémantique avancée (TF-IDF / FAISS)
+- Téléchargement, impression, ouverture de pièces justificatives
+- Interface responsive, expérience utilisateur soignée
+- Thème clair/sombre personnalisable (avec bouton de bascule, persistance)
+- Logo ACS personnalisable dans la navigation
+- Persistance du mode d’affichage (grille/liste) pour les documents
+- Tableaux de bord avec graphiques (Recharts)
 
-- Connexion / stockage JWT navigateur
-- Paramètres utilisateur (profil + changement mot de passe)
-- CRUD utilisateurs, clients, catégories, documents (via API Django)
-- Téléversement de documents multi-fichiers
-- Timeline des activités + statistiques temps réel
-- Recherche rapide de documents
-- Interface **Assistant IA (démo)** pour les consultants : suggestions de questions, réponses structurées (synthèse, points clés, recommandations, pièces justificatives) et accès direct aux paramètres
-- Affichage des documents liés avec métadonnées enrichies (badges client/exercice/type/date, détails consultables)
-- Volet statistiques de l’assistant (KPI, top thématiques/clients, volumes mensuels)
-- Journalisation/telemetry des appels assistant (`/api/assistant-demo/telemetry`) et mocks d’IA (`app/api/assistant-demo/llm.ts`)
-- Tests e2e Playwright avec scénarios assistant (`tests/e2e/assistant-demo.spec.ts`)
+## Technologies utilisées
 
-## 🔧 Scripts utiles
+- **Frontend** : Next.js (App Router), TypeScript, TailwindCSS, Heroicons, Recharts, Framer Motion
+- **Backend** : Django REST Framework, SQLite (par défaut)
+- **Assistant IA** : OpenAI (gpt-4o-mini, configurable)
 
-- `npm run dev` : lancer le frontend Next.js
-- `npm run build` / `npm run start`
-- `npm run lint`
-- `npm run test:e2e` : lancer les tests Playwright (assistant IA)
-- `python manage.py runserver` : lancer l’API Django
-- `python manage.py test` : exécuter les tests backend
-- `node scripts/tail-assistant-logs.cjs` : suivre les traces telemetry assistant IA
+## Notes
 
-## 📚 Documentation complémentaire
+- Les médias sont servis par Django en développement (`/media/`).
+- Le frontend communique avec le backend via `/api/*`.
 
-- [backend/INSTALLATION.md](./backend/INSTALLATION.md) – procédure détaillée backend
-- [backend/API_DOCUMENTATION.md](./backend/API_DOCUMENTATION.md) – endpoints REST & exemples
-- [docs/assistant-alerting.md](./docs/assistant-alerting.md) – architecture de journalisation et alertes assistant IA
+## Branches
 
-## 🧠 Assistant IA (démo)
-
-La page `/assistant-demo` propose une expérience dédiée aux consultants :
-
-- Suggestions rapides sous le champ de question pour démarrer la recherche.
-- Résultats structurés en sections (synthèse, narration IA, points marquants, actions, pièces justificatives, statistiques).
-- Suppression des références « catégories » côté interface au profit du terme « thématique ».
-- Accès direct au lien « Mes paramètres » et bouton de déconnexion.
-- Redirections automatiques empêchant les consultants d’accéder aux autres pages administratives.
-
-API associées (mockées côté Next.js) :
-
-- `POST /api/assistant-demo` : requête principale
-- `POST /api/assistant-demo/metrics` : agrégation statistique
-- `POST /api/assistant-demo/telemetry` : journalisation des temps de réponse / modèle
-
-Pour développer ou tester :
-
-```bash
-# Lancer le frontend en mode dev
-npm run dev
-
-# Suivre les logs telemetry
-node scripts/tail-assistant-logs.cjs
-
-# Tests e2e (nécessite le serveur front en route)
-npm run test:e2e
-```
-
----
-
-**ACS – Assureurs Conseils Service** © 2025
+- La branche `fonctionnalite assistant ia` a été fusionnée et peut être supprimée si elle n’est plus utile.
+- Utilisez `main` pour toute évolution.
+>>>>>>> bd767f74 (Mise à jour README et thème)

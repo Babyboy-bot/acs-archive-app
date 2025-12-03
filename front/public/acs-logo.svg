@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 130">
+  <defs>
+    <style>
+      .cls-red { fill: #D32027; }
+      .cls-text { fill: #003366; font-family: Arial, sans-serif; }
+    </style>
+  </defs>
+  
+  <!-- Lettres ACS en rouge -->
+  <text x="10" y="70" font-family="Arial Black, sans-serif" font-size="65" font-weight="900" class="cls-red">ACS</text>
+  
+  <!-- Textes en bas -->
+  <text x="10" y="100" font-size="10" font-weight="600" class="cls-text" letter-spacing="1">ASSUREURS CONSEILS SERVICE</text>
+  <text x="10" y="115" font-size="8" class="cls-text" opacity="0.7">SOCIÉTÉ DE COURTAGE D'ASSURANCES</text>
+</svg>

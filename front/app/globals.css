@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f6f8;
+  --foreground: #171717;
+  --surface: #ffffff;
+  --surface-muted: #f3f4f6;
+  --surface-border: rgba(17, 24, 39, 0.08);
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+}
+
+:root.dark {
+  --background: #0f172a;
+  --foreground: #f9fafb;
+  --surface: #1e293b;
+  --surface-muted: #334155;
+  --surface-border: rgba(148, 163, 184, 0.25);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --input-bg: #1e293b;
+  --input-border: #475569;
+}
+
+body {
+  color: var(--text-primary);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .bg-theme-base {
+    background-color: var(--background);
+  }
+
+  .bg-theme-card {
+    background-color: var(--surface);
+  }
+
+  .bg-theme-muted {
+    background-color: var(--surface-muted);
+  }
+
+  .text-theme-primary {
+    color: var(--text-primary);
+  }
+
+  .text-theme-secondary {
+    color: var(--text-secondary);
+  }
+
+  .border-theme {
+    border-color: var(--surface-border);
+  }
+
+  .bg-theme-input {
+    background-color: var(--input-bg, var(--surface));
+  }
+
+  .border-theme-input {
+    border-color: var(--input-border, var(--surface-border));
+  }
+}
+
+/* Override Tailwind bg-white and bg-gray-* in dark mode */
+.dark .bg-white {
+  background-color: var(--surface) !important;
+}
+
+.dark .bg-gray-50,
+.dark .bg-gray-100 {
+  background-color: var(--surface-muted) !important;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700 {
+  color: var(--text-primary) !important;
+}
+
+.dark .text-gray-600,
+.dark .text-gray-500 {
+  color: var(--text-secondary) !important;
+}
+
+.dark .border-gray-200,
+.dark .border-gray-100 {
+  border-color: var(--surface-border) !important;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: var(--surface) !important;
+  border-color: var(--input-border, var(--surface-border)) !important;
+  color: var(--text-primary) !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--text-secondary) !important;
+}
+
+.dark table {
+  background-color: var(--surface) !important;
+}
+
+.dark thead {
+ background: linear-gradient(to right, var(--surface-muted), var(--surface-muted)) !important;
+}
+
+.dark tbody tr {
+  border-color: var(--surface-border) !important;
+}
+
+.dark tbody tr:hover {
+  background-color: var(--surface-muted) !important;
+}

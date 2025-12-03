@@ -1,0 +1,23 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/activite/page": "/activite",
+  "/api/assistant-demo/metrics/route": "/api/assistant-demo/metrics",
+  "/api/assistant-demo/route": "/api/assistant-demo",
+  "/api/proxy/document/route": "/api/proxy/document",
+  "/assistant-demo/page": "/assistant-demo",
+  "/categories/page": "/categories",
+  "/clients/page": "/clients",
+  "/connexion/page": "/connexion",
+  "/consultant/page": "/consultant",
+  "/contact-administrateur/page": "/contact-administrateur",
+  "/documents/[id]/edit/page": "/documents/[id]/edit",
+  "/documents/nouveau/page": "/documents/nouveau",
+  "/documents/page": "/documents",
+  "/mot-de-passe-oublie/page": "/mot-de-passe-oublie",
+  "/page": "/",
+  "/parametres/page": "/parametres",
+  "/recherche/page": "/recherche",
+  "/tableau-de-bord/page": "/tableau-de-bord",
+  "/utilisateurs/page": "/utilisateurs"
+}

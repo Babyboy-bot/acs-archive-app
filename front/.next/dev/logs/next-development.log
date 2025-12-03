@@ -1,0 +1,314 @@
+[00:00:01.117] Server  LOG      ✓ Ready in 818ms
+[00:01:43.237] Server  LOG      ○ Compiling /assistant-demo ...
+[00:02:30.720] Server  INFO    assistant-telemetry "{\"event\":{\"type\":\"request\",\"intent\":\"documents\",\"questionLength\":42},\"metrics\":{\"startedAt\":1764748572320,\"totalRequests\":1,\"documentsRequests\":1,\"statistiquesRequests\":0,\"errors\":0,\"llmSuccess\":0,\"llmFallback\":0,\"uptimeSeconds\":0},\"timestamp\":\"2025-12-03T07:56:12.340Z\"}"
+[00:02:34.023] Server  INFO    assistant-demo {}
+[00:02:34.025] Server  INFO    assistant-telemetry "{\"event\":{\"type\":\"response\",\"intent\":\"documents\",\"durationMs\":3305,\"pieces\":3,\"llmUsed\":false},\"metrics\":{\"startedAt\":1764748572320,\"totalRequests\":1,\"documentsRequests\":1,\"statistiquesRequests\":0,\"errors\":0,\"llmSuccess\":0,\"llmFallback\":0,\"uptimeSeconds\":3},\"timestamp\":\"2025-12-03T07:56:15.645Z\"}"
+[00:02:42.635] Server  INFO    assistant-telemetry "{\"event\":{\"type\":\"request\",\"intent\":\"documents\",\"questionLength\":44},\"metrics\":{\"startedAt\":1764748572320,\"totalRequests\":2,\"documentsRequests\":2,\"statistiquesRequests\":0,\"errors\":0,\"llmSuccess\":0,\"llmFallback\":0,\"uptimeSeconds\":12},\"timestamp\":\"2025-12-03T07:56:24.255Z\"}"
+[00:02:46.022] Server  INFO    assistant-demo {}
+[00:02:46.026] Server  INFO    assistant-telemetry "{\"event\":{\"type\":\"response\",\"intent\":\"documents\",\"durationMs\":3390,\"pieces\":1,\"llmUsed\":false},\"metrics\":{\"startedAt\":1764748572320,\"totalRequests\":2,\"documentsRequests\":2,\"statistiquesRequests\":0,\"errors\":0,\"llmSuccess\":0,\"llmFallback\":0,\"uptimeSeconds\":15},\"timestamp\":\"2025-12-03T07:56:27.646Z\"}"
+[00:08:17.513] Server  LOG      ✓ Compiled in 206ms
+[00:08:47.569] Browser ERROR   A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/documents" tree={[...]} params={{}} cacheNode={{lazyData:null, ...}} ...>
+            <SegmentViewNode type="page" pagePath="documents/...">
+              <SegmentTrieNode>
+              <ClientPageRoot Component={function PageDocuments} serverProvidedParams={{...}}>
+                <PageDocuments params={Promise} searchParams={Promise}>
+                  <div className="min-h-scre...">
+                    <Navigation>
+                    <main className="container ...">
+                      <motion.header>
+                      <motion.section initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:0.1}} ...>
+                        <section className="bg-white r..." style={{opacity:0, ...}} ...>
+                          <div>
+                          <div className="flex items...">
+                            <span>
+                            <button
+                              onClick={function onClick}
++                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+-                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+                            >
+                            <button
+                              onClick={function onClick}
++                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+-                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+                            >
+                      ...
+            ...
+          ...
+
+[00:09:01.164] Browser ERROR   A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/documents" tree={[...]} params={{}} cacheNode={{lazyData:null, ...}} ...>
+            <SegmentViewNode type="page" pagePath="documents/...">
+              <SegmentTrieNode>
+              <ClientPageRoot Component={function PageDocuments} serverProvidedParams={{...}}>
+                <PageDocuments params={Promise} searchParams={Promise}>
+                  <div className="min-h-scre...">
+                    <Navigation>
+                    <main className="container ...">
+                      <motion.header>
+                      <motion.section initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:0.1}} ...>
+                        <section className="bg-white r..." style={{opacity:0, ...}} ...>
+                          <div>
+                          <div className="flex items...">
+                            <span>
+                            <button
+                              onClick={function onClick}
++                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+-                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+                            >
+                            <button
+                              onClick={function onClick}
++                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+-                             className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-gr..."
+                            >
+                      ...
+            ...
+          ...
+
+[00:09:41.256] Server  LOG      ✓ Compiled in 156ms
+[00:12:10.559] Server  LOG      ✓ Compiled in 77ms
+[00:13:41.067] Server  LOG      ✓ Compiled in 86ms
+[00:29:35.691] Server  LOG      ✓ Compiled in 665ms
+[00:30:36.031] Server  LOG      ✓ Compiled in 277ms
+[00:31:22.797] Server  LOG      ✓ Compiled in 322ms
+[00:31:31.848] Server  LOG      ✓ Compiled in 106ms
+[00:37:32.459] Server  LOG      ✓ Compiled in 310ms
+[00:40:17.834] Server  LOG      ✓ Compiled in 169ms
+[00:40:29.860] Server  LOG      ✓ Compiled in 122ms
+[00:40:43.430] Server  LOG      ✓ Compiled in 57ms
+[00:40:51.019] Server  LOG      ✓ Compiled in 53ms
+[00:41:03.630] Server  LOG      ✓ Compiled in 65ms
+[00:41:14.316] Server  LOG      ✓ Compiled in 71ms
+[00:41:24.091] Server  LOG      ✓ Compiled in 55ms
+[00:41:35.802] Server  LOG      ✓ Compiled in 81ms
+[00:42:04.126] Server  LOG      ✓ Compiled in 63ms
+[00:42:32.705] Server  LOG      ✓ Compiled in 83ms
+[00:47:42.571] Server  LOG      ✓ Compiled in 283ms
+[00:51:37.715] Server  LOG      ✓ Compiled in 74ms
+[00:55:39.090] Server  LOG      ✓ Compiled in 76ms
+[00:55:56.128] Browser ERROR   A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <RenderFromTemplateContext>
+      <ScrollAndFocusHandler segmentPath={[...]}>
+        <InnerScrollAndFocusHandler segmentPath={[...]} focusAndScrollRef={{apply:false, ...}}>
+          <ErrorBoundary errorComponent={undefined} errorStyles={undefined} errorScripts={undefined}>
+            <LoadingBoundary name="assistant-..." loading={null}>
+              <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+                <RedirectBoundary>
+                  <RedirectErrorBoundary router={{...}}>
+                    <InnerLayoutRouter url="/assistant..." tree={[...]} params={{}} cacheNode={{lazyData:null, ...}} ...>
+                      <SegmentViewNode type="page" pagePath="assistant-...">
+                        <SegmentTrieNode>
+                        <ClientPageRoot Component={function ConsultantChatPage} serverProvidedParams={{...}}>
+                          <ConsultantChatPage params={Promise} searchParams={Promise}>
+                            <div
++                             className="flex h-screen bg-[#343541] text-white"
+-                             className="flex h-screen bg-theme-base text-theme-primary"
+                            >
+                              <aside
++                               className="w-64 flex-shrink-0 overflow-hidden transition-all duration-300 bg-[#202123]"
+-                               className="w-64 flex-shrink-0 overflow-hidden transition-all duration-300 bg-theme-car..."
+                              >
+                                <div className="flex flex-...">
+                                  <button
+                                    onClick={function nouvelleConversation}
++                                   className="flex items-center gap-3 w-full px-3 py-3 rounded-md text-sm mb-2 border..."
+-                                   className="flex items-center gap-3 w-full px-3 py-3 rounded-md text-sm mb-2 border..."
+                                  >
+                                  <div className="flex-1 ove...">
+                                    <div>
+                                    <div
++                                     className="px-3 py-2 text-xs text-gray-500"
+-                                     className="px-3 py-2 text-xs text-gray-400"
+                                    >
++                                     Aucune conversation pour le moment.
+                                  <div
++                                   className="border-t border-white/20 pt-2"
+-                                   className="border-t border-theme pt-2"
+                                  >
+                                    <div
++                                     className="flex items-center gap-3 px-3 py-3 rounded-md transition-colors hover:..."
+-                                     className="flex items-center gap-3 px-3 py-3 rounded-md transition-colors hover:..."
+                                    >
+                                      <div>
+                                      <div className="flex-1 min...">
+                                        <p
++                                         className="text-sm truncate text-white"
+-                                         className="text-sm truncate text-theme-primary"
+                                        >
+                                        <p
++                                         className="text-xs text-gray-400"
+-                                         className="text-xs text-gray-500"
+                                        >
++                                         Consultant
+                                    <button
+                                      onClick={function handleLogout}
++                                     className="mt-1 flex items-center gap-3 w-full px-3 py-2 text-sm rounded-md tran..."
+-                                     className="mt-1 flex items-center gap-3 w-full px-3 py-2 text-sm rounded-md tran..."
+                                    >
+                              <div className="flex-1 fle...">
+                                <button
+                                  onClick={function onClick}
++                                 className="absolute top-4 left-4 z-10 p-2 rounded-md transition-colors text-gray-400..."
+-                                 className="absolute top-4 left-4 z-10 p-2 rounded-md transition-colors text-gray-500..."
+                                >
+                                <button
+                                  onClick={function onClick}
++                                 className="absolute top-4 right-4 z-10 p-2 rounded-md transition-colors text-gray-40..."
+-                                 className="absolute top-4 right-4 z-10 p-2 rounded-md transition-colors text-gray-50..."
++                                 aria-label="Activer le mode clair"
+-                                 aria-label="Activer le mode sombre"
+                                >
+                                  <Icon name="sun" size="sm">
+                                    <SunIcon className={"w-5 h-5 "}>
+                                      <svg xmlns="http://www..." fill="none" viewBox="0 0 24 24" strokeWidth={1.5} ...>
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
++                                         d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 1..."
+-                                         d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1..."
+                                        >
+                                <div className="flex-1 ove...">
+                                  <div className="h-full fle...">
+                                    <div>
+                                    <h1
++                                     className="text-3xl font-semibold mb-2 text-white"
+-                                     className="text-3xl font-semibold mb-2 text-theme-primary"
+                                    >
++                                     Assistant Archives ACS
+                                    <p
++                                     className="text-center max-w-md mb-8 text-gray-400"
+-                                     className="text-center max-w-md mb-8 text-theme-secondary"
+                                    >
++                                     Posez-moi une question sur vos documents, contrats ou pièces justificatives. Je s...
+                                    <div className="grid grid-...">
+                                      <button
+                                        onClick={function onClick}
++                                       className="p-4 rounded-xl text-left text-sm transition-colors border border-wh..."
+-                                       className="p-4 rounded-xl text-left text-sm transition-colors border border-th..."
+                                      >
+                                        <Icon name="sparkles" size="xs" className="text-gray-...">
+                                          <SparklesIcon className="w-4 h-4 te...">
+                                            <svg
+                                              xmlns="http://www.w3.org/2000/svg"
+                                              fill="none"
+                                              viewBox="0 0 24 24"
+                                              strokeWidth={1.5}
+                                              stroke="currentColor"
+                                              aria-hidden="true"
+                                              data-slot="icon"
+                                              ref={null}
+                                              aria-labelledby={undefined}
++                                             className="w-4 h-4 text-gray-400 mb-2"
+-                                             className="w-4 h-4 text-gray-500 mb-2"
+                                            >
+                                        ...
+                                      <button
+                                        onClick={function onClick}
++                                       className="p-4 rounded-xl text-left text-sm transition-colors border border-wh..."
+-                                       className="p-4 rounded-xl text-left text-sm transition-colors border border-th..."
+                                      >
+                                        <Icon name="sparkles" size="xs" className="text-gray-...">
+                                          <SparklesIcon className="w-4 h-4 te...">
+                                            <svg
+                                              xmlns="http://www.w3.org/2000/svg"
+                                              fill="none"
+                                              viewBox="0 0 24 24"
+                                              strokeWidth={1.5}
+                                              stroke="currentColor"
+                                              aria-hidden="true"
+                                              data-slot="icon"
+                                              ref={null}
+                                              aria-labelledby={undefined}
++                                             className="w-4 h-4 text-gray-400 mb-2"
+-                                             className="w-4 h-4 text-gray-500 mb-2"
+                                            >
+                                        ...
+                                      <button
+                                        onClick={function onClick}
++                                       className="p-4 rounded-xl text-left text-sm transition-colors border border-wh..."
+-                                       className="p-4 rounded-xl text-left text-sm transition-colors border border-th..."
+                                      >
+                                        <Icon name="sparkles" size="xs" className="text-gray-...">
+                                          <SparklesIcon className="w-4 h-4 te...">
+                                            <svg
+                                              xmlns="http://www.w3.org/2000/svg"
+                                              fill="none"
+                                              viewBox="0 0 24 24"
+                                              strokeWidth={1.5}
+                                              stroke="currentColor"
+                                              aria-hidden="true"
+                                              data-slot="icon"
+                                              ref={null}
+                                              aria-labelledby={undefined}
++                                             className="w-4 h-4 text-gray-400 mb-2"
+-                                             className="w-4 h-4 text-gray-500 mb-2"
+                                            >
+                                        ...
+                                <div
++                                 className="border-t p-4 border-white/20 bg-[#343541]"
+-                                 className="border-t p-4 border-theme bg-theme-card"
+                                >
+                                  <form onSubmit={function envoyerMessage} className="max-w-3xl ...">
+                                    <input
+                                      type="text"
+                                      value=""
+                                      onChange={function onChange}
+                                      placeholder="Envoyez un message..."
+                                      disabled={false}
++                                     className="w-full rounded-xl py-4 pl-4 pr-12 outline-none border transition-colo..."
+-                                     className="w-full rounded-xl py-4 pl-4 pr-12 outline-none border transition-colo..."
+                                    >
+                                    <button
+                                      type="submit"
+                                      disabled={true}
++                                     className="absolute right-3 top-1/2 -translate-y-1/2 p-2 disabled:opacity-30 dis..."
+-                                     className="absolute right-3 top-1/2 -translate-y-1/2 p-2 disabled:opacity-30 dis..."
+                                    >
+                                  ...
+                      ...
+                    ...
+          ...
+
+[00:56:30.906] Server  LOG      ✓ Compiled in 85ms
