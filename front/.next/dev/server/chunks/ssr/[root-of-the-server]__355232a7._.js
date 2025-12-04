@@ -241,7 +241,7 @@ __turbopack_context__.s([
 const TOKEN_KEY = 'authToken';
 const REFRESH_KEY = 'refreshToken';
 const UTILISATEUR_KEY = 'utilisateurActif';
-const API_BASE_URL = ("TURBOPACK compile-time value", "http://127.0.0.1:8000/api") ?? 'http://127.0.0.1:8000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000/api';
 function isBrowser() {
     return ("TURBOPACK compile-time value", "undefined") !== 'undefined';
 }

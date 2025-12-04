@@ -1,9 +1,9 @@
 {
-  "/api/assistant-demo/route": "app/api/assistant-demo/route.js",
   "/assistant-demo/page": "app/assistant-demo/page.js",
   "/clients/page": "app/clients/page.js",
+  "/connexion/page": "app/connexion/page.js",
   "/documents/page": "app/documents/page.js",
-  "/parametres/page": "app/parametres/page.js",
+  "/page": "app/page.js",
   "/recherche/page": "app/recherche/page.js",
   "/tableau-de-bord/page": "app/tableau-de-bord/page.js",
   "/utilisateurs/page": "app/utilisateurs/page.js"

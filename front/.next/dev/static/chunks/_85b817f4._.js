@@ -224,7 +224,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist
 const TOKEN_KEY = 'authToken';
 const REFRESH_KEY = 'refreshToken';
 const UTILISATEUR_KEY = 'utilisateurActif';
-const API_BASE_URL = ("TURBOPACK compile-time value", "http://127.0.0.1:8000/api") ?? 'http://127.0.0.1:8000/api';
+const API_BASE_URL = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$build$2f$polyfills$2f$process$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000/api';
 function isBrowser() {
     return ("TURBOPACK compile-time value", "object") !== 'undefined';
 }

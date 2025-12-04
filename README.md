@@ -1,88 +1,96 @@
 # ACS Archive App
 
-Application d’archivage documentaire moderne avec interface web (Next.js) et backend (Django), intégrant un assistant IA conversationnel, la gestion avancée des thèmes (clair/sombre), un logo personnalisable et une expérience utilisateur optimisée.
+Application de gestion et d’archivage documentaire pour ACS (Assureurs Conseils Service), avec :
+
+- Authentification JWT multi‑rôles (admin, archiviste, consultant)
+- Gestion des clients, exercices, risques, documents
+- Assistant IA conversationnel intégré
+- Interface moderne (Next.js, thème clair/sombre, tableaux de bord, etc.)
 
 ## Structure du projet
 
-```
+```text
 /acs-archive-app/
-├── front/          # Frontend Next.js (App Router, TypeScript, TailwindCSS)
-│   ├── app/        # Pages (dashboard, documents, assistant, paramètres...)
-│   ├── components/ # Composants React réutilisables
-│   ├── lib/        # Utilitaires (API, session, thème, etc.)
-│   ├── public/     # Fichiers statiques (logo, images)
+├── backend/       # Backend Django (API REST)
+│   ├── acs_backend/
+│   ├── api/       # Modèles, vues, serializers, URLs
+│   └── manage.py
+├── front/         # Frontend Next.js (App Router, TypeScript, TailwindCSS)
+│   ├── app/       # Pages (tableau de bord, documents, clients, assistant, etc.)
+│   ├── components/# Composants React réutilisables
+│   ├── hooks/     # Hooks personnalisés
+│   ├── lib/       # API client, session, permissions, impression, thème…
+│   ├── public/    # Assets (logo ACS, images…)
 │   └── ...
-└── back/           # Backend Django (API REST)
-    ├── backend/
-    │   ├── api/    # Vues, serializers, urls, modèles
-    │   ├── acs_backend/
-    │   └── manage.py
-    └── .venv/      # Environnement virtuel Python
+├── experiments/   # POCs, scripts et essais techniques
+├── types/         # Types TypeScript globaux (partagés)
+└── fichiers de configuration racine (postcss.config.mjs, prisma.config.ts, …)
 ```
 
 ## Démarrage rapide
 
-### Backend (Django)
-```bash
-cd back
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r backend/requirements.txt
+### 1. Backend (Django + PostgreSQL)
+
+Depuis le dossier racine :
+
+```powershell
 cd backend
-python manage.py migrate
+
+# (1ère fois uniquement) créer et activer le venv
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Installer les dépendances
+pip install -r requirements.txt
+
+# Lancer le serveur
 python manage.py runserver
 ```
 
-### Frontend (Next.js)
-```bash
+Par défaut, l’API est disponible sur : `http://127.0.0.1:8000/api/`.
+
+> ⚠️ Les migrations Django ne sont pas toutes appliquées volontairement pour préserver une base existante. Ne pas lancer `python manage.py migrate` sans avoir vérifié l’impact sur la base PostgreSQL.
+
+### 2. Frontend (Next.js)
+
+Dans un autre terminal, depuis le dossier racine :
+
+```powershell
 cd front
 npm install
 npm run dev
 ```
 
+L’interface web est disponible sur : `http://localhost:3000`.
+
 ## Variables d’environnement
 
-- Dans `front/.env.local` :
-  ```bash
-  NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api
-  ASSISTANT_LLM_PROVIDER=openai
-  ASSISTANT_LLM_API_KEY=sk-...
-  ASSISTANT_LLM_MODEL=gpt-4o-mini
-  ASSISTANT_LLM_ENABLED=true
-  ```
-- Dans `back/backend/.env` (optionnel) :
-  ```bash
-  DEBUG=True
-  SECRET_KEY=...
-  DATABASE_URL=sqlite:///db.sqlite3
-  ```
+### Frontend (`front/.env.local`)
 
-## Fonctionnalités principales
+```env
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api
+ASSISTANT_LLM_PROVIDER=openai
+ASSISTANT_LLM_API_KEY=sk-...
+ASSISTANT_LLM_MODEL=gpt-4o-mini
+ASSISTANT_LLM_ENABLED=true
+```
 
-- Authentification JWT multi-rôles (admin, archiviste, consultant)
-- Gestion complète des documents, clients, exercices, risques
-- Assistant IA conversationnel (OpenAI, configurable, historique persistant)
-- Recherche sémantique avancée (TF-IDF / FAISS)
-- Téléchargement, impression, ouverture de pièces justificatives
-- Interface responsive, expérience utilisateur soignée
-- Thème clair/sombre personnalisable (avec bouton de bascule, persistance)
-- Logo ACS personnalisable dans la navigation
-- Persistance du mode d’affichage (grille/liste) pour les documents
-- Tableaux de bord avec graphiques (Recharts)
+### Backend (`backend/.env`, optionnel)
 
-## Technologies utilisées
+```env
+DEBUG=True
+SECRET_KEY=change-me
+DATABASE_URL=postgresql://user:password@localhost:5432/acs_archive
+```
 
-- **Frontend** : Next.js (App Router), TypeScript, TailwindCSS, Heroicons, Recharts, Framer Motion
-- **Backend** : Django REST Framework, SQLite (par défaut)
-- **Assistant IA** : OpenAI (gpt-4o-mini, configurable)
+## Technologies principales
+
+- **Frontend** : Next.js (App Router), React, TypeScript, TailwindCSS, Recharts, Framer Motion, React PDF, jsPDF…
+- **Backend** : Django 5, Django REST Framework, JWT (djangorestframework-simplejwt), PostgreSQL, psycopg2-binary
+- **IA / recherche** : scikit-learn, faiss-cpu
 
 ## Notes
 
-- Les médias sont servis par Django en développement (`/media/`).
-- Le frontend communique avec le backend via `/api/*`.
-
-## Branches
-
-- La branche `fonctionnalite assistant ia` a été fusionnée et peut être supprimée si elle n’est plus utile.
-- Utilisez `main` pour toute évolution.
->>>>>>> bd767f74 (Mise à jour README et thème)
+- Les médias sont servis par Django en développement via `/media/`.
+- Le frontend communique avec le backend via le préfixe `/api/*`.
+- La branche principale du projet est `main`.

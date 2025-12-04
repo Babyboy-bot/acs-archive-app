@@ -26,6 +26,10 @@ class UtilisateurManager(BaseUserManager):
             prenom=prenom,
             **extra_fields
         )
+        # Champ legacy pour compatibilité avec la colonne motDePasse existante en base
+        # On évite les valeurs NULL pour respecter la contrainte NOT NULL
+        if hasattr(user, "mot_de_passe_legacy"):
+            user.mot_de_passe_legacy = password or ""
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -49,11 +53,12 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
         ('CONSULTANT', 'Consultant'),
     ]
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
     nom_utilisateur = models.CharField(max_length=150, unique=True, db_column='nomUtilisateur')
     nom = models.CharField(max_length=150)
     prenom = models.CharField(max_length=150)
     email = models.EmailField(blank=True, null=True)
+    mot_de_passe_legacy = models.CharField(max_length=255, db_column='motDePasse', default='', blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='CONSULTANT')
     est_actif = models.BooleanField(default=True, db_column='estActif')
     date_creation = models.DateTimeField(auto_now_add=True, db_column='dateCreation')
@@ -93,7 +98,7 @@ class Client(models.Model):
         ('PARTICULIER', 'Particulier'),
     ]
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
     nom = models.CharField(max_length=255, unique=True)
     numero_client = models.CharField(max_length=100, unique=True, null=True, blank=True, db_column='numeroClient')
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='ENTREPRISE')
@@ -143,7 +148,7 @@ class Exercice(models.Model):
 class Risque(models.Model):
     """Modèle Risque"""
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
     type = models.CharField(max_length=100)
     numero_police = models.CharField(max_length=100, null=True, blank=True, db_column='numeroPolice')
     exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE, related_name='risques', db_column='exerciceId')
@@ -163,7 +168,7 @@ class Risque(models.Model):
 class Categorie(models.Model):
     """Modèle Catégorie de documents"""
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
     nom = models.CharField(max_length=100, unique=True)
     description = models.TextField(null=True, blank=True)
     couleur = models.CharField(max_length=7, default='#D32027')
