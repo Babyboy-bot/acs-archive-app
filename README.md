@@ -2,9 +2,10 @@
 
 Application de gestion et d’archivage documentaire pour ACS (Assureurs Conseils Service), avec :
 
-- Authentification JWT multi‑rôles (admin, archiviste, consultant)
-- Gestion des clients, exercices, risques, documents
-- Assistant IA conversationnel intégré
+- Authentification sécurisée multi‑rôles (JWT en cookies **httpOnly** + middleware, rôles admin / archiviste / consultant)
+- Gestion des clients, exercices, risques, documents (dont clients groupe / flotte)
+- Recherche avancée et recherche rapide des documents (client / exercice / risque / type de courrier, avec normalisation robuste accents/casse)
+- Assistant IA conversationnel intégré (recherche documentaire TF‑IDF / FAISS; recherche sémantique par embeddings reportée à plus tard)
 - Interface moderne (Next.js, thème clair/sombre, tableaux de bord, etc.)
 
 ## Structure du projet
@@ -87,7 +88,13 @@ DATABASE_URL=postgresql://user:password@localhost:5432/acs_archive
 
 - **Frontend** : Next.js (App Router), React, TypeScript, TailwindCSS, Recharts, Framer Motion, React PDF, jsPDF…
 - **Backend** : Django 5, Django REST Framework, JWT (djangorestframework-simplejwt), PostgreSQL, psycopg2-binary
-- **IA / recherche** : scikit-learn, faiss-cpu
+- **IA / recherche** : scikit-learn, faiss-cpu (recherche lexicale/TF‑IDF pour l’assistant IA et l’API de recherche rapide)
+
+## Recherche documentaire & assistant IA
+
+- **Recherche avancée** : page dédiée permettant de filtrer les documents par client, exercice, type de risque et type de courrier. Les libellés de risques sont normalisés (accents, variantes d’orthographe) pour garantir des résultats fiables.
+- **Recherche rapide** : barre globale (Ctrl+K) qui interroge l’endpoint `/documents/search/` et combine client / exercice / risque / type de courrier / titre / référence via une normalisation texte robuste (accents, casse, ponctuation).
+- **Assistant IA** : utilise aujourd’hui une recherche lexicale (TF‑IDF / FAISS) sur les documents. La recherche sémantique basée sur `torch` / `sentence-transformers` est volontairement désactivée dans l’environnement Windows local et sera réactivée plus tard sur une infrastructure adaptée (Linux/Cloud).
 
 ## Notes
 
