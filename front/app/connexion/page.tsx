@@ -44,8 +44,6 @@ export default function PageConnexion() {
       const role = (data as any).utilisateur.role as RoleUtilisateur
 
       enregistrerSession({
-        token: (data as any).token,
-        refresh: (data as any).refresh,
         utilisateur: {
           id: (data as any).utilisateur.id,
           nomUtilisateur: (data as any).utilisateur.nomUtilisateur,
@@ -66,7 +64,7 @@ export default function PageConnexion() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)' }}>
+    <div className="min-h-screen bg-theme-base text-theme-primary flex items-center justify-center px-4 relative overflow-hidden">
       {/* Effets d'arrière-plan */}
       <div className="absolute inset-0">
         <div className="absolute w-96 h-96 rounded-full blur-3xl -top-48 -left-48 animate-pulse" style={{ backgroundColor: 'rgba(211, 32, 39, 0.08)' }} />
@@ -199,14 +197,6 @@ export default function PageConnexion() {
               )}
             </motion.button>
           </form>
-
-          <div className="mt-6 text-center text-sm text-gray-600">
-            Besoin d'accès ou d'assistance ?{' '}
-            <Link href="/contact-administrateur" className="font-medium hover:opacity-80 transition-opacity flex items-center justify-center gap-1 mt-2" style={{ color: '#0066B3' }}>
-              <Icon name="user" size="xs" />
-              Contactez l'administrateur
-            </Link>
-          </div>
         </motion.div>
 
         {/* Pied de page */}

@@ -23,6 +23,7 @@ export function StatsTempsReel({ intervalMs = 5000 }: StatsTempsReelProps) {
     { label: 'Documents', valeur: 0, variation: 0, icone: 'folder', couleur: '#D32027', unite: '' },
     { label: 'Clients', valeur: 0, variation: 0, icone: 'users', couleur: '#0066B3', unite: '' },
     { label: "Uploads aujourd'hui", valeur: 0, variation: 0, icone: 'upload', couleur: '#10B981', unite: '' },
+    { label: 'Utilisateurs', valeur: 0, variation: 0, icone: 'eye', couleur: '#6366F1', unite: '' },
   ])
   
   const [derniereMAJ, setDerniereMAJ] = useState(new Date())
@@ -43,11 +44,13 @@ export function StatsTempsReel({ intervalMs = 5000 }: StatsTempsReelProps) {
       const documents = Number((data as any).documents ?? 0)
       const uploads = Number((data as any).uploadsAujourdhui ?? 0)
       const clients = Number((data as any).clients ?? 0)
+      const utilisateurs = Number((data as any).utilisateurs ?? 0)
 
       setStats(prevStats => [
         { ...prevStats[0], valeur: documents, variation: documents - prevStats[0].valeur },
         { ...prevStats[1], valeur: clients, variation: clients - prevStats[1].valeur },
         { ...prevStats[2], valeur: uploads, variation: uploads - prevStats[2].valeur },
+        { ...prevStats[3], valeur: utilisateurs, variation: utilisateurs - prevStats[3].valeur },
       ])
     } catch (error) {
       console.error('Erreur chargement stats:', error)

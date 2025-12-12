@@ -63,6 +63,7 @@ export default function PageEditionDocument() {
     chargerDocument()
   }, [documentId])
 
+
   const risques = [
     { value: 'AUTOMOBILE', label: 'Automobile', color: '#D32027' },
     { value: 'SANTE', label: 'Santé', color: '#10B981' },
@@ -120,7 +121,7 @@ export default function PageEditionDocument() {
 
   if (chargement) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-theme-base text-theme-primary">
         <Navigation />
         <main className="container mx-auto px-4 py-8">
           <div className="flex items-center justify-center h-64">
@@ -133,7 +134,7 @@ export default function PageEditionDocument() {
 
   if (erreur && !titre) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-theme-base text-theme-primary">
         <Navigation />
         <main className="container mx-auto px-4 py-8">
           <div className="bg-red-50 border-2 border-red-200 rounded-xl p-6 text-center">
@@ -152,7 +153,7 @@ export default function PageEditionDocument() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-theme-base text-theme-primary">
       <Navigation />
       
       <main className="container mx-auto px-4 py-8">

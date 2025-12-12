@@ -49,10 +49,6 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
         setLoading(true)
         setError(null)
         const headers = new Headers()
-        const token = getToken()
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`)
-        }
         headers.set('Accept', 'application/pdf')
 
         const response = await fetch(fetchUrl, {
@@ -116,10 +112,6 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
 
     try {
       const headers = new Headers()
-      const token = getToken()
-      if (token) {
-        headers.set('Authorization', `Bearer ${token}`)
-      }
       headers.set('Accept', 'application/pdf')
 
       const response = await fetch(source, {
@@ -158,10 +150,6 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
 
     try {
       const headers = new Headers()
-      const token = getToken()
-      if (token) {
-        headers.set('Authorization', `Bearer ${token}`)
-      }
       headers.set('Accept', 'application/pdf,image/*')
 
       const response = await fetch(source, {

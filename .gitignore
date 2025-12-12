@@ -10,9 +10,11 @@
 
 # testing
 /coverage
+/test-results/
 
 # next.js
 /.next/
+front/.next/
 /out/
 
 # production
@@ -30,6 +32,29 @@ yarn-error.log*
 # env files
 .env*.local
 .env
+backend/.env
+front/.env.local
+front/.env.*
+
+# Python/Django
+*.pyc
+__pycache__/
+.venv/
+backend/.venv/
+backend/__pycache__/
+backend/*.sqlite3
+backend/*.log
+backend/backups/
+backend/scripts/
+
+# Node/Next.js
+node_modules/
+front/node_modules/
+
+# Experiments IA
+experiments/assistant-ia/.env
+experiments/assistant-ia/.cache
+experiments/assistant-ia/indexes/
 
 # vercel
 .vercel

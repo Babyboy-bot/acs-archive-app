@@ -40,6 +40,13 @@ export type AssistantLogEvent =
       message: string
       status?: number
     }
+  | {
+      type: 'security'
+      intent?: AssistantIntent
+      riskLevel: 'low' | 'medium' | 'high'
+      flags: { promptInjectionSuspect?: boolean; piiSuspect?: boolean }
+      message?: string
+    }
 
 export function incrementRequest(intent: AssistantIntent) {
   assistantMetrics.totalRequests += 1

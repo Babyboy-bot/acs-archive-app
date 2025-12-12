@@ -1,10 +1,12 @@
 'use client'
 
-import { FormEvent, useEffect, useState, useRef } from 'react'
+import { FormEvent, useEffect, useState, useRef, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { Icon } from '@/components/Icon'
+import { motion, AnimatePresence } from 'framer-motion'
 import { getToken, getUtilisateurActif, SessionUtilisateur, supprimerSession } from '@/lib/session'
 import { apiFetchJson } from '@/lib/api'
+import { printBlob } from '@/lib/print'
 import { RoleUtilisateur } from '@/types'
 
 interface PieceJustificativeMetadata extends Record<string, unknown> {
@@ -20,6 +22,7 @@ interface PieceJustificativeMetadata extends Record<string, unknown> {
   highlights?: string[]
   fichier_url?: string
   type_fichier?: string
+  risque?: string
 }
 
 interface PieceJustificative {
@@ -39,6 +42,8 @@ interface Message {
   timestamp: Date
   pieces?: PieceJustificative[]
   isError?: boolean
+    interactionId?: string  // Pour le système de feedback 👍/👎
+  feedbackGiven?: 'like' | 'dislike' | null
 }
 
 interface AssistantConversationSummary {
@@ -50,11 +55,6 @@ interface AssistantConversationSummary {
   nombre_messages?: number
 }
 
-const SUGGESTIONS = [
-  'Quels sont les derniers avenants de 2025 ?',
-  'Montre-moi les documents du client SANLAM',
-  'Quels contrats arrivent à échéance ce mois ?',
-]
 
 const LOCAL_STORAGE_KEY = 'acs-assistant-conversation-v1'
 const ACTIVE_CONVERSATION_KEY = 'acs-assistant-active-conversation-id'
@@ -66,6 +66,7 @@ export default function ConsultantChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [typingIndicator, setTypingIndicator] = useState(false)
   const [utilisateur, setUtilisateur] = useState<SessionUtilisateur | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -190,15 +191,11 @@ export default function ConsultantChatPage() {
 
       const finalUrl = buildFileUrl(fichierUrl)
 
-      const token = getToken()
       const headers: Record<string, string> = {
         'Accept': 'application/octet-stream, application/pdf, image/*, */*',
       }
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
 
-      const response = await fetch(finalUrl, { method: 'GET', headers })
+      const response = await fetch(finalUrl, { method: 'GET', headers, credentials: 'include' })
       if (!response.ok) throw new Error(`Erreur ${response.status}`)
 
       const blob = await response.blob()
@@ -245,26 +242,45 @@ export default function ConsultantChatPage() {
     }
   }
 
-  const imprimerPiece = (piece: PieceJustificative) => {
-    const fichierUrl = piece.metadata?.fichier_url
-    if (!fichierUrl) {
-      alert("Ce document n'a pas de fichier imprimable")
-      return
-    }
+  const imprimerPiece = async (piece: PieceJustificative) => {
+    try {
+      const fichierUrl = piece.metadata?.fichier_url
+      if (!fichierUrl) {
+        alert("Ce document n'a pas de fichier imprimable")
+        return
+      }
 
-    const finalUrl = buildFileUrl(fichierUrl)
+      const finalUrl = buildFileUrl(fichierUrl)
+      const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(finalUrl)}`
 
-    const printWindow = window.open(finalUrl, '_blank')
-    if (!printWindow) {
-      alert("Impossible d'ouvrir le document pour impression")
-      return
-    }
+      const headers = new Headers({ Accept: 'application/pdf,image/*' })
 
-    printWindow.onload = () => {
-      try {
-        printWindow.print()
-      } catch (error) {
-        console.error("Erreur lors de l'impression :", error)
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        credentials: 'include',
+        headers,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Erreur ${response.status}`)
+      }
+
+      const blob = await response.blob()
+
+      await printBlob({
+        blob,
+        title: (piece.metadata?.titre as string) || 'Document',
+        mimeType: response.headers.get('content-type'),
+        sourceUrl: finalUrl,
+        fallbackUrl: finalUrl,
+      })
+    } catch (error) {
+      console.error("Erreur lors de l'impression :", error)
+      alert("Impossible d'imprimer ce document pour le moment")
+      const fichierUrl = piece.metadata?.fichier_url
+      if (fichierUrl) {
+        const finalUrl = buildFileUrl(fichierUrl)
+        window.open(finalUrl, '_blank', 'noopener,noreferrer')
       }
     }
   }
@@ -286,7 +302,6 @@ export default function ConsultantChatPage() {
     setIsLoading(true)
 
     try {
-      const token = getToken()
       const utilisateur = getUtilisateurActif()
 
       let currentConversationId = conversationId
@@ -356,9 +371,9 @@ export default function ConsultantChatPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token && { Authorization: `Bearer ${token}` }),
           ...(utilisateur?.role && { 'x-user-role': utilisateur.role }),
         },
+        credentials: 'include',
         body: JSON.stringify({ question }),
       })
 
@@ -386,7 +401,10 @@ export default function ConsultantChatPage() {
         role: 'assistant',
         content: data.narration?.texte || data.resume || 'Je n\'ai pas trouvé de résultat.',
         timestamp: new Date(),
-        pieces,
+        // N'inclure les pièces que si elles existent vraiment
+        ...(pieces && pieces.length > 0 ? { pieces } : {}),
+                // ID pour le système de feedback/apprentissage
+        interactionId: data.interactionId,
       }
 
       setMessages((prev) => [...prev, assistantMessage])
@@ -452,10 +470,38 @@ export default function ConsultantChatPage() {
     }
   }
 
-  const handleSuggestionClick = (suggestion: string) => {
-    setInput(suggestion)
+  
+  // Fonction pour envoyer le feedback sur une réponse de l'assistant
+  const handleFeedback = async (messageId: string, interactionId: string, feedback: 'like' | 'dislike') => {
+    try {
+      const response = await fetch('/api/assistant-demo/feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          interactionId,
+          feedback,
+        }),
+      })
+      
+      if (response.ok) {
+        // Mettre à jour le message pour afficher le feedback
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, feedbackGiven: feedback }
+            : msg
+        ))
+        console.log(`Feedback ${feedback} envoyé pour ${interactionId}`)
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'envoi du feedback:', error)
+    }
   }
 
+  // Générer des suggestions rapides basées sur la réponse de l'assistant
+  
   const chargerConversation = async (id: string) => {
     if (!id || id === conversationId) return
 
@@ -697,34 +743,17 @@ export default function ConsultantChatPage() {
                 Je suis là pour vous aider !
               </p>
 
-              {/* Suggestions */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-3xl w-full">
-                {SUGGESTIONS.map((suggestion, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className={`p-4 rounded-xl text-left text-sm transition-colors ${
-                      isDark
-                        ? 'border border-white/20 text-gray-300 hover:bg-theme-card/5'
-                        : 'border border-theme bg-theme-card text-theme-primary hover:bg-theme-card'
-                    }`}
-                  >
-                    <Icon
-                      name="sparkles"
-                      size="xs"
-                      className={isDark ? 'text-gray-400 mb-2' : 'text-gray-500 mb-2'}
-                    />
-                    <p>{suggestion}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
+                                        </div>
           ) : (
             // Conversation
             <div className="max-w-3xl mx-auto w-full py-8 px-4">
+              <AnimatePresence>
               {messages.map((message) => (
-                <div
+                <motion.div
                   key={message.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
                   className={`py-6 -mx-4 px-4 rounded-lg mb-4 ${
                     message.role === 'assistant'
                       ? isDark
@@ -732,6 +761,7 @@ export default function ConsultantChatPage() {
                         : 'bg-theme-card'
                       : 'bg-transparent'
                   }`}
+                  data-message-id={message.id}
                 >
                   <div className="flex gap-4 max-w-3xl mx-auto">
                     {/* Avatar */}
@@ -804,6 +834,11 @@ export default function ConsultantChatPage() {
                                           {piece.metadata.client}
                                         </span>
                                       )}
+                                      {piece.metadata?.risque && (
+                                        <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
+                                          {piece.metadata.risque}
+                                        </span>
+                                      )}
                                       {piece.metadata?.type && (
                                         <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
                                           {piece.metadata.type}
@@ -815,76 +850,94 @@ export default function ConsultantChatPage() {
                                         </span>
                                       )}
                                     </div>
-                                    {piece.content && (
-                                      <p
-                                        className={`text-sm mt-2 line-clamp-2 ${
-                                          isDark ? 'text-gray-400' : 'text-theme-secondary'
-                                        }`}
-                                      >
-                                        {piece.content}
-                                      </p>
-                                    )}
+                                    {(() => {
+                                      const brut = piece.content || ''
+                                      const lignesFiltrees = brut
+                                        .split('\n')
+                                        .filter((ligne) => {
+                                          const trimmed = ligne.trim()
+                                          if (!trimmed) return false
+                                          if (trimmed.startsWith('Client :')) return false
+                                          if (trimmed.startsWith('Type de courrier :')) return false
+                                          return true
+                                        })
+                                      const contenuAffiche = lignesFiltrees.join('\n').trim()
+                                      if (!contenuAffiche) return null
+                                      return (
+                                        <p
+                                          className={`text-sm mt-2 line-clamp-2 ${
+                                            isDark ? 'text-gray-400' : 'text-theme-secondary'
+                                          }`}
+                                        >
+                                          {contenuAffiche}
+                                        </p>
+                                      )
+                                    })()}
                                   </div>
 
-                                  {/* Actions */}
-                                  <div className="flex items-center gap-2">
-                                    {piece.metadata?.fichier_url && (
-                                      <>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            ouvrirPiece(piece)
-                                          }}
-                                          className={`p-2 rounded transition-colors ${
-                                            isDark
-                                              ? 'text-gray-400 hover:text-white hover:bg-theme-card/10'
-                                              : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'
-                                          }`}
-                                          title="Ouvrir"
-                                        >
-                                          <Icon name="arrow-right" size="sm" />
-                                        </button>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            void telechargerPiece(piece)
-                                          }}
-                                          className={`p-2 rounded transition-colors ${
-                                            isDark
-                                              ? 'text-gray-400 hover:text-white hover:bg-theme-card/10'
-                                              : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'
-                                          }`}
-                                          title="Télécharger"
-                                        >
-                                          <Icon name="download" size="sm" />
-                                        </button>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            imprimerPiece(piece)
-                                          }}
-                                          className={`p-2 rounded transition-colors ${
-                                            isDark
-                                              ? 'text-gray-400 hover:text-white hover:bg-theme-card/10'
-                                              : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'
-                                          }`}
-                                          title="Imprimer"
-                                        >
-                                          <Icon name="print" size="sm" />
-                                        </button>
-                                      </>
-                                    )}
-                                  </div>
+                                  {/* Actions supprimées pour épurer l'interface des cartes de pièces justificatives */}
                                 </div>
                               </div>
                             ))}
                           </div>
                         </div>
                       )}
+                      
+                                                                  
+                      {/* Feedback Buttons - Système d'apprentissage */}
+                      {message.role === 'assistant' && message.interactionId && !message.isError && (
+                        <div className={`mt-4 pt-3 border-t flex items-center gap-3 ${
+                          isDark ? 'border-white/10' : 'border-theme'
+                        }`}>
+                          <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-theme-tertiary'}`}>
+                            Cette réponse vous a-t-elle aidé ?
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleFeedback(message.id, message.interactionId!, 'like')}
+                              disabled={message.feedbackGiven !== undefined && message.feedbackGiven !== null}
+                              className={`p-1.5 rounded-md transition-all ${
+                                message.feedbackGiven === 'like'
+                                  ? 'bg-green-500/20 text-green-500'
+                                  : message.feedbackGiven
+                                    ? 'opacity-30 cursor-not-allowed text-gray-400'
+                                    : isDark
+                                      ? 'hover:bg-green-500/20 text-gray-400 hover:text-green-500'
+                                      : 'hover:bg-green-100 text-gray-400 hover:text-green-600'
+                              }`}
+                              title="Bonne réponse"
+                            >
+                                👍
+                            </button>
+                            <button
+                              onClick={() => handleFeedback(message.id, message.interactionId!, 'dislike')}
+                              disabled={message.feedbackGiven !== undefined && message.feedbackGiven !== null}
+                              className={`p-1.5 rounded-md transition-all ${
+                                message.feedbackGiven === 'dislike'
+                                  ? 'bg-red-500/20 text-red-500'
+                                  : message.feedbackGiven
+                                    ? 'opacity-30 cursor-not-allowed text-gray-400'
+                                    : isDark
+                                      ? 'hover:bg-red-500/20 text-gray-400 hover:text-red-500'
+                                      : 'hover:bg-red-100 text-gray-400 hover:text-red-600'
+                              }`}
+                              title="Mauvaise réponse"
+                            >
+                                👎
+                            </button>
+                          </div>
+                          {message.feedbackGiven && (
+                            <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-theme-tertiary'}`}>
+                              Merci pour votre retour !
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
+                </motion.div>
               ))}
+              </AnimatePresence>
 
               {/* Loading indicator */}
               {isLoading && (
@@ -897,10 +950,21 @@ export default function ConsultantChatPage() {
                     <div className="w-8 h-8 rounded-sm flex-shrink-0 bg-gradient-to-br from-red-500 to-blue-600 flex items-center justify-center">
                       <Icon name="sparkles" size="sm" className="text-white" />
                     </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <div className={`text-sm mt-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <motion.span
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ duration: 0.5 }}
+                        >
+                          L'assistant réfléchit...
+                        </motion.span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -922,13 +986,25 @@ export default function ConsultantChatPage() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Envoyez un message..."
+              placeholder={isLoading ? "L'assistant réfléchit..." : "Envoyez un message..."}
               disabled={isLoading}
               className={`w-full rounded-xl py-4 pl-4 pr-12 outline-none border transition-colors disabled:opacity-50 ${
                 isDark
                   ? 'bg-[#40414f] text-white placeholder-gray-400 border-white/10 focus:border-white/30'
                   : 'bg-theme-card text-theme-primary placeholder-gray-400 border-theme focus:border-blue-500'
               }`}
+              onFocus={() => {
+                // Scroll to bottom when input is focused
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+              }}
+              onKeyDown={(e) => {
+                // Scroll to bottom when typing
+                if (e.key !== 'Tab' && e.key !== 'Shift') {
+                  setTimeout(() => {
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+                  }, 100)
+                }
+              }}
             />
             <button
               type="submit"
@@ -943,7 +1019,13 @@ export default function ConsultantChatPage() {
             </button>
           </form>
           <p className="text-xs text-gray-500 text-center mt-2">
-            Assistant Archives ACS - Recherche dans vos documents
+            <motion.span
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 1 }}
+            >
+              Assistant Archives ACS - Recherche intelligente dans vos documents
+            </motion.span>
           </p>
         </div>
       </div>

@@ -325,8 +325,28 @@ export default function PageUtilisateurs() {
         body: JSON.stringify(payload)
       })
 
-      if (!response.ok || !data || typeof data !== 'object' || !('success' in data) || !(data as any).success) {
-        throw new Error((data as any)?.erreur || (data as any)?.detail || `Erreur lors ${estEdition ? 'de la mise à jour' : 'de la création'} de l’utilisateur`)
+      if (!response.ok) {
+        let msg = ''
+        if (data && typeof data === 'object') {
+          msg = Object.entries(data as any)
+            .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+            .join('\n')
+        } else {
+          msg = (data as any)?.erreur || (data as any)?.detail || ''
+        }
+        console.error('Erreur API création/mise à jour utilisateur:', data)
+        setErreur(msg || `Erreur HTTP ${response.status}`)
+        return
+      }
+
+      if (!data || typeof data !== 'object' || !('success' in data) || !(data as any).success) {
+        const msg =
+          (data as any)?.erreur ||
+          (data as any)?.detail ||
+          `Réponse inattendue lors ${estEdition ? 'de la mise à jour' : 'de la création'} de l’utilisateur`
+        console.error('Réponse inattendue API utilisateurs:', data)
+        setErreur(msg)
+        return
       }
 
       await chargerUtilisateurs(false)
@@ -339,8 +359,8 @@ export default function PageUtilisateurs() {
 
       fermerFormulaire()
     } catch (error: any) {
-      console.error('Erreur soumission utilisateur:', error)
-      setErreur(error?.message || 'Erreur lors de l’enregistrement de l’utilisateur')
+      console.error('Erreur réseau ou inattendue lors de la soumission utilisateur:', error)
+      setErreur(error?.message || 'Erreur de connexion au serveur')
     } finally {
       setSoumissionEnCours(false)
     }
@@ -348,7 +368,7 @@ export default function PageUtilisateurs() {
 
   if (!peutVoirUtilisateurs) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-theme-base text-theme-primary">
         <Navigation />
         <main className="container mx-auto px-4 py-16 flex flex-col items-center text-center gap-6">
           <div className="flex items-center gap-3 text-red-600">
@@ -364,7 +384,7 @@ export default function PageUtilisateurs() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-theme-base text-theme-primary">
       <Navigation />
       
       <main className="container mx-auto px-4 py-8">

@@ -20,16 +20,13 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
   const { skipAuth, headers, ...rest } = options
   const finalHeaders = new Headers(headers ?? {})
 
-  if (!skipAuth) {
-    const token = getToken()
-    if (token && !finalHeaders.has('Authorization')) {
-      finalHeaders.set('Authorization', `Bearer ${token}`)
-    }
-  }
+  // L'authentification est gérée côté backend via les cookies httpOnly (access_token).
 
   const init: RequestInit = {
+    // Toujours envoyer les cookies (access_token, refresh_token) pour les appels API
+    credentials: rest.credentials ?? 'include',
     ...rest,
-    headers: finalHeaders
+    headers: finalHeaders,
   }
 
   return fetch(buildApiUrl(path), init)

@@ -179,6 +179,17 @@ const RISQUE_FALLBACK_TYPES = [
   'TRANSPORT FACULTES',
   'CAUTION',
   'TOUS RISQUES CHANTIER',
+  'ASSISTANCE FRAIS FUNERAIRES',
+  'FRAIS FUNERAIRES',
+  'GLOBALE DOMMAGES',
+  'GLOBALE BANQUE',
+  'ASSURANCE DES STOCKS',
+  'PREVOYANCE COLLECTIVE',
+  'PREVOYANCE ENTREPRISE',
+  'MULTIRISQUE BUREAU',
+  'BRIS DE MACHINE',
+  'EVACUATION SANITAIRE',
+  'VOL ET DETOURNEMENTS',
   'AUTRE',
 ] as const
 
@@ -429,10 +440,6 @@ export default function PageDocuments() {
     const startPrint = async () => {
       try {
         const headers = new Headers({ Accept: 'application/pdf,image/*' })
-        const token = getToken()
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`)
-        }
 
         const response = await fetch(proxyUrl, {
           credentials: 'include',
@@ -866,6 +873,7 @@ export default function PageDocuments() {
                   ))}
                 </select>
               </div>
+
 
               <div className="md:col-span-4 flex justify-end gap-3">
                 <button

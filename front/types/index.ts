@@ -83,11 +83,6 @@ export type DocumentInfo = {
   numeroReference?: string
   dateDocument?: Date
   dateCreation: Date
-  categorie: {
-    id: string
-    nom: string
-    couleur?: string
-  }
   createur: {
     id: string
     nom: string
@@ -104,7 +99,6 @@ export type DocumentInfo = {
 export type DonneesTeleversement = {
   titre: string
   description?: string
-  categorieId: string
   numeroReference?: string
   dateDocument?: Date
   etiquettes?: string[]
@@ -130,7 +124,6 @@ export type EntreeJournal = {
 export type StatistiquesDashboard = {
   nombreDocuments: number
   nombreUtilisateurs: number
-  nombreCategories: number
   espaceTotalUtilise: number // en octets
   documentsRecents: DocumentInfo[]
   activitesRecentes: EntreeJournal[]
@@ -139,7 +132,6 @@ export type StatistiquesDashboard = {
 // Type pour les filtres de recherche
 export type FiltresRecherche = {
   texte?: string
-  categorieId?: string
   etiquettes?: string[]
   dateDebut?: Date
   dateFin?: Date

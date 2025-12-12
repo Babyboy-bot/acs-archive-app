@@ -29,20 +29,20 @@ class RoleBasedPermission(permissions.BasePermission):
         'ADMIN': {
             'documents': ['voir', 'creer', 'modifier', 'supprimer'],
             'utilisateurs': ['voir', 'creer', 'modifier', 'supprimer'],
-            'categories': ['voir', 'creer', 'modifier', 'supprimer'],
-            'stats': ['voir']
+            'stats': ['voir'],
+            'assistant': ['voir', 'creer', 'modifier', 'supprimer'],
         },
         'ARCHIVISTE': {
             'documents': ['voir', 'creer', 'modifier', 'supprimer'],
             'utilisateurs': ['voir'],
-            'categories': ['voir', 'creer', 'modifier', 'supprimer'],
-            'stats': ['voir']
+            'stats': ['voir'],
+            'assistant': ['voir', 'creer', 'modifier', 'supprimer'],
         },
         'CONSULTANT': {
             'documents': ['voir'],
             'utilisateurs': [],
-            'categories': ['voir'],
-            'stats': []
+            'stats': [],
+            'assistant': ['voir', 'creer', 'modifier', 'supprimer'],
         }
     }
     

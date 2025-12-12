@@ -29,7 +29,7 @@ class UtilisateurManager(BaseUserManager):
         # Champ legacy pour compatibilité avec la colonne motDePasse existante en base
         # On évite les valeurs NULL pour respecter la contrainte NOT NULL
         if hasattr(user, "mot_de_passe_legacy"):
-            user.mot_de_passe_legacy = password or ""
+            user.mot_de_passe_legacy = ""
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -53,7 +53,7 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
         ('CONSULTANT', 'Consultant'),
     ]
     
-    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
+    id = models.TextField(primary_key=True, default=uuid.uuid4)
     nom_utilisateur = models.CharField(max_length=150, unique=True, db_column='nomUtilisateur')
     nom = models.CharField(max_length=150)
     prenom = models.CharField(max_length=150)
@@ -98,13 +98,21 @@ class Client(models.Model):
         ('PARTICULIER', 'Particulier'),
     ]
     
-    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
+    id = models.TextField(primary_key=True, default=uuid.uuid4)
     nom = models.CharField(max_length=255, unique=True)
     numero_client = models.CharField(max_length=100, unique=True, null=True, blank=True, db_column='numeroClient')
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='ENTREPRISE')
     email = models.EmailField(null=True, blank=True)
     telephone = models.CharField(max_length=50, null=True, blank=True)
     adresse = models.TextField(null=True, blank=True)
+    entreprise_parente = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        related_name='membres',
+        limit_choices_to={'type': 'ENTREPRISE'},
+        on_delete=models.SET_NULL,
+    )
     cree_le = models.DateTimeField(auto_now_add=True, db_column='creeLe')
     modifie_le = models.DateTimeField(auto_now=True, db_column='modifieLe')
     
@@ -117,6 +125,27 @@ class Client(models.Model):
     def __str__(self):
         return self.nom
 
+    @property
+    def tous_les_exercices(self):
+        """Retourne les exercices visibles pour ce client.
+
+        - Pour un particulier ou un client sans membres : uniquement ses propres exercices.
+        - Pour un client de type ENTREPRISE utilisé comme groupe/flotte :
+          agrège les exercices de tous ses membres (particuliers rattachés) sans
+          nécessiter d'exercices propres sur le groupe lui-même.
+        """
+        if self.type != 'ENTREPRISE':
+            # Pour un particulier ou un client non-entreprise, on retourne uniquement
+            # ses propres exercices.
+            return self.exercices.all()
+
+        # Pour une ENTREPRISE utilisée comme groupe/flotte, on agrège :
+        # - les exercices directement rattachés à l'entreprise
+        # - les exercices de tous ses membres (particuliers rattachés)
+        return Exercice.objects.filter(
+            models.Q(client=self) | models.Q(client__entreprise_parente=self)
+        ).distinct()
+
 
 class Exercice(models.Model):
     """Modèle Exercice (année fiscale)"""
@@ -127,7 +156,7 @@ class Exercice(models.Model):
         ('CLOTURE', 'Clôturé'),
     ]
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.TextField(primary_key=True, default=uuid.uuid4)
     annee = models.IntegerField()
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='exercices', db_column='clientId')
     statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='ACTIF')
@@ -148,7 +177,7 @@ class Exercice(models.Model):
 class Risque(models.Model):
     """Modèle Risque"""
     
-    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
+    id = models.TextField(primary_key=True, default=uuid.uuid4)
     type = models.CharField(max_length=100)
     numero_police = models.CharField(max_length=100, null=True, blank=True, db_column='numeroPolice')
     exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE, related_name='risques', db_column='exerciceId')
@@ -168,7 +197,7 @@ class Risque(models.Model):
 class Categorie(models.Model):
     """Modèle Catégorie de documents"""
     
-    id = models.CharField(primary_key=True, max_length=50, default=uuid.uuid4, editable=False)
+    id = models.TextField(primary_key=True, default=uuid.uuid4)
     nom = models.CharField(max_length=100, unique=True)
     description = models.TextField(null=True, blank=True)
     couleur = models.CharField(max_length=7, default='#D32027')
@@ -198,7 +227,7 @@ class Document(models.Model):
         ('SINISTRE', 'Sinistre'),
     ]
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.TextField(primary_key=True, default=uuid.uuid4)
     titre = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     chemin_fichier = models.CharField(max_length=500, db_column='cheminFichier')
@@ -229,3 +258,80 @@ class Document(models.Model):
     
     def __str__(self):
         return self.titre
+
+
+class DocumentChunk(models.Model):
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='chunks')
+    ordre = models.IntegerField()
+    page = models.IntegerField(null=True, blank=True)
+    texte = models.TextField()
+    client_nom = models.CharField(max_length=255, null=True, blank=True)
+    exercice_annee = models.IntegerField(null=True, blank=True)
+    risque_type = models.CharField(max_length=255, null=True, blank=True)
+    type_courrier = models.CharField(max_length=30, null=True, blank=True)
+    reference = models.CharField(max_length=100, null=True, blank=True)
+    cree_le = models.DateTimeField(auto_now_add=True, db_column='creeLe')
+    modifie_le = models.DateTimeField(auto_now=True, db_column='modifieLe')
+
+    class Meta:
+        db_table = 'document_chunks'
+        verbose_name = 'Chunk de document'
+        verbose_name_plural = 'Chunks de document'
+        ordering = ['document', 'ordre']
+        indexes = [
+            models.Index(fields=['document', 'ordre']),
+            models.Index(fields=['exercice_annee']),
+            models.Index(fields=['risque_type']),
+        ]
+
+    def __str__(self):
+        return f"Chunk {self.ordre} de {self.document_id}"
+
+
+class AssistantConversation(models.Model):
+    """Conversation sauvegardée de l'assistant IA pour un utilisateur."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey(Utilisateur, on_delete=models.CASCADE, related_name='assistant_conversations')
+    titre = models.CharField(max_length=255, blank=True)
+    cree_le = models.DateTimeField(auto_now_add=True, db_column='creeLe')
+    modifie_le = models.DateTimeField(auto_now=True, db_column='modifieLe')
+    dernier_message_le = models.DateTimeField(null=True, blank=True)
+    nombre_messages = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'assistant_conversations'
+        verbose_name = 'Conversation assistant'
+        verbose_name_plural = 'Conversations assistant'
+        ordering = ['-dernier_message_le', '-cree_le']
+
+    def __str__(self):
+        return self.titre or f'Conversation {self.id}'
+
+
+class AssistantMessage(models.Model):
+    """Message d'une conversation de l'assistant IA."""
+
+    ROLE_CHOICES = [
+        ('USER', 'Utilisateur'),
+        ('ASSISTANT', 'Assistant'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation = models.ForeignKey(AssistantConversation, on_delete=models.CASCADE, related_name='messages')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    contenu = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+    cree_le = models.DateTimeField(auto_now_add=True, db_column='creeLe')
+
+    class Meta:
+        db_table = 'assistant_messages'
+        verbose_name = 'Message assistant'
+        verbose_name_plural = 'Messages assistant'
+        ordering = ['cree_le']
+        indexes = [
+            models.Index(fields=['conversation', 'cree_le']),
+        ]
+
+    def __str__(self):
+        return f'[{self.role}] {self.contenu[:50]}'

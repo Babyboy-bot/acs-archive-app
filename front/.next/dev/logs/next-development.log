@@ -1,3 +1,0 @@
-[00:00:01.773] Server  LOG      ✓ Ready in 1428ms
-[00:00:04.921] Server  LOG      ○ Compiling /tableau-de-bord ...
-[00:05:42.058] Browser WARN    Image with src "http://localhost:3000/acs-logo.svg" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.

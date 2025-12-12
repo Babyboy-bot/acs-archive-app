@@ -2,6 +2,7 @@
 Vues pour l'API Django REST Framework
 """
 from rest_framework import viewsets, status, permissions
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -14,22 +15,63 @@ from django.db.models import Q, Count
 from django.db.models.functions import Coalesce, TruncMonth
 from datetime import timedelta
 from django.core.files.storage import default_storage
+from django.conf import settings
+import logging
 import mimetypes
 import uuid
+import unicodedata
+import re
 
 import numpy as np
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
+try:
+    # Embeddings sémantiques avec sentence-transformers
+    from sentence_transformers import SentenceTransformer
+
+    _SEMANTIC_MODEL = None
+    _SEMANTIC_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'  # Multilingue, rapide, bon pour le français
+
+    def get_semantic_model():
+        global _SEMANTIC_MODEL
+        if _SEMANTIC_MODEL is None:
+            logging.info(f"Chargement du modèle sémantique: {_SEMANTIC_MODEL_NAME}")
+            _SEMANTIC_MODEL = SentenceTransformer(_SEMANTIC_MODEL_NAME)
+            logging.info("Modèle sémantique chargé avec succès")
+        return _SEMANTIC_MODEL
+
+    SEMANTIC_SEARCH_AVAILABLE = True
+except Exception as exc:
+    logging.warning(
+        "sentence-transformers non disponible ou échec d'initialisation (%s), recherche sémantique désactivée",
+        exc,
+    )
+    SEMANTIC_SEARCH_AVAILABLE = False
+
+    def get_semantic_model():
+        return None
+
+try:
+    import PyPDF2
+    PDF_EXTRACTION_AVAILABLE = True
+except ImportError:
+    logging.warning("PyPDF2 non disponible, extraction avancée des PDF désactivée")
+    PyPDF2 = None  # type: ignore[assignment]
+    PDF_EXTRACTION_AVAILABLE = False
+
 from .models import (
     Utilisateur, Client, Exercice, Risque,
-    Categorie, Document
+    Document, DocumentChunk, AssistantConversation, AssistantMessage,
 )
 from .serializers import (
     UtilisateurSerializer, UtilisateurListSerializer, LoginSerializer,
-    ClientSerializer, ExerciceSerializer, RisqueSerializer,
-    CategorieSerializer, DocumentSerializer
+    ClientSimpleSerializer, ClientSerializer,
+    ExerciceSimpleSerializer, ExerciceSerializer,
+    RisqueSimpleSerializer, RisqueSerializer,
+    DocumentSerializer,
+    AssistantConversationSerializer, AssistantMessageSerializer,
 )
 from .permissions import RoleBasedPermission, IsOwnerOrAdmin
 
@@ -37,42 +79,41 @@ from .permissions import RoleBasedPermission, IsOwnerOrAdmin
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
-    """
-    Vue de connexion - retourne un token JWT
-    """
+    """Vue de connexion - retourne un token JWT via cookies httpOnly."""
     serializer = LoginSerializer(data=request.data)
-    
+
     if not serializer.is_valid():
         return Response(
-            {'erreur': 'Nom d\'utilisateur et mot de passe requis'},
-            status=status.HTTP_400_BAD_REQUEST
+            {'erreur': "Nom d'utilisateur et mot de passe requis"},
+            status=status.HTTP_400_BAD_REQUEST,
         )
-    
+
     nom_utilisateur = serializer.validated_data['nom_utilisateur']
     mot_de_passe = serializer.validated_data['mot_de_passe']
-    
+
     try:
         utilisateur = Utilisateur.objects.get(nom_utilisateur=nom_utilisateur)
-        
+
         if not utilisateur.est_actif:
             return Response(
                 {'erreur': 'Identifiants incorrects'},
-                status=status.HTTP_401_UNAUTHORIZED
+                status=status.HTTP_401_UNAUTHORIZED,
             )
-        
+
         if not utilisateur.check_password(mot_de_passe):
             return Response(
                 {'erreur': 'Identifiants incorrects'},
-                status=status.HTTP_401_UNAUTHORIZED
+                status=status.HTTP_401_UNAUTHORIZED,
             )
-        
+
         # Mettre à jour la dernière connexion
         utilisateur.derniere_connexion = timezone.now()
         utilisateur.save(update_fields=['derniere_connexion'])
-        
+
         # Générer les tokens JWT
         refresh = RefreshToken.for_user(utilisateur)
-        
+        access_token = refresh.access_token
+
         # Données de session
         session_data = {
             'id': str(utilisateur.id),
@@ -80,26 +121,153 @@ def login_view(request):
             'nom': utilisateur.nom,
             'prenom': utilisateur.prenom,
             'email': utilisateur.email,
-            'role': utilisateur.role
+            'role': utilisateur.role,
         }
-        
-        return Response({
-            'success': True,
-            'token': str(refresh.access_token),
-            'refresh': str(refresh),
-            'utilisateur': session_data
-        }, status=status.HTTP_200_OK)
-        
+
+        # Construire la réponse JSON sans exposer les tokens côté client :
+        # l'authentification repose désormais uniquement sur les cookies httpOnly.
+        response = Response(
+            {
+                'success': True,
+                'utilisateur': session_data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+        # Déterminer les paramètres des cookies
+        secure_cookie = not settings.DEBUG
+        access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
+        refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
+
+        response.set_cookie(
+            'access_token',
+            str(access_token),
+            httponly=True,
+            secure=secure_cookie,
+            samesite='Lax',
+            max_age=int(access_lifetime.total_seconds()),
+        )
+        response.set_cookie(
+            'refresh_token',
+            str(refresh),
+            httponly=True,
+            secure=secure_cookie,
+            samesite='Lax',
+            max_age=int(refresh_lifetime.total_seconds()),
+        )
+
+        return response
+
     except Utilisateur.DoesNotExist:
         return Response(
             {'erreur': 'Identifiants incorrects'},
-            status=status.HTTP_401_UNAUTHORIZED
+            status=status.HTTP_401_UNAUTHORIZED,
         )
-    except Exception as e:
+    except Exception:
+        logging.exception("Erreur lors de la tentative de connexion")
         return Response(
             {'erreur': 'Erreur serveur'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def logout_view(request):
+    """Déconnexion : efface les cookies JWT côté client."""
+    response = Response(
+        {'success': True, 'message': 'Déconnecté avec succès.'},
+        status=status.HTTP_200_OK,
+    )
+    response.delete_cookie('access_token')
+    response.delete_cookie('refresh_token')
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def documents_search_view(request):
+    """Recherche rapide de documents pour la barre globale.
+
+    Permet de taper un mélange de client / exercice / risque / type de courrier /
+    référence / titre, avec une normalisation robuste (suppression des accents,
+    casse, ponctuation) pour que les combinaisons comme
+    "2FZ 2022 responsabilite civile avenant" retrouvent les bons documents.
+    """
+
+    query = (request.query_params.get('q') or '').strip()
+    if not query or len(query) < 2:
+        return Response({'resultats': []})
+
+    try:
+        limit = int(request.query_params.get('limit') or 10)
+    except (TypeError, ValueError):
+        limit = 10
+
+    norm_query = _normalize_text(query)
+    if not norm_query:
+        return Response({'resultats': []})
+
+    tokens = [tok for tok in norm_query.split(' ') if tok]
+    if not tokens:
+        return Response({'resultats': []})
+
+    documents = list(
+        Document.objects.select_related('categorie', 'risque__exercice__client').all()
+    )
+    if not documents:
+        return Response({'resultats': []})
+
+    scored: list[tuple[float, dict]] = []
+
+    for document in documents:
+        payload = _build_document_payload(document, request)
+
+        parts = [
+            payload.get('titre') or '',
+            payload.get('description') or '',
+            payload.get('reference') or '',
+            payload.get('client') or '',
+            str(payload.get('exercice') or ''),
+            payload.get('risque') or '',
+            payload.get('type_courrier_label') or '',
+        ]
+
+        searchable = _normalize_text(' '.join(str(part) for part in parts if part))
+        if not searchable:
+            continue
+
+        match_count = 0
+        for token in tokens:
+            if token and token in searchable:
+                match_count += 1
+
+        if match_count == 0:
+            continue
+
+        score = match_count / len(tokens)
+        scored.append((score, payload))
+
+    if not scored:
+        return Response({'resultats': []})
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    results = []
+    for score, payload in scored[: max(limit, 1)]:
+        fichier_url = payload.get('fichier_url')
+        results.append({
+            'id': payload.get('id'),
+            'titre': payload.get('titre') or '',
+            'description': payload.get('description') or '',
+            'url': fichier_url,
+            'icone': 'document',
+        })
+
+    return Response({'resultats': results})
+
+
+setattr(documents_search_view, 'ressource', 'documents')
 
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
@@ -218,6 +386,40 @@ class ClientViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'  # Les clients font partie de la gestion documentaire
 
+    # Pas de pagination côté API pour permettre à l’interface de gérer sa propre pagination
+    pagination_class = None
+
+    def get_serializer_class(self):
+        """Retourner une version légère si ?simple=1 est demandé pour la liste."""
+        request = getattr(self, 'request', None)
+        if self.action == 'list' and request is not None:
+            simple = (request.query_params.get('simple') or '').lower()
+            if simple in ('1', 'true', 'yes'):
+                return ClientSimpleSerializer
+        return ClientSerializer
+
+    def get_queryset(self):
+        queryset = Client.objects.all()
+
+        # Recherche plein texte sur le nom (paramètre ?search=)
+        search = (self.request.query_params.get('search') or '').strip()
+        if search:
+            queryset = queryset.filter(nom__icontains=search)
+
+        # Filtre par type de client (ENTREPRISE / PARTICULIER) via ?type=
+        type_param = self.request.query_params.get('type') or None
+        if type_param:
+            queryset = queryset.filter(type=type_param)
+
+        # Respecter le paramètre d’ordering si fourni, sinon trier par nom
+        ordering = self.request.query_params.get('ordering') or None
+        if ordering:
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('nom')
+
+        return queryset
+
 
 class ExerciceViewSet(viewsets.ModelViewSet):
     """ViewSet pour gérer les exercices"""
@@ -225,6 +427,49 @@ class ExerciceViewSet(viewsets.ModelViewSet):
     serializer_class = ExerciceSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'
+    pagination_class = None
+
+    def get_serializer_class(self):
+        """Version légère pour les listes avec ?simple=1 (sans risques imbriqués)."""
+        request = getattr(self, 'request', None)
+        if self.action == 'list' and request is not None:
+            simple = (request.query_params.get('simple') or '').lower()
+            if simple in ('1', 'true', 'yes'):
+                return ExerciceSimpleSerializer
+        return ExerciceSerializer
+
+    def get_queryset(self):
+        """Filtrer les exercices selon le client si ?client=<id> est fourni"""
+        queryset = Exercice.objects.all().order_by('-annee')
+        client_id = self.request.query_params.get('client')
+        if client_id:
+            try:
+                client = Client.objects.get(pk=client_id)
+            except Client.DoesNotExist:
+                queryset = Exercice.objects.none()
+            else:
+                # Cas spécial flotte/groupe : pour une ENTREPRISE, inclure à la fois
+                # ses exercices propres et ceux de ses membres (particuliers rattachés).
+                if client.type == 'ENTREPRISE':
+                    queryset = queryset.filter(
+                        Q(client=client) | Q(client__entreprise_parente=client)
+                    )
+                else:
+                    queryset = queryset.filter(client=client)
+
+        # Pour les usages "simples" (recherche avancée), permettre de limiter
+        # le nombre de résultats via ?page_size=...
+        simple = (self.request.query_params.get('simple') or '').lower()
+        page_size_param = self.request.query_params.get('page_size')
+        if simple in ('1', 'true', 'yes') and page_size_param:
+            try:
+                page_size = int(page_size_param)
+                if page_size > 0:
+                    queryset = queryset[:page_size]
+            except (TypeError, ValueError):
+                pass
+
+        return queryset
 
 
 class RisqueViewSet(viewsets.ModelViewSet):
@@ -234,13 +479,30 @@ class RisqueViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'
 
+    def get_serializer_class(self):
+        """Version légère pour les listes avec ?simple=1 (type uniquement)."""
+        request = getattr(self, 'request', None)
+        if self.action == 'list' and request is not None:
+            simple = (request.query_params.get('simple') or '').lower()
+            if simple in ('1', 'true', 'yes'):
+                return RisqueSimpleSerializer
+        return RisqueSerializer
 
-class CategorieViewSet(viewsets.ModelViewSet):
-    """ViewSet pour gérer les catégories"""
-    queryset = Categorie.objects.all()
-    serializer_class = CategorieSerializer
-    permission_classes = [IsAuthenticated, RoleBasedPermission]
-    ressource = 'categories'
+    def get_queryset(self):
+        queryset = Risque.objects.all()
+
+        # Pour les usages simples (chargement des filtres), on peut limiter via ?page_size
+        simple = (self.request.query_params.get('simple') or '').lower()
+        page_size_param = self.request.query_params.get('page_size')
+        if simple in ('1', 'true', 'yes') and page_size_param:
+            try:
+                page_size = int(page_size_param)
+                if page_size > 0:
+                    queryset = queryset[:page_size]
+            except (TypeError, ValueError):
+                pass
+
+        return queryset
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
@@ -259,11 +521,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
         if risque_id:
             queryset = queryset.filter(risque_id=risque_id)
         
-        # Filtrer par catégorie
-        categorie_id = self.request.query_params.get('categorie', None)
-        if categorie_id:
-            queryset = queryset.filter(categorie_id=categorie_id)
-        
         # Filtrer par auteur
         auteur_id = self.request.query_params.get('auteur', None)
         if auteur_id:
@@ -281,6 +538,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = serializer.save()
+        try:
+            chunker_document(document)
+        except Exception:
+            logging.exception("Erreur lors de la génération des chunks de document")
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -327,8 +588,14 @@ class DocumentUploadView(APIView):
                 date_document=date_document
             )
         except Exception:
+            logging.exception("Erreur lors de la création du document")
             default_storage.delete(chemin)
-            return Response({'erreur': 'Erreur lors de la création du document.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            raise
+
+        try:
+            chunker_document(document)
+        except Exception:
+            logging.exception("Erreur lors de la génération des chunks de document (upload)")
 
         serializer = DocumentSerializer(document, context={'request': request})
         return Response({
@@ -338,6 +605,54 @@ class DocumentUploadView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+class AssistantConversationViewSet(viewsets.ModelViewSet):
+    """ViewSet pour gérer les conversations de l'assistant IA"""
+
+    serializer_class = AssistantConversationSerializer
+    permission_classes = [IsAuthenticated, RoleBasedPermission]
+    ressource = 'assistant'
+
+    def get_queryset(self):
+        user = self.request.user
+        return AssistantConversation.objects.filter(utilisateur=user).order_by('-dernier_message_le', '-cree_le')
+
+    def perform_create(self, serializer):
+        conversation = serializer.save(utilisateur=self.request.user)
+        if conversation.dernier_message_le is None:
+            conversation.dernier_message_le = conversation.cree_le
+            conversation.save(update_fields=['dernier_message_le'])
+
+
+class AssistantMessageViewSet(viewsets.ModelViewSet):
+    """ViewSet pour gérer les messages de l'assistant IA"""
+
+    serializer_class = AssistantMessageSerializer
+    permission_classes = [IsAuthenticated, RoleBasedPermission]
+    ressource = 'assistant'
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = AssistantMessage.objects.select_related('conversation', 'conversation__utilisateur')
+        queryset = queryset.filter(conversation__utilisateur=user)
+
+        conversation_id = self.request.query_params.get('conversation')
+        if conversation_id:
+            queryset = queryset.filter(conversation_id=conversation_id)
+
+        return queryset.order_by('cree_le')
+
+    def perform_create(self, serializer):
+        conversation = serializer.validated_data.get('conversation')
+        if conversation.utilisateur != self.request.user:
+            raise PermissionDenied("Vous ne pouvez pas écrire dans une conversation qui ne vous appartient pas.")
+
+        message = serializer.save()
+
+        conversation.dernier_message_le = message.cree_le
+        conversation.nombre_messages = (conversation.nombre_messages or 0) + 1
+        conversation.save(update_fields=['dernier_message_le', 'nombre_messages'])
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def stats_view(request):
@@ -345,13 +660,13 @@ def stats_view(request):
     total_documents = Document.objects.count()
     uploads_today = Document.objects.filter(cree_le__date=timezone.now().date()).count()
     total_clients = Client.objects.count()
-    total_categories = Categorie.objects.count()
+    total_utilisateurs = Utilisateur.objects.count()
 
     return Response({
         'documents': total_documents,
         'uploadsAujourdhui': uploads_today,
         'clients': total_clients,
-        'categories': total_categories
+        'utilisateurs': total_utilisateurs,
     })
 
 
@@ -387,20 +702,6 @@ def assistant_stats_view(request):
         for entry in documents_par_mois_list
     }
 
-    top_categories_qs = (
-        base_queryset
-        .values('categorie__nom')
-        .annotate(total=Count('id'))
-        .order_by('-total')[:5]
-    )
-    top_categories = [
-        {
-            'categorie': entry['categorie__nom'] or 'Non catégorisé',
-            'compte': entry['total'],
-        }
-        for entry in top_categories_qs
-    ]
-
     top_clients_qs = (
         base_queryset
         .values('risque__exercice__client__nom')
@@ -435,14 +736,25 @@ def assistant_stats_view(request):
     if total_documents:
         taux_conformite = max(0, min(1, (total_documents - documents_en_retard) / total_documents))
 
+    # Totaux de clients pour permettre à l'assistant de répondre de manière
+    # fiable aux questions de type "combien de clients" sans deviner à
+    # partir d'un échantillon de documents.
+    total_clients = Client.objects.count()
+    total_clients_particuliers = Client.objects.filter(type='PARTICULIER').count()
+    total_clients_entreprises = Client.objects.filter(type='ENTREPRISE').count()
+
     data = {
         'documents_par_mois': documents_par_mois,
-        'top_categories': top_categories,
         'top_clients': top_clients,
         'kpi': {
             'taux_conformite': taux_conformite,
             'documents_en_retard': documents_en_retard,
             'alertes_peremption': alertes_peremption,
+        },
+        'totaux_clients': {
+            'total': total_clients,
+            'particuliers': total_clients_particuliers,
+            'entreprises': total_clients_entreprises,
         },
     }
 
@@ -452,17 +764,28 @@ def assistant_stats_view(request):
 setattr(assistant_stats_view, 'ressource', 'stats')
 
 
-def _build_document_payload(document: Document) -> dict:
+def _build_document_payload(document: Document, request=None) -> dict:
     client_nom = None
     exercice_annee = None
+    risque_type = None
     if document.risque and document.risque.exercice:
         exercice = document.risque.exercice
         exercice_annee = exercice.annee
+        risque_type = document.risque.type
         if exercice.client:
             client_nom = exercice.client.nom
 
     categorie_nom = document.categorie.nom if document.categorie else None
     type_label = document.get_type_courrier_display() if document.type_courrier else None
+
+    # Essayer de récupérer l'URL de fichier de la même façon que sur les autres écrans
+    fichier_url = None
+    if request is not None:
+        try:
+            serializer = DocumentSerializer(document, context={'request': request})
+            fichier_url = serializer.data.get('fichier_url')
+        except Exception:
+            fichier_url = None
 
     return {
         'id': str(document.id),
@@ -474,10 +797,130 @@ def _build_document_payload(document: Document) -> dict:
         'reference': document.reference,
         'client': client_nom,
         'exercice': exercice_annee,
+        'risque': risque_type,
         'date_document': document.date_document.isoformat() if document.date_document else None,
         'cree_le': document.cree_le.isoformat() if document.cree_le else None,
         'est_archive': document.est_archive,
+        'fichier_url': fichier_url,
     }
+
+
+def _normalize_text(value: str) -> str:
+    """Normaliser une chaîne pour les recherches plein texte (accents, casse, espaces).
+
+    Cette fonction est utilisée pour la recherche rapide afin de rendre robustes les
+    correspondances sur les noms de clients, années d'exercice, types de risques et
+    types de courrier, y compris lorsque l'utilisateur tape sans accents ou avec des
+    séparateurs différents.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+
+    value = unicodedata.normalize('NFD', value)
+    value = ''.join(ch for ch in value if unicodedata.category(ch) != 'Mn')
+    value = value.lower()
+    value = re.sub(r"[^0-9a-zA-Z]+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _extract_text_from_pdf(document: Document) -> list[tuple[int, str]]:
+    if not PDF_EXTRACTION_AVAILABLE:
+        return []
+
+    if not document.chemin_fichier:
+        return []
+
+    try:
+        with default_storage.open(document.chemin_fichier, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)  # type: ignore[call-arg]
+            pages: list[tuple[int, str]] = []
+            for index, page in enumerate(reader.pages):
+                try:
+                    text = page.extract_text() or ""
+                except Exception:
+                    logging.exception("Erreur lors de l'extraction du texte de la page %s du document %s", index + 1, document.id)
+                    text = ""
+                if text.strip():
+                    pages.append((index + 1, text))
+            return pages
+    except Exception:
+        logging.exception("Erreur lors de l'ouverture du fichier PDF pour le document %s", document.id)
+        return []
+
+
+def chunker_document(document: Document) -> None:
+    client_nom = None
+    exercice_annee = None
+    risque_type = None
+    if document.risque and document.risque.exercice:
+        exercice = document.risque.exercice
+        exercice_annee = exercice.annee
+        risque_type = document.risque.type
+        if exercice.client:
+            client_nom = exercice.client.nom
+
+    chunks_crees = 0
+
+    # Extraction avancée pour les PDF si possible
+    type_fichier = (document.type_fichier or "").lower()
+    if 'pdf' in type_fichier:
+        pages = _extract_text_from_pdf(document)
+        if pages:
+            ordre = 0
+            max_chars = 2000
+            overlap = 400
+
+            for page_num, texte_page in pages:
+                texte_page = (texte_page or "").replace("\r", "\n")
+                texte_page = texte_page.strip()
+                if not texte_page:
+                    continue
+
+                start = 0
+                length = len(texte_page)
+                while start < length:
+                    end = min(length, start + max_chars)
+                    extrait = texte_page[start:end].strip()
+                    if extrait:
+                        DocumentChunk.objects.create(
+                            document=document,
+                            ordre=ordre,
+                            page=page_num,
+                            texte=extrait,
+                            client_nom=client_nom,
+                            exercice_annee=exercice_annee,
+                            risque_type=risque_type,
+                            type_courrier=document.type_courrier,
+                            reference=document.reference,
+                        )
+                        ordre += 1
+                        chunks_crees += 1
+
+                    if end >= length:
+                        break
+                    # overlap pour éviter de couper brutalement le contexte
+                    start = max(0, end - overlap)
+
+    # Fallback simple si aucune extraction PDF n'est possible ou n'a rien produit
+    if chunks_crees == 0:
+        texte = document.description or document.titre or ''
+        if not texte.strip():
+            return
+
+        DocumentChunk.objects.create(
+            document=document,
+            ordre=0,
+            page=None,
+            texte=texte,
+            client_nom=client_nom,
+            exercice_annee=exercice_annee,
+            risque_type=risque_type,
+            type_courrier=document.type_courrier,
+            reference=document.reference,
+        )
 
 
 def _build_document_text(payload: dict) -> str:
@@ -489,8 +932,17 @@ def _build_document_text(payload: dict) -> str:
         payload.get('reference'),
         payload.get('client'),
     ]
-    texte = ' '.join([part for part in parts if part])
-    return texte or payload.get('titre') or ''
+
+    risque = payload.get('risque')
+    if risque is not None:
+        parts.append(str(risque))
+
+    exercice = payload.get('exercice')
+    if exercice is not None:
+        parts.append(str(exercice))
+
+    texte = ' '.join(str(part) for part in parts if part is not None and str(part).strip())
+    return texte or str(payload.get('titre') or '')
 
 
 def _build_document_metadata(payload: dict) -> dict:
@@ -502,8 +954,14 @@ def _build_document_metadata(payload: dict) -> dict:
         'reference': payload.get('reference'),
         'client': payload.get('client'),
         'exercice': payload.get('exercice'),
-        'date_document': payload.get('date_document') or payload.get('cree_le'),
+        'risque': payload.get('risque'),
+        # Ne pas utiliser cree_le comme date_document : seule la date réelle (si renseignée)
+        # est conservée, et l'année d'exercice sert de référence principale pour les recherches.
+        'date_document': payload.get('date_document'),
         'statut_archive': payload.get('est_archive'),
+        'fichier_url': payload.get('fichier_url'),
+        'page': payload.get('chunk_page'),
+        'chunk_ordre': payload.get('chunk_ordre'),
     }
 
 
@@ -576,7 +1034,7 @@ def assistant_document_search_view(request):
     if not documents:
         return Response({'results': []})
 
-    payloads = [_build_document_payload(doc) for doc in documents]
+    payloads = [_build_document_payload(doc, request) for doc in documents]
     corpus = [_build_document_text(payload) for payload in payloads]
 
     vectorizer = TfidfVectorizer()
@@ -643,7 +1101,7 @@ def assistant_document_search_faiss_view(request):
         if include_fallback:
             fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
             if fallback_document:
-                payload = _build_document_payload(fallback_document)
+                payload = _build_document_payload(fallback_document, request)
                 return Response({'results': [_build_assistant_result(payload, 0.0, is_fallback=True)]})
         return Response({'results': []})
 
@@ -666,7 +1124,7 @@ def assistant_document_search_faiss_view(request):
     if include_fallback and not results:
         fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
         if fallback_document:
-            payload = _build_document_payload(fallback_document)
+            payload = _build_document_payload(fallback_document, request)
             results.append(_build_assistant_result(payload, 0.0, is_fallback=True))
 
     return Response({'results': results})
@@ -707,3 +1165,219 @@ def document_search_view(request):
 
 
 setattr(document_search_view, 'ressource', 'documents')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_semantic_search_view(request):
+    """
+    Recherche sémantique avancée pour l'assistant IA.
+    Utilise des embeddings multilingues pour comprendre le sens des requêtes.
+    Fallback sur TF-IDF si sentence-transformers n'est pas disponible.
+    
+    Paramètres de filtre optionnels :
+    - client: code client (ex: 3CB)
+    - exercice: année de l'exercice (ex: 2018)
+    - risque: type de risque (ex: sante)
+    """
+    query = (request.query_params.get('q') or '').strip()
+    if not query:
+        return Response({'results': [], 'method': 'none'})
+
+    try:
+        top_k = int(request.query_params.get('top_k') or 5)
+    except ValueError:
+        top_k = 5
+
+    include_fallback = (request.query_params.get('include_fallback') or '').lower() == 'true'
+    
+    # Filtres optionnels pour affiner la recherche
+    client_filter = (request.query_params.get('client') or '').strip().upper()
+    exercice_filter = (request.query_params.get('exercice') or '').strip()
+    risque_filter = (request.query_params.get('risque') or '').strip().lower()
+
+    # Construire la requête avec filtres
+    queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
+    
+    if client_filter:
+        # Le client peut être identifié par son nom ou son numero_client
+        queryset = queryset.filter(
+            Q(risque__exercice__client__nom__iexact=client_filter) |
+            Q(risque__exercice__client__numero_client__iexact=client_filter)
+        )
+        logging.info(f"Filtre client: {client_filter}")
+    
+    if exercice_filter:
+        try:
+            annee = int(exercice_filter)
+            queryset = queryset.filter(risque__exercice__annee=annee)
+            logging.info(f"Filtre exercice: {annee}")
+        except ValueError:
+            pass
+    
+    if risque_filter:
+        # Le risque est identifié par son type
+        queryset = queryset.filter(risque__type__icontains=risque_filter)
+        logging.info(f"Filtre risque: {risque_filter}")
+    
+    documents = list(queryset.all())
+
+    if not documents:
+        return Response({'results': [], 'method': 'none'})
+
+    payloads = [_build_document_payload(doc, request) for doc in documents]
+    corpus = [_build_document_text(payload) for payload in payloads]
+
+    # Essayer la recherche sémantique si disponible
+    if SEMANTIC_SEARCH_AVAILABLE:
+        try:
+            model = get_semantic_model()
+            if model is not None:
+                # Encoder la requête et les documents
+                query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
+                doc_embeddings = model.encode(corpus, convert_to_numpy=True, normalize_embeddings=True)
+                
+                # Créer l'index FAISS avec les embeddings sémantiques
+                dimension = doc_embeddings.shape[1]
+                index = faiss.IndexFlatIP(dimension)
+                index.add(doc_embeddings.astype(np.float32))
+                
+                # Rechercher les documents les plus similaires
+                distances, indices = index.search(query_embedding.astype(np.float32), min(top_k, len(documents)))
+                
+                results = []
+                for idx, score in zip(indices[0], distances[0]):
+                    if idx < 0 or score <= 0:
+                        continue
+                    payload = payloads[idx]
+                    result = _build_assistant_result(payload, float(score))
+                    result['search_method'] = 'semantic'
+                    results.append(result)
+                
+                if results:
+                    try:
+                        apercu = [
+                            {
+                                'id': r.get('id'),
+                                'client': (r.get('metadata') or {}).get('client'),
+                                'exercice': (r.get('metadata') or {}).get('exercice'),
+                                'risque': (r.get('metadata') or {}).get('risque'),
+                                'score': r.get('score'),
+                            }
+                            for r in results[:10]
+                        ]
+                        logging.info(
+                            "Assistant semantic search: query=%r client=%s exercice=%s risque=%s top=%s",
+                            query,
+                            client_filter or None,
+                            exercice_filter or None,
+                            risque_filter or None,
+                            apercu,
+                        )
+                    except Exception as log_error:
+                        logging.error("Erreur lors du logging des résultats sémantiques: %s", log_error)
+
+                    return Response({'results': results, 'method': 'semantic'})
+                
+                # Pas de résultats sémantiques, fallback
+                logging.info("Recherche sémantique: aucun résultat, fallback TF-IDF")
+        except Exception as e:
+            logging.error(f"Erreur recherche sémantique: {e}, fallback TF-IDF")
+
+    # Fallback sur TF-IDF si la recherche sémantique échoue ou n'est pas disponible.
+    # On privilégie les chunks de documents (texte extrait des PDF) s'ils sont disponibles.
+    try:
+        chunks_qs = DocumentChunk.objects.filter(document__in=documents)
+        chunks = list(
+            chunks_qs.select_related(
+                'document__categorie',
+                'document__risque__exercice__client',
+            )
+        )
+    except Exception:
+        logging.exception("Erreur lors de la récupération des chunks pour la recherche TF-IDF")
+        chunks = []
+
+    if chunks:
+        new_payloads = []
+        new_corpus = []
+        for chunk in chunks:
+            base_payload = _build_document_payload(chunk.document, request)
+            payload = dict(base_payload)
+            payload['description'] = chunk.texte
+            payload['chunk_page'] = chunk.page
+            payload['chunk_ordre'] = chunk.ordre
+            new_payloads.append(payload)
+            new_corpus.append(_build_document_text(payload))
+        payloads = new_payloads
+        corpus = new_corpus
+
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(corpus)
+    query_vector = vectorizer.transform([query])
+    scores = linear_kernel(query_vector, tfidf_matrix).flatten()
+
+    indexed_scores = list(enumerate(scores.tolist()))
+
+    # Agréger les scores au niveau du document pour éviter de renvoyer plusieurs
+    # fois le même document lorsque plusieurs chunks sont pertinents.
+    doc_best = {}
+    for idx, score in indexed_scores:
+        if score <= 0:
+            continue
+        if idx < 0 or idx >= len(payloads):
+            continue
+        payload = payloads[idx]
+        doc_id = str(payload.get('id') or '')
+        if not doc_id:
+            continue
+        current = doc_best.get(doc_id)
+        if current is None or score > current[0]:
+            # Conserver le meilleur chunk (score le plus élevé) pour chaque document
+            doc_best[doc_id] = (score, payload)
+
+    # Trier les documents par score décroissant (meilleur chunk en premier)
+    sorted_docs = sorted(doc_best.items(), key=lambda item: item[1][0], reverse=True)
+
+    results = []
+    for _, (score, payload) in sorted_docs[: max(top_k, 1)]:
+        result = _build_assistant_result(payload, score)
+        result['search_method'] = 'tfidf'
+        results.append(result)
+
+    # Fallback document si aucun résultat
+    if include_fallback and not results:
+        fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
+        if fallback_document:
+            payload = _build_document_payload(fallback_document, request)
+            result = _build_assistant_result(payload, 0.0, is_fallback=True)
+            result['search_method'] = 'fallback'
+            results.append(result)
+
+    if results:
+        try:
+            apercu = [
+                {
+                    'id': r.get('id'),
+                    'client': (r.get('metadata') or {}).get('client'),
+                    'exercice': (r.get('metadata') or {}).get('exercice'),
+                    'risque': (r.get('metadata') or {}).get('risque'),
+                    'score': r.get('score'),
+                }
+                for r in results[:10]
+            ]
+            logging.info(
+                "Assistant TF-IDF search: query=%r client=%s exercice=%s risque=%s top=%s",
+                query,
+                client_filter or None,
+                exercice_filter or None,
+                risque_filter or None,
+                apercu,
+            )
+        except Exception as log_error:
+            logging.error("Erreur lors du logging des résultats TF-IDF: %s", log_error)
+
+    return Response({'results': results, 'method': 'tfidf' if results else 'none'})
+
+
+setattr(assistant_semantic_search_view, 'ressource', 'documents')

@@ -105,8 +105,6 @@ export default function PageParametres() {
       const utilisateurMisAJour = (data as any).utilisateur
       if (utilisateurMisAJour) {
         enregistrerSession({
-          token: getUtilisateurActif()?.id ? (localStorage.getItem('authToken') ?? '') : '',
-          refresh: getUtilisateurActif()?.id ? localStorage.getItem('refreshToken') : '',
           utilisateur: {
             id: utilisateurMisAJour.id,
             nomUtilisateur: utilisateurMisAJour.nom_utilisateur ?? utilisateurMisAJour.nomUtilisateur,

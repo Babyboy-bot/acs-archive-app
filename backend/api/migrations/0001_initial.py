@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Categorie',
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('id', models.TextField(primary_key=True)),
                 ('nom', models.CharField(max_length=100, unique=True)),
                 ('description', models.TextField(blank=True, null=True)),
                 ('couleur', models.CharField(default='#D32027', max_length=7)),
@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Client',
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('id', models.TextField(primary_key=True)),
                 ('nom', models.CharField(max_length=255, unique=True)),
                 ('numero_client', models.CharField(blank=True, db_column='numeroClient', max_length=100, null=True, unique=True)),
                 ('type', models.CharField(choices=[('ENTREPRISE', 'Entreprise'), ('PARTICULIER', 'Particulier')], default='ENTREPRISE', max_length=20)),
@@ -58,7 +58,7 @@ class Migration(migrations.Migration):
                 ('password', models.CharField(max_length=128, verbose_name='password')),
                 ('last_login', models.DateTimeField(blank=True, null=True, verbose_name='last login')),
                 ('is_superuser', models.BooleanField(default=False, help_text='Designates that this user has all permissions without explicitly assigning them.', verbose_name='superuser status')),
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('id', models.TextField(primary_key=True)),
                 ('nom_utilisateur', models.CharField(db_column='nomUtilisateur', max_length=150, unique=True)),
                 ('nom', models.CharField(max_length=150)),
                 ('prenom', models.CharField(max_length=150)),
@@ -83,7 +83,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Exercice',
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('id', models.TextField(primary_key=True)),
                 ('annee', models.IntegerField()),
                 ('statut', models.CharField(choices=[('ACTIF', 'Actif'), ('ARCHIVE', 'Archivé'), ('CLOTURE', 'Clôturé')], default='ACTIF', max_length=20)),
                 ('cree_le', models.DateTimeField(auto_now_add=True, db_column='creeLe')),
@@ -101,7 +101,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Risque',
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('id', models.TextField(primary_key=True)),
                 ('type', models.CharField(choices=[('AUTOMOBILE', 'Automobile'), ('SANTE', 'Santé'), ('HABITATION', 'Habitation'), ('VIE', 'Vie'), ('RESPONSABILITE_CIVILE', 'Responsabilité Civile'), ('AUTRE', 'Autre')], max_length=30)),
                 ('numero_police', models.CharField(blank=True, db_column='numeroPolice', max_length=100, null=True)),
                 ('cree_le', models.DateTimeField(auto_now_add=True, db_column='creeLe')),
@@ -118,7 +118,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Document',
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('id', models.TextField(primary_key=True)),
                 ('titre', models.CharField(max_length=255)),
                 ('description', models.TextField(blank=True, null=True)),
                 ('chemin_fichier', models.CharField(db_column='cheminFichier', max_length=500)),

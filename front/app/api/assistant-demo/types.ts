@@ -2,12 +2,16 @@ import type { RoleUtilisateur } from '@/types'
 
 export type Statistiques = {
   documents_par_mois: Record<string, number>
-  top_categories: { categorie: string; compte: number }[]
   top_clients?: { client: string; compte: number }[]
   kpi?: {
     taux_conformite: number
     documents_en_retard: number
     alertes_peremption: number
+  }
+  totaux_clients?: {
+    total: number
+    particuliers: number
+    entreprises: number
   }
 }
 
@@ -32,10 +36,14 @@ export type AssistantNarration = {
   }
 }
 
+export type AssistantRestrictionReason = 'PERMISSION_DENIED' | 'PROMPT_INJECTION' | 'PII_DETECTED'
+
 export type AssistantRestriction = {
-  reason: 'PERMISSION_DENIED'
+  reason: AssistantRestrictionReason
   role?: RoleUtilisateur | null
+  details?: string
 }
+
 
 export type AssistantResponse = {
   question: string
@@ -47,4 +55,6 @@ export type AssistantResponse = {
   actions?: string[]
   narration?: AssistantNarration
   restriction?: AssistantRestriction
+  // Système d'apprentissage
+  interactionId?: string  // ID pour le feedback utilisateur (👍/👎)
 }

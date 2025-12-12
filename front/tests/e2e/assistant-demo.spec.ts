@@ -10,7 +10,6 @@ type AssistantDocumentPiece = {
 
 type AssistantStatisticsPayload = {
   documents_par_mois: Record<string, number>
-  top_categories: { categorie: string; compte: number }[]
   top_clients?: { client: string; compte: number }[]
   kpi?: {
     taux_conformite: number
@@ -40,10 +39,9 @@ const reponseDocuments: AssistantResponsePayload = {
       content: 'Contrat responsabilité civile 2024\nClient : SANLAM\nRéférence : DOC-001',
       metadata: {
         client: 'SANLAM',
-        categorie: 'Facturation',
         type: 'Facture',
         reference: 'DOC-001',
-        highlights: ['Client : SANLAM', 'Catégorie : Facturation', 'Type : Facture'],
+        highlights: ['Client : SANLAM', 'Type : Facture'],
       },
       score: 0.97,
     },
@@ -58,10 +56,6 @@ const reponseStatistiques: AssistantResponsePayload = {
   resume: 'Taux de conformité : 95.0 %. Documents en retard : 2. Alertes de péremption : 1.',
   statistiques: {
     documents_par_mois: { '2025-04': 12, '2025-05': 18 },
-    top_categories: [
-      { categorie: 'Facturation', compte: 10 },
-      { categorie: 'Responsabilité civile', compte: 6 },
-    ],
     top_clients: [
       { client: 'SANLAM', compte: 8 },
       { client: 'Mutuelle Santé+', compte: 6 },

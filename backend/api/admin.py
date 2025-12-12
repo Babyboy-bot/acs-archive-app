@@ -4,8 +4,7 @@ Configuration de l'interface d'administration Django
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
-    Utilisateur, Client, Exercice, Risque,
-    Categorie, Document
+    Utilisateur, Client, Exercice, Risque, Document
 )
 
 
@@ -68,22 +67,12 @@ class RisqueAdmin(admin.ModelAdmin):
     readonly_fields = ['cree_le', 'modifie_le']
 
 
-@admin.register(Categorie)
-class CategorieAdmin(admin.ModelAdmin):
-    """Administration des catégories"""
-    
-    list_display = ['nom', 'couleur', 'cree_le']
-    search_fields = ['nom']
-    ordering = ['nom']
-    readonly_fields = ['cree_le', 'modifie_le']
-
-
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
     """Administration des documents"""
     
-    list_display = ['titre', 'type_courrier', 'risque', 'auteur', 'categorie', 'est_archive', 'cree_le']
-    list_filter = ['type_courrier', 'est_archive', 'categorie', 'cree_le']
+    list_display = ['titre', 'type_courrier', 'risque', 'auteur', 'est_archive', 'cree_le']
+    list_filter = ['type_courrier', 'est_archive', 'cree_le']
     search_fields = ['titre', 'description', 'reference']
     ordering = ['-cree_le']
     readonly_fields = ['cree_le', 'modifie_le']
@@ -96,7 +85,7 @@ class DocumentAdmin(admin.ModelAdmin):
             'fields': ('chemin_fichier', 'type_fichier', 'taille_fichier')
         }),
         ('Classification', {
-            'fields': ('type_courrier', 'risque', 'categorie', 'auteur')
+            'fields': ('type_courrier', 'risque', 'auteur')
         }),
         ('Archivage', {
             'fields': ('est_archive', 'date_archivage')

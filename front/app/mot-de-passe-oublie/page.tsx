@@ -18,36 +18,25 @@ export default function PageMotDePasseOublie() {
         </div>
 
         <p className="text-theme-secondary mb-6">
-          Pour des raisons de sécurité, la réinitialisation du mot de passe n'est pas encore automatisée.
-          Merci de contacter l'administrateur ACS afin qu'il procède à la mise à jour de vos accès.
+          Pour des raisons de sécurité, la réinitialisation du mot de passe n'est pas automatisée.
+          La mise à jour de vos accès est traitée manuellement par les équipes ACS.
         </p>
 
         <div className="space-y-4 bg-theme-muted border border-theme rounded-xl p-4">
           <div className="flex items-start gap-3">
-            <Icon name="email" size="sm" className="mt-1 text-red-500" />
+            <Icon name="info" size="sm" className="mt-1 text-red-500" />
             <div>
-              <p className="font-semibold text-theme-primary">E-mail</p>
-              <a href="mailto:support@acs-archive.com" className="text-theme-secondary hover:text-theme-primary underline">
-                support@acs-archive.com
-              </a>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3">
-            <Icon name="phone" size="sm" className="mt-1 text-red-500" />
-            <div>
-              <p className="font-semibold text-theme-primary">Téléphone</p>
-              <div className="text-theme-secondary flex flex-col">
-                <span>+225 05 01 28 96 58</span>
-                <span>+225 05 44 77 38 19</span>
-              </div>
+              <p className="font-semibold text-theme-primary">Procédure interne</p>
+              <p className="text-theme-secondary">
+                Vous serez averti via les canaux habituels lorsque vos nouveaux identifiants seront disponibles.
+              </p>
             </div>
           </div>
         </div>
 
         <div className="mt-8 text-sm text-theme-secondary">
           <p>
-            Une fois le mot de passe réinitialisé par l'administrateur, vous pourrez vous reconnecter avec les identifiants fournis.
+            Une fois le mot de passe réinitialisé, vous pourrez vous reconnecter avec les identifiants fournis.
           </p>
         </div>
 

@@ -5,7 +5,7 @@ import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetchJson, buildApiUrl } from '@/lib/api'
-import { getToken } from '@/lib/session'
+import { printBlob } from '@/lib/print'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { formatDistanceToNow } from 'date-fns'
@@ -235,8 +235,16 @@ const RISQUE_THEMES: Record<string, RisqueTheme> = {
 
 const normalizeRisqueKey = (value?: string | null) => {
   if (!value) return ''
-  return value
+
+  // Normalisation de base (accents, casse)
+  let v = value
     .normalize('NFD')
+
+  // Unifier les variantes d'orthographe pour certains risques connus
+  // Exemple : "Assistance frais funérailles" vs "Assistance frais funéraires"
+  v = v.replace(/funeraill(es?)/gi, 'funeraires')
+
+  return v
     .replace(/[^0-9a-zA-Z\s-]/g, '')
     .replace(/[\s-]+/g, '_')
     .normalize('NFC')
@@ -268,6 +276,14 @@ const RISQUE_FALLBACK_TYPES = [
   { value: 'VOYAGE', label: 'Voyage' },
   { value: 'CAUTION', label: 'Caution' },
   { value: 'TOUS RISQUES CHANTIER', label: 'Tous risques chantier' },
+  { value: 'ASSISTANCE FRAIS FUNERAIRES', label: 'Assistance frais funéraires' },
+  { value: 'FRAIS FUNERAIRES', label: 'Frais funéraires' },
+  { value: 'GLOBALE BANQUE', label: 'Globale banque' },
+  { value: 'ASSURANCE DES STOCKS', label: 'Assurance des stocks' },
+  { value: 'PREVOYANCE COLLECTIVE', label: 'Prévoyance collective' },
+  { value: 'PREVOYANCE ENTREPRISE', label: 'Prévoyance entreprise' },
+  { value: 'MULTIRISQUE BUREAU', label: 'Multirisque bureau' },
+  { value: 'VOL ET DETOURNEMENTS', label: 'Vol et détournements' },
 ]
 
 const RISQUE_LABELS = new Map(
@@ -345,18 +361,48 @@ export default function PageRecherche() {
   const chargerDocuments = useCallback(async () => {
     setChargementDocuments(true)
     try {
-      const { data, response } = await apiFetchJson<{ results?: DocumentApi[] }>(
-        '/documents/?page_size=800&ordering=-cree_le'
-      )
+      const tousLesDocuments: DocumentApi[] = []
 
-      if (!response.ok) {
-        throw new Error('Réponse invalide de l’API documents')
+      // On parcourt toutes les pages de /documents/ pour ne rater aucun document.
+      // On commence par la première page, triée du plus récent au plus ancien.
+      let prochaineUrl: string | null = '/documents/?ordering=-cree_le&page_size=200'
+
+      while (prochaineUrl) {
+        const { data, response } = await apiFetchJson<{ results?: DocumentApi[]; next?: string | null }>(
+          prochaineUrl,
+        )
+
+        if (!response.ok) {
+          throw new Error('Réponse invalide de l’API documents')
+        }
+
+        // Cas pagination DRF classique
+        if (data && Array.isArray((data as any).results)) {
+          tousLesDocuments.push(...(((data as any).results ?? []) as DocumentApi[]))
+
+          const nextUrl = (data as any).next as string | null | undefined
+          if (nextUrl) {
+            try {
+              const urlObj = new URL(nextUrl)
+              prochaineUrl = `${urlObj.pathname}${urlObj.search}`
+            } catch {
+              prochaineUrl = null
+            }
+          } else {
+            prochaineUrl = null
+          }
+        } else if (Array.isArray(data)) {
+          // Cas où la pagination serait désactivée
+          tousLesDocuments.push(...(data as DocumentApi[]))
+          prochaineUrl = null
+        } else {
+          prochaineUrl = null
+        }
       }
 
-      const docs = Array.isArray(data?.results) ? data!.results : []
-      setDocumentsSource(docs)
+      setDocumentsSource(tousLesDocuments)
       setDocumentsCharges(true)
-      return docs
+      return tousLesDocuments
     } catch (error) {
       console.error('Erreur chargement documents (suggestions)', error)
       setDocumentsSource([])
@@ -381,14 +427,16 @@ export default function PageRecherche() {
         const info = doc.risque_detail?.exercice_info
         const clientDoc = info?.client ?? ''
         const anneeDoc = info?.annee ? String(info.annee) : ''
-        const risqueDoc = (doc.risque_detail?.type ?? '').toUpperCase()
+        const risqueDoc = doc.risque_detail?.type ?? ''
         const typeCourrierDoc = doc.type_courrier ?? ''
 
         const matchClient = criteres.client
           ? clientDoc.toLowerCase().includes(criteres.client.toLowerCase())
           : true
         const matchExercice = criteres.exercice ? anneeDoc === criteres.exercice : true
-        const matchRisque = criteres.risque ? risqueDoc === criteres.risque.toUpperCase() : true
+        const matchRisque = criteres.risque
+          ? normalizeRisqueKey(risqueDoc) === normalizeRisqueKey(criteres.risque)
+          : true
         const matchTypeCourrier = criteres.typeCourrier ? typeCourrierDoc === criteres.typeCourrier : true
 
         return matchClient && matchExercice && matchRisque && matchTypeCourrier
@@ -458,6 +506,8 @@ export default function PageRecherche() {
           : Array.isArray(clientsRes.data?.results)
             ? (clientsRes.data!.results as ClientApi[])
             : []
+
+        clientsData.sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }))
         setClients(clientsData)
 
         const exercicesData: ExerciceApi[] = Array.isArray(exercicesRes.data)
@@ -506,15 +556,19 @@ export default function PageRecherche() {
     setErreur(null)
 
     try {
+      let baseDocuments: DocumentApi[] = documentsSource
+
+      // Au premier appel, on doit utiliser directement le résultat de chargerDocuments,
+      // car setDocumentsSource est asynchrone et l'état n'est pas encore à jour.
       if (!documentsCharges) {
         try {
-          await chargerDocuments()
+          baseDocuments = await chargerDocuments()
         } catch (error) {
           setErreur("Impossible de récupérer les documents.")
         }
       }
 
-      const resultatFiltre = filtrerDocuments(documentsSource, {
+      const resultatFiltre = filtrerDocuments(baseDocuments, {
         client: client || undefined,
         exercice: exercice || undefined,
         risque: risque || undefined,
@@ -534,7 +588,7 @@ export default function PageRecherche() {
   const imprimerResultat = (doc: (typeof resultatsAffiches)[number]) => {
     const url = extraireUrlDocument(doc)
     if (!url) {
-      setErreurTelechargement("Document introuvable sur le serveur")
+      setErreurTelechargement('Document introuvable sur le serveur')
       return
     }
 
@@ -549,10 +603,6 @@ export default function PageRecherche() {
     const startPrint = async () => {
       try {
         const headers = new Headers({ Accept: 'application/pdf,image/*' })
-        const token = getToken()
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`)
-        }
 
         const response = await fetch(proxyUrl, {
           credentials: 'include',
@@ -564,91 +614,14 @@ export default function PageRecherche() {
         }
 
         const blob = await response.blob()
-        const mime = blob.type || response.headers.get('content-type') || ''
-        const candidateUrl = doc.fichierUrl ?? resolvedUrl ?? ''
-        const isPdf =
-          mime.includes('pdf') ||
-          (!mime || mime === 'application/octet-stream') && /\.pdf(?:$|\?|#)/i.test(candidateUrl)
 
-        const blobUrl = URL.createObjectURL(blob)
-        const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700')
-
-        if (!printWindow) {
-          URL.revokeObjectURL(blobUrl)
-          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
-          return
-        }
-
-        const sanitize = (value: string) =>
-          value
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-
-        const titreNettoye = sanitize(doc.titre || 'Document')
-
-        const scriptContent = isPdf
-          ? `const iframe = document.querySelector('iframe');
-            const triggerPrint = () => {
-              try {
-                iframe.contentWindow?.focus?.();
-                iframe.contentWindow?.print?.();
-              } catch (e) {
-                window.focus();
-                window.print();
-              }
-              setTimeout(() => window.close(), 500);
-            };
-            if (iframe) {
-              iframe.addEventListener('load', triggerPrint);
-            } else {
-              triggerPrint();
-            }`
-          : `const image = document.querySelector('img');
-            const triggerPrint = () => {
-              try {
-                window.focus();
-                window.print();
-              } catch (e) {
-                window.print();
-              }
-              setTimeout(() => window.close(), 500);
-            };
-            if (!image) {
-              triggerPrint();
-            } else if (image.complete) {
-              triggerPrint();
-            } else {
-              image.addEventListener('load', triggerPrint);
-            }`
-
-        printWindow.document.open()
-        printWindow.document.write(`<!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="utf-8" />
-              <title>Impression - ${titreNettoye}</title>
-              <style>
-                html, body { margin: 0; padding: 0; height: 100%; }
-                iframe, img { width: 100%; height: 100%; border: 0; display: block; }
-                img { object-fit: contain; background: #fff; }
-              </style>
-            </head>
-            <body>
-              ${isPdf ? `<iframe src="${blobUrl}"></iframe>` : `<img src="${blobUrl}" alt="${titreNettoye}" />`}
-              <script>
-                ${scriptContent.replace(/<\//g, '<\\/')}
-              <\/script>
-            </body>
-          </html>`)
-        printWindow.document.close()
-
-        const cleanup = () => {
-          URL.revokeObjectURL(blobUrl)
-          printWindow.removeEventListener('beforeunload', cleanup)
-        }
-        printWindow.addEventListener('beforeunload', cleanup)
+        await printBlob({
+          blob,
+          title: doc.titre || 'Document',
+          mimeType: response.headers.get('content-type'),
+          sourceUrl: doc.fichierUrl ?? doc.source?.fichier_url ?? doc.source?.fichierUrl ?? null,
+          fallbackUrl: resolvedUrl,
+        })
       } catch (error: any) {
         console.error('Impression recherche', error)
         setErreurTelechargement(error?.message ?? "Impossible d'imprimer le document")
@@ -1223,17 +1196,6 @@ export default function PageRecherche() {
                         <motion.button 
                           whileHover={{ scale: 1.2 }}
                           className="p-3 hover:bg-gray-100 rounded-xl transition-colors" 
-                          title="Imprimer"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            imprimerResultat(doc)
-                          }}
-                        >
-                          <Icon name="print" size="md" />
-                        </motion.button>
-                        <motion.button 
-                          whileHover={{ scale: 1.2 }}
-                          className="p-3 hover:bg-gray-100 rounded-xl transition-colors" 
                           title="Voir"
                           onClick={(event) => {
                             event.stopPropagation()
@@ -1241,17 +1203,6 @@ export default function PageRecherche() {
                           }}
                         >
                           <Icon name="eye" size="md" />
-                        </motion.button>
-                        <motion.button 
-                          whileHover={{ scale: 1.2 }}
-                          className="p-3 hover:bg-blue-100 rounded-xl transition-colors" 
-                          title="Télécharger"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            telechargerResultat(doc)
-                          }}
-                        >
-                          <Icon name="download" size="md" />
                         </motion.button>
                       </div>
                     </div>

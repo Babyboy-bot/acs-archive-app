@@ -109,7 +109,15 @@ const SUGGESTIONS_RISQUES = [
   'Transport facultés',
   'Voyage',
   'Caution',
-  'Tous risques chantier'
+  'Tous risques chantier',
+  'Assistance frais funéraires',
+  'Frais funéraires',
+  'Globale banque',
+  'Assurance des stocks',
+  'Prévoyance collective',
+  'Prévoyance entreprise',
+  'Multirisque bureau',
+  'Vol et détournements'
 ]
 
 const CLIENTS_PAR_PAGE = 50
@@ -146,6 +154,7 @@ export default function PageClients() {
   useEnforceNonConsultant()
   const [clients, setClients] = useState<ClientAPI[]>([])
   const [entreprises, setEntreprises] = useState<{ id: string; nom: string }[]>([])
+  const [rechercheEntrepriseRattachee, setRechercheEntrepriseRattachee] = useState('')
   const [chargement, setChargement] = useState(true)
   const [erreur, setErreur] = useState('')
   const [messageSucces, setMessageSucces] = useState('')
@@ -174,25 +183,25 @@ export default function PageClients() {
   const [risquesSelectionnes, setRisquesSelectionnes] = useState<NouveauRisqueSelection[]>([])
   const [chargementRisque, setChargementRisque] = useState(false)
 
-  useEffect(() => {
-    const chargerEntreprises = async () => {
-      try {
-        const { response, data } = await apiFetchJson('/clients/?type=ENTREPRISE')
-        if (!response.ok) {
-          return
-        }
-        const bruts = Array.isArray(data)
-          ? data
-          : Array.isArray((data as any)?.results)
-            ? (data as any).results
-            : []
-        const normalises = bruts.map((client: any) => ({ id: client.id as string, nom: client.nom as string }))
-        setEntreprises(normalises)
-      } catch (error) {
-        console.error('Erreur chargement entreprises:', error)
+  const chargerEntreprises = async () => {
+    try {
+      const { response, data } = await apiFetchJson('/clients/?type=ENTREPRISE&simple=1&ordering=nom')
+      if (!response.ok) {
+        return
       }
+      const bruts = Array.isArray(data)
+        ? data
+        : Array.isArray((data as any)?.results)
+          ? (data as any).results
+          : []
+      const normalises = bruts.map((client: any) => ({ id: client.id as string, nom: client.nom as string }))
+      setEntreprises(normalises)
+    } catch (error) {
+      console.error('Erreur chargement entreprises:', error)
     }
+  }
 
+  useEffect(() => {
     chargerEntreprises()
   }, [])
 
@@ -546,6 +555,14 @@ export default function PageClients() {
     return clients
   }, [clients])
 
+  const entreprisesFiltrees = useMemo(
+    () =>
+      entreprises.filter((entreprise) =>
+        entreprise.nom.toLowerCase().includes(rechercheEntrepriseRattachee.toLowerCase()),
+      ),
+    [entreprises, rechercheEntrepriseRattachee],
+  )
+
   const clientsPagination = useMemo(() => {
     const total = clientsFiltres.length
     const totalPages = Math.max(1, Math.ceil(total / CLIENTS_PAR_PAGE))
@@ -571,6 +588,8 @@ export default function PageClients() {
     }
 
     setSoumissionEnCours(true)
+
+    const typeClient = formulaire.type
 
     const payload = {
       nom: formulaire.nom.trim(),
@@ -601,6 +620,9 @@ export default function PageClients() {
       }
 
       await chargerClients(recherche, typeFiltre)
+      if (typeClient === 'ENTREPRISE') {
+        await chargerEntreprises()
+      }
       const clientReponse = (data as any).client as ClientDRF | undefined
       const nomClient = clientReponse?.nom ?? formulaire.nom.trim()
       setMessageSucces(`Client ${nomClient} ${estEdition ? 'mis à jour' : 'créé'} avec succès.`)
@@ -771,7 +793,7 @@ export default function PageClients() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-theme-base text-theme-primary">
       <Navigation />
 
       <main className="container mx-auto px-4 py-8">

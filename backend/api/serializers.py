@@ -5,12 +5,11 @@ from urllib.parse import urljoin
 
 from django.conf import settings
 from django.core.files.storage import default_storage
-from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from .models import (
     Utilisateur, Client, Exercice, Risque, 
-    Categorie, Document
+    Document, AssistantConversation, AssistantMessage
 )
 
 
@@ -20,7 +19,6 @@ class UtilisateurSerializer(serializers.ModelSerializer):
     mot_de_passe = serializers.CharField(
         write_only=True,
         required=True,
-        validators=[validate_password],
         style={'input_type': 'password'}
     )
     
@@ -111,8 +109,33 @@ class LoginSerializer(serializers.Serializer):
     mot_de_passe = serializers.CharField(required=True, write_only=True, style={'input_type': 'password'})
 
 
-class ClientSerializer(serializers.ModelSerializer):
-    """Serializer pour le modèle Client"""
+class ClientBaseSerializer(serializers.ModelSerializer):
+    entreprise = serializers.PrimaryKeyRelatedField(
+        source='entreprise_parente',
+        queryset=Client.objects.all(),
+        allow_null=True,
+        required=False,
+    )
+    entreprise_nom = serializers.CharField(source='entreprise_parente.nom', read_only=True)
+    nombre_personnes_rattachees = serializers.SerializerMethodField()
+
+    def get_nombre_personnes_rattachees(self, obj):
+        if obj.type != 'ENTREPRISE':
+            return 0
+        return obj.membres.count()
+
+
+class ClientSimpleSerializer(ClientBaseSerializer):
+    """Version légère du serializer Client (sans exercices imbriqués explicites)."""
+
+    class Meta:
+        model = Client
+        fields = '__all__'
+        read_only_fields = ['id', 'cree_le', 'modifie_le']
+
+
+class ClientSerializer(ClientBaseSerializer):
+    """Serializer pour le modèle Client, avec exercices imbriqués."""
     exercices = serializers.SerializerMethodField()
 
     class Meta:
@@ -121,12 +144,26 @@ class ClientSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 
     def get_exercices(self, obj):
-        exercices = obj.exercices.all().order_by('-annee')
-        return ExerciceSerializer(exercices, many=True, context=self.context).data
+        if getattr(obj, 'type', None) == 'ENTREPRISE' and hasattr(obj, 'tous_les_exercices'):
+            exercices_qs = obj.tous_les_exercices.order_by('-annee')
+        else:
+            exercices_qs = obj.exercices.all().order_by('-annee')
+        return ExerciceSerializer(exercices_qs, many=True, context=self.context).data
+
+
+class ExerciceSimpleSerializer(serializers.ModelSerializer):
+    """Version légère du serializer Exercice (sans risques imbriqués)."""
+
+    client_nom = serializers.CharField(source='client.nom', read_only=True)
+
+    class Meta:
+        model = Exercice
+        fields = '__all__'
+        read_only_fields = ['id', 'cree_le', 'modifie_le']
 
 
 class ExerciceSerializer(serializers.ModelSerializer):
-    """Serializer pour le modèle Exercice"""
+    """Serializer pour le modèle Exercice, avec risques imbriqués."""
     
     client_nom = serializers.CharField(source='client.nom', read_only=True)
     risques = serializers.SerializerMethodField()
@@ -139,6 +176,15 @@ class ExerciceSerializer(serializers.ModelSerializer):
     def get_risques(self, obj):
         risques = obj.risques.all().order_by('type')
         return RisqueSerializer(risques, many=True, context=self.context).data
+
+
+class RisqueSimpleSerializer(serializers.ModelSerializer):
+    """Version légère du serializer Risque (id + type uniquement)."""
+
+    class Meta:
+        model = Risque
+        fields = ['id', 'type']
+        read_only_fields = ['id']
 
 
 class RisqueSerializer(serializers.ModelSerializer):
@@ -158,20 +204,10 @@ class RisqueSerializer(serializers.ModelSerializer):
         }
 
 
-class CategorieSerializer(serializers.ModelSerializer):
-    """Serializer pour le modèle Catégorie"""
-    
-    class Meta:
-        model = Categorie
-        fields = '__all__'
-        read_only_fields = ['id', 'cree_le', 'modifie_le']
-
-
 class DocumentSerializer(serializers.ModelSerializer):
     """Serializer pour le modèle Document"""
     
     auteur_nom = serializers.CharField(source='auteur.get_full_name', read_only=True)
-    categorie_nom = serializers.CharField(source='categorie.nom', read_only=True, allow_null=True)
     risque_detail = RisqueSerializer(source='risque', read_only=True)
     fichier_url = serializers.SerializerMethodField()
 
@@ -200,3 +236,24 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = Document
         fields = '__all__'
         read_only_fields = ['id', 'cree_le', 'modifie_le']
+
+
+class AssistantConversationSerializer(serializers.ModelSerializer):
+    """Serializer pour les conversations de l'assistant IA"""
+
+    nombre_messages = serializers.IntegerField(read_only=True)
+    dernier_message_le = serializers.DateTimeField(read_only=True)
+
+    class Meta:
+        model = AssistantConversation
+        fields = '__all__'
+        read_only_fields = ['id', 'utilisateur', 'cree_le', 'modifie_le', 'dernier_message_le', 'nombre_messages']
+
+
+class AssistantMessageSerializer(serializers.ModelSerializer):
+    """Serializer pour les messages de l'assistant IA"""
+
+    class Meta:
+        model = AssistantMessage
+        fields = '__all__'
+        read_only_fields = ['id', 'cree_le']

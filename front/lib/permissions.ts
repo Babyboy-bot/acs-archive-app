@@ -1,7 +1,7 @@
 import { RoleUtilisateur } from '@/types'
 
 export type PermissionAction = 'voir' | 'creer' | 'modifier' | 'supprimer'
-export type PermissionRessource = 'documents' | 'utilisateurs' | 'categories' | 'stats'
+export type PermissionRessource = 'documents' | 'utilisateurs' | 'stats'
 
 export type RolePermissions = Record<PermissionRessource, ReadonlySet<PermissionAction>>
 
@@ -9,7 +9,6 @@ const buildPermissions = (matrix: Partial<Record<PermissionRessource, Permission
   return {
     documents: new Set(matrix.documents ?? []),
     utilisateurs: new Set(matrix.utilisateurs ?? []),
-    categories: new Set(matrix.categories ?? []),
     stats: new Set(matrix.stats ?? []),
   }
 }
@@ -18,18 +17,15 @@ const ROLE_PERMISSIONS: Record<RoleUtilisateur, RolePermissions> = {
   ADMIN: buildPermissions({
     documents: ['voir', 'creer', 'modifier', 'supprimer'],
     utilisateurs: ['voir', 'creer', 'modifier', 'supprimer'],
-    categories: ['voir', 'creer', 'modifier', 'supprimer'],
     stats: ['voir'],
   }),
   ARCHIVISTE: buildPermissions({
     documents: ['voir', 'creer', 'modifier', 'supprimer'],
     utilisateurs: ['voir'],
-    categories: ['voir', 'creer', 'modifier', 'supprimer'],
     stats: ['voir'],
   }),
   CONSULTANT: buildPermissions({
     documents: ['voir'],
-    categories: ['voir'],
   }),
 }
 

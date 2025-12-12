@@ -43,26 +43,19 @@ export function Navigation() {
   const router = useRouter()
 
   // Gestion du thème utilisateur
-  const [theme, setTheme] = React.useState<ThemeMode>(() => getStoredTheme() ?? 'light')
-
   useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
+    const stored = getStoredTheme() || 'light'
+    setTheme(stored)
+  }, [])
 
-  // Optionnel : synchroniser avec le rôle au premier chargement
-  useEffect(() => {
-    if (!getStoredTheme()) {
-      if (role === RoleUtilisateur.ADMIN || role === RoleUtilisateur.ARCHIVISTE) {
-        setTheme('dark')
-      } else {
-        setTheme('light')
-      }
-    }
-    // eslint-disable-next-line
-  }, [role])
+  const [theme, setTheme] = React.useState<ThemeMode>(null)
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+    setTheme((prev) => {
+      const next: ThemeMode = prev === 'dark' ? 'light' : 'dark'
+      applyTheme(next)
+      return next
+    })
   }
 
   const elementsMenu = useMemo(() => {
