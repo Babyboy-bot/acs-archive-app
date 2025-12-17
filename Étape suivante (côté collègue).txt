@@ -1,0 +1,16 @@
+Étape suivante (côté collègue)
+1) Test réseau (avant Django)
+Sur le PC de ton collègue :
+
+powershell
+Test-NetConnection 192.168.1.11 -Port 5432
+2) Son backend/.env
+env
+DB_NAME=acs_archive
+DB_USER=postgres
+DB_PASSWORD=jesusauve1
+DB_HOST=192.168.1.11
+DB_PORT=5432
+3) Lancer le backend
+powershell
+python manage.py runserver

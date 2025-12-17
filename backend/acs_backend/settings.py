@@ -213,3 +213,27 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
+
+# ============================================================================
+# Assistant LLM (configuration via backend/.env)
+# ============================================================================
+
+ASSISTANT_LLM_ENABLED = os.getenv('ASSISTANT_LLM_ENABLED', 'true')
+ASSISTANT_LLM_PROVIDER = os.getenv('ASSISTANT_LLM_PROVIDER', 'mistral')
+ASSISTANT_LLM_API_KEY = os.getenv('ASSISTANT_LLM_API_KEY') or os.getenv('OPENAI_API_KEY')
+ASSISTANT_LLM_BASE_URL = os.getenv('ASSISTANT_LLM_BASE_URL')
+ASSISTANT_LLM_MODEL = os.getenv('ASSISTANT_LLM_MODEL')
+
+ASSISTANT_LLM_MONTHLY_LIMIT = int(os.getenv('ASSISTANT_LLM_MONTHLY_LIMIT', '30000'))
+# Les quotas LLM sont désactivés par défaut. Pour les réactiver explicitement,
+# définir ASSISTANT_LLM_QUOTA_DISABLED=false dans backend/.env.
+ASSISTANT_LLM_QUOTA_DISABLED = os.getenv('ASSISTANT_LLM_QUOTA_DISABLED', 'true')
+
+CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
+CLAUDE_BASE_URL = os.getenv('CLAUDE_BASE_URL', 'https://api.anthropic.com/v1')
+CLAUDE_MODEL = os.getenv('CLAUDE_MODEL', 'claude-3-5-sonnet-20241022')
+
+MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
+MISTRAL_BASE_URL = os.getenv('MISTRAL_BASE_URL', 'https://api.mistral.ai/v1')
+MISTRAL_MODEL_DEFAULT = os.getenv('MISTRAL_MODEL_DEFAULT', 'mistral-medium-latest')
+MISTRAL_MODEL_ADVANCED = os.getenv('MISTRAL_MODEL_ADVANCED', 'mistral-large-latest')

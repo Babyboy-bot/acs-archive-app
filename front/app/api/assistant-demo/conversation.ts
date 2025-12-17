@@ -16,6 +16,8 @@ type ConversationMessage = {
 type Conversation = {
   id: string
   titre: string
+  memoire_resume?: string
+  memoire_etat?: Record<string, unknown>
   messages: ConversationMessage[]
   creeLe: string
   modifieLe: string
@@ -24,6 +26,15 @@ type Conversation = {
 // Cache local pour éviter trop d'appels API
 const localCache = new Map<string, ConversationMessage[]>()
 const conversationIdCache = new Map<string, string>() // sessionId -> conversationId
+
+type ConversationMemory = {
+  conversationId: string
+  memoire_resume: string
+  memoire_etat: Record<string, unknown>
+}
+
+const memoryCache = new Map<string, { value: ConversationMemory; updatedAt: number }>()
+const MEMORY_TTL_MS = 2 * 60 * 1000 // 2 minutes
 
 /**
  * Récupère ou crée une conversation pour un utilisateur
@@ -50,13 +61,13 @@ export async function getOrCreateConversation(token: string, sessionId: string):
     }
 
     const data = await response.json()
-    const conversations = Array.isArray(data) ? data : data?.results ?? []
+    const conversations: any[] = Array.isArray(data) ? data : data?.results ?? []
 
-    // Utiliser la conversation la plus récente ou en créer une nouvelle
-    if (conversations.length > 0) {
-      const latestConversation = conversations[0]
-      conversationIdCache.set(sessionId, latestConversation.id)
-      return latestConversation.id
+    // Si une conversation est déjà associée au sessionId, la réutiliser
+    const matching = conversations.find((c) => (c?.memoire_etat?.sessionId ?? c?.memoire_etat?.session_id) === sessionId)
+    if (matching?.id) {
+      conversationIdCache.set(sessionId, matching.id)
+      return matching.id
     }
 
     // Créer une nouvelle conversation
@@ -68,6 +79,7 @@ export async function getOrCreateConversation(token: string, sessionId: string):
       },
       body: JSON.stringify({
         titre: `Conversation ${new Date().toLocaleDateString('fr-FR')}`,
+        memoire_etat: { sessionId },
       }),
     })
 
@@ -82,6 +94,86 @@ export async function getOrCreateConversation(token: string, sessionId: string):
   } catch (error) {
     console.error('Erreur lors de la gestion des conversations:', error)
     return null
+  }
+}
+
+export async function getConversationMemoryPersistent(
+  token: string,
+  sessionId: string
+): Promise<ConversationMemory | null> {
+  const cached = memoryCache.get(sessionId)
+  if (cached && Date.now() - cached.updatedAt < MEMORY_TTL_MS) {
+    return cached.value
+  }
+
+  const conversationId = await getOrCreateConversation(token, sessionId)
+  if (!conversationId) return null
+
+  try {
+    const response = await fetch(`${API_BASE}/assistant/conversations/${conversationId}/`, {
+      headers: {
+        'Authorization': token,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const convo = (await response.json()) as any
+    const value: ConversationMemory = {
+      conversationId,
+      memoire_resume: typeof convo?.memoire_resume === 'string' ? convo.memoire_resume : '',
+      memoire_etat: (convo?.memoire_etat && typeof convo.memoire_etat === 'object') ? convo.memoire_etat : {},
+    }
+
+    memoryCache.set(sessionId, { value, updatedAt: Date.now() })
+    return value
+  } catch (error) {
+    console.error('Erreur lors de la récupération de la mémoire de conversation:', error)
+    return null
+  }
+}
+
+export async function updateConversationMemoryPersistent(
+  token: string,
+  sessionId: string,
+  memoryPatch: { memoire_resume?: string; memoire_etat?: Record<string, unknown> }
+): Promise<boolean> {
+  const conversationId = await getOrCreateConversation(token, sessionId)
+  if (!conversationId) return false
+
+  try {
+    const response = await fetch(`${API_BASE}/assistant/conversations/${conversationId}/`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(memoryPatch),
+    })
+
+    if (!response.ok) {
+      return false
+    }
+
+    const cached = memoryCache.get(sessionId)
+    if (cached) {
+      memoryCache.set(sessionId, {
+        value: {
+          conversationId,
+          memoire_resume: memoryPatch.memoire_resume ?? cached.value.memoire_resume,
+          memoire_etat: memoryPatch.memoire_etat ?? cached.value.memoire_etat,
+        },
+        updatedAt: Date.now(),
+      })
+    }
+
+    return true
+  } catch (error) {
+    console.error('Erreur lors de la mise à jour de la mémoire de conversation:', error)
+    return false
   }
 }
 

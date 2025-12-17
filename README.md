@@ -82,6 +82,7 @@ L’interface web est disponible sur : `http://localhost:3000`.
 - **Assistant IA**
   - Chat conversationnel orienté aide à la recherche documentaire
   - Utilise actuellement une recherche lexicale (TF‑IDF / FAISS) sur les documents indexés
+  - Intégration LLM Mistral (API Mistral) sans système de quotas applicatif côté ACS (seuls les quotas Mistral s'appliquent)
 
 ## Rôles & permissions
 
@@ -115,10 +116,15 @@ La gestion fine des permissions côté frontend repose sur des helpers comme `ha
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api
-ASSISTANT_LLM_PROVIDER=openai
-ASSISTANT_LLM_API_KEY=sk-...
-ASSISTANT_LLM_MODEL=gpt-4o-mini
+
+# Configuration LLM (Mistral uniquement)
+MISTRAL_API_KEY=...
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
 ASSISTANT_LLM_ENABLED=true
+
+# Optionnel : surcharger les modèles par défaut
+# MISTRAL_MODEL_DEFAULT=mistral-medium-latest
+# MISTRAL_MODEL_ADVANCED=mistral-large-latest
 ```
 
 ### Backend (`backend/.env`, optionnel)
@@ -127,6 +133,7 @@ ASSISTANT_LLM_ENABLED=true
 DEBUG=True
 SECRET_KEY=change-me
 DATABASE_URL=postgresql://user:password@localhost:5432/acs_archive
+ASSISTANT_LLM_QUOTA_DISABLED=true  # quotas LLM applicatifs désactivés (valeur par défaut dans settings.py)
 ```
 
 ## Technologies principales

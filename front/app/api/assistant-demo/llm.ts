@@ -6,12 +6,27 @@
 
 import type { DocumentPiece } from './types'
 import { enrichPromptWithLearning } from './learning'
+import {
+  getConversationHistoryPersistent,
+  addMessagePersistent,
+  clearLocalCache,
+} from './conversation'
 
-const PROVIDER = (process.env.ASSISTANT_LLM_PROVIDER ?? 'openai').toLowerCase()
+const PROVIDER = 'mistral'
+
+// Configuration générique type OpenAI-compatible (OpenAI ou proxy compatible)
 const API_KEY = process.env.ASSISTANT_LLM_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
 const BASE_URL = process.env.ASSISTANT_LLM_BASE_URL ?? 'https://api.openai.com/v1'
 const MODEL = process.env.ASSISTANT_LLM_MODEL ?? 'gpt-4o-mini'
+
+// Configuration pour Claude (Anthropic)
+const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? ''
+const CLAUDE_BASE_URL = process.env.CLAUDE_BASE_URL ?? 'https://api.anthropic.com/v1'
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-5-sonnet-20241022'
 const LLM_ENABLED = (process.env.ASSISTANT_LLM_ENABLED ?? 'true').toLowerCase() !== 'false'
+
+// Timeout global (en millisecondes) pour les appels LLM afin d'éviter les requêtes qui pendent
+const LLM_TIMEOUT_MS = Number(process.env.ASSISTANT_LLM_TIMEOUT_MS ?? '20000')
 
 // Configuration pour la stratégie multi-modèles Mistral
 const MISTRAL_BASE_URL = process.env.MISTRAL_BASE_URL ?? 'https://api.mistral.ai/v1'
@@ -24,6 +39,13 @@ const MISTRAL_ENABLED = (process.env.MISTRAL_ENABLED ?? 'false').toLowerCase() =
 // Seuil de complexité pour utiliser le modèle avancé (abaissé pour utiliser plus souvent le modèle puissant)
 const COMPLEXITY_THRESHOLD = Number(process.env.COMPLEXITY_THRESHOLD ?? '80')
 
+const MAX_TOKENS_DOCUMENTS_FACTUAL = Number(process.env.ASSISTANT_LLM_MAX_TOKENS_DOCUMENTS ?? '160')
+const MAX_TOKENS_STATISTIQUES = Number(process.env.ASSISTANT_LLM_MAX_TOKENS_STATISTIQUES ?? '200')
+const MAX_TOKENS_DEFAULT = Number(process.env.ASSISTANT_LLM_MAX_TOKENS_DEFAULT ?? '250')
+
+const HISTORY_LIMIT_FACTUAL = Number(process.env.ASSISTANT_LLM_HISTORY_LIMIT_FACTUAL ?? '0')
+const HISTORY_LIMIT_DEFAULT = Number(process.env.ASSISTANT_LLM_HISTORY_LIMIT_DEFAULT ?? '8')
+
 // Mémoire de conversation (stockage en mémoire pour la session)
 type ConversationMessage = {
   role: 'user' | 'assistant'
@@ -31,17 +53,189 @@ type ConversationMessage = {
   timestamp: number
 }
 
+function extractJsonObject(text: string): string | null {
+  const cleaned = (text ?? '').trim().replace(/^```[a-z]*\s*/i, '').replace(/\s*```\s*$/i, '')
+  const first = cleaned.indexOf('{')
+  const last = cleaned.lastIndexOf('}')
+  if (first === -1 || last === -1 || last <= first) return null
+  return cleaned.slice(first, last + 1)
+}
+
+function pickRoutingState(conversationState: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!conversationState) return {}
+  const allowed = ['lastMode', 'lastIntent', 'lastQuery', 'client', 'annee', 'risque', 'typeDocument', 'typeDoc', 'type', 'reference']
+  const out: Record<string, unknown> = {}
+  for (const key of allowed) {
+    if (conversationState[key] !== undefined && conversationState[key] !== null && conversationState[key] !== '') {
+      out[key] = conversationState[key]
+    }
+  }
+  return out
+}
+
+export async function generateLlmRoutingDecision(payload: {
+  question: string
+  heuristiqueMode: LlmRoutingDecision['mode']
+  criteres?: Record<string, unknown>
+  conversationSummary?: string
+  conversationState?: Record<string, unknown>
+}): Promise<{ decision: LlmRoutingDecision; telemetry: LlmTelemetry }> {
+  if (!isLlmConfigured()) {
+    throw new Error('LLM non configuré')
+  }
+
+  const state = pickRoutingState(payload.conversationState)
+  const lines: string[] = []
+  if (payload.conversationSummary) {
+    lines.push(`[MEMOIRE CONVERSATION]\n${sanitizeText(payload.conversationSummary)}`)
+  }
+  if (Object.keys(state).length > 0) {
+    lines.push(`[ETAT CONTEXTE]\n${Object.entries(state).map(([k, v]) => `${k}: ${typeof v === 'string' ? sanitizeText(v) : JSON.stringify(v)}`).join('\n')}`)
+  }
+  if (payload.criteres && Object.keys(payload.criteres).length > 0) {
+    lines.push(`[CRITERES EXTRAITS]\n${Object.entries(payload.criteres)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? sanitizeText(v) : JSON.stringify(v)}`)
+      .join('\n')}`)
+  }
+  lines.push(`[HEURISTIQUE]\nmode: ${payload.heuristiqueMode}`)
+  lines.push(`[QUESTION]\n${payload.question}`)
+
+  const routerSystemPrompt = `Tu es un routeur d'intention pour l'assistant ACS, spécialisé dans les archives ACS et les questions d'assurance / courtage.
+Ta seule sortie doit être un JSON STRICT et valide, sans texte autour.
+
+Schéma attendu:
+{
+  "mode": "recherche_document" | "conversation" | "salutation" | "confirmation",
+  "confidence": number,
+  "reasons": string[]
+}
+
+Définition des types de questions:
+- "recherche_document": l'utilisateur cherche un ou plusieurs documents ACS (courriers, pièces, contrats, avenants, factures, attestations, sinistres, etc.), ou mentionne des critères de recherche (client, année, risque, type de document, exercice, référence, numéro de police...).
+- "conversation": l'utilisateur pose une question métier sur l'assurance / le courtage (contrat, garanties, exclusions, primes, commissions, procédures, gestion de sinistres, réglementations, relation client...), SANS demander un document précis.
+- "salutation": salutations simples ("bonjour", "salut", "merci", "bonne journée", etc.).
+- "confirmation": réponses très courtes qui confirment une action ou une compréhension ("ok", "c'est bon", "parfait", "merci beaucoup"...).
+
+Règles importantes:
+- Si la question est clairement une recherche de document ACS, choisis toujours "recherche_document".
+- Si la question est une demande d'explication ou de conseil en assurance / courtage sans mention explicite de documents ACS, choisis "conversation".
+- Si la question est totalement hors du domaine assurance / courtage et ACS (cuisine, politique, programmation, vie personnelle, etc.), choisis quand même "conversation" mais ajoute dans "reasons" un élément "out_of_scope".
+- N'utilise la mémoire que pour comprendre les pronoms et les suivis ("idem", "le même client", "et pour 2020 ?"), pas pour forcer une recherche documentaire si la question est purement métier.
+- "confidence" doit être entre 0 et 1.`
+
+  const prompt = lines.join('\n\n')
+
+  const result: LlmResult = await callMistral(prompt, false, [], {
+    historyLimit: 0,
+    maxTokens: 180,
+    systemPrompt: routerSystemPrompt,
+    temperature: 0,
+  })
+
+  const jsonStr = extractJsonObject(result.content)
+  if (!jsonStr) {
+    console.warn('Réponse routeur LLM invalide (JSON manquant), fallback heuristique.', {
+      provider: PROVIDER,
+      content: result.content,
+    })
+    return {
+      decision: {
+        mode: payload.heuristiqueMode,
+        confidence: 0,
+        reasons: ['fallback_invalid_router_output_json_missing'],
+      },
+      telemetry: result.telemetry,
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr) as any
+    const mode = parsed?.mode
+    const confidence = parsed?.confidence
+    if (!['recherche_document', 'conversation', 'salutation', 'confirmation'].includes(mode)) {
+      throw new Error('mode')
+    }
+    if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new Error('confidence')
+    }
+
+    const decision: LlmRoutingDecision = {
+      mode,
+      confidence,
+      reasons: Array.isArray(parsed?.reasons)
+        ? parsed.reasons.filter((r: any) => typeof r === 'string').slice(0, 5)
+        : undefined,
+    }
+
+    return { decision, telemetry: result.telemetry }
+  } catch (err) {
+    console.warn('Réponse routeur LLM invalide (parse/validation), fallback heuristique.', {
+      provider: PROVIDER,
+      content: result.content,
+      error: (err as Error)?.message,
+    })
+    return {
+      decision: {
+        mode: payload.heuristiqueMode,
+        confidence: 0,
+        reasons: ['fallback_invalid_router_output_schema'],
+      },
+      telemetry: result.telemetry,
+    }
+  }
+}
+
+export async function generateLlmConversationSummary(payload: {
+  previousSummary: string
+  lastUserMessage: string
+  lastAssistantMessage: string
+}): Promise<{ summary: string; telemetry?: LlmTelemetry }> {
+  if (!isLlmConfigured()) {
+    return { summary: payload.previousSummary }
+  }
+
+  const summarySystemPrompt = `Tu es chargé de résumer une conversation entre un utilisateur et l'assistant ACS.
+Ton objectif est de produire un résumé COURT, factuel et utile pour la suite de la conversation.
+
+Contraintes IMPORTANTES :
+- Ne rajoute AUCUNE information qui n'apparaît pas dans le texte fourni.
+- Ne crée jamais de nouveaux nombres, dates, références de documents, codes ou identifiants.
+- Réponds en français.
+
+Format de sortie :
+- Une ou deux phrases maximum.
+- Pas de puces, pas de markdown, pas de préambule.`
+
+  const prompt =
+    `[RESUME ACTUEL]\n${sanitizeText(payload.previousSummary)}\n\n` +
+    `[DERNIER ECHANGE]\n` +
+    `Utilisateur: ${sanitizeText(payload.lastUserMessage)}\n` +
+    `Assistant: ${sanitizeText(payload.lastAssistantMessage)}`
+
+  const result: LlmResult = await callMistral(prompt, false, [], {
+    historyLimit: 0,
+    maxTokens: 120,
+    systemPrompt: summarySystemPrompt,
+    temperature: 0.3,
+  })
+
+  const summary = (result.content ?? '').trim() || payload.previousSummary
+  const bounded = summary
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-6)
+    .join(' ')
+
+  const finalSummary = bounded.length > 900 ? bounded.slice(0, 900) : bounded
+  return { summary: finalSummary || payload.previousSummary, telemetry: result.telemetry }
+}
+
 // Cache des conversations par utilisateur (clé = token hash ou session id)
 const conversationCache = new Map<string, ConversationMessage[]>()
 const MAX_CONVERSATION_HISTORY = 10 // Garder les 10 derniers échanges (5 questions + 5 réponses)
 const CONVERSATION_TTL_MS = 60 * 60 * 1000 // 1 heure d'inactivité
-
-// Import dynamique pour éviter les erreurs de build
-import { 
-  getConversationHistoryPersistent, 
-  addMessagePersistent, 
-  clearLocalCache 
-} from './conversation'
 
 /**
  * Récupère l'historique de conversation (cache mémoire + fallback DB)
@@ -145,11 +339,14 @@ export type LlmPayload = {
   statistiques?: Record<string, unknown>
   sessionId?: string // Pour la mémoire de conversation
   token?: string | null // Pour la persistance en base de données
+  conversationSummary?: string
+  conversationState?: Record<string, unknown>
   dbContext?: {
     totalDocuments?: number
     totalClients?: number
     clientsListe?: string[]
   }
+  customSystemPrompt?: string // Prompt système personnalisé pour certains types de questions
 }
 
 export type LlmResult = {
@@ -157,21 +354,124 @@ export type LlmResult = {
   telemetry: LlmTelemetry
 }
 
+// Helper générique pour faire un fetch avec timeout et signal d'annulation
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutMs = options.timeoutMs ?? LLM_TIMEOUT_MS
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+    return response
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export type LlmRoutingDecision = {
+  mode: 'recherche_document' | 'conversation' | 'salutation' | 'confirmation'
+  confidence: number
+  reasons?: string[]
+}
+
+function getExpectedDocumentCountFromStats(statistiques: Record<string, unknown> | undefined): number | null {
+  if (!statistiques) return null
+  const direct = (statistiques as any).nombreDocuments
+  if (typeof direct === 'number' && Number.isFinite(direct)) return direct
+  const totalDocs = (statistiques as any).total_documents
+  if (typeof totalDocs === 'number' && Number.isFinite(totalDocs)) return totalDocs
+  return null
+}
+
+function validateLlmContent(payload: LlmPayload, response: string): { isValid: boolean; warnings: string[] } {
+  const warnings: string[] = []
+  const normalized = response.toLowerCase()
+  const questionNormalized = payload.question.toLowerCase()
+
+  // Détecter les répétitions suspectes de la question dans la réponse
+  const questionWords = questionNormalized
+    .split(/\s+/)
+    .filter(w => w.length > 4) // mots significatifs uniquement
+    .slice(0, 10)
+  
+  if (questionWords.length >= 3) {
+    const repeatedWords = questionWords.filter(w => normalized.includes(w))
+    if (repeatedWords.length >= Math.min(5, questionWords.length)) {
+      warnings.push('La réponse répète trop de mots de la question sans apporter de contenu nouveau.')
+    }
+  }
+
+  // Détecter les phrases creuses de remplissage
+  const fillerPatterns = [
+    /je vais (t'|vous )?(expliquer|te dire|répondre)/i,
+    /laisse[- ]moi (t'|te |vous )?expliquer/i,
+    /voici (ce que|comment)/i,
+  ]
+  const hasOnlyFiller = fillerPatterns.some(p => p.test(response)) && response.length < 150
+  if (hasOnlyFiller) {
+    warnings.push('La réponse contient principalement du remplissage sans contenu substantiel.')
+  }
+
+  if (payload.intent === 'documents') {
+    const foundCount = payload.pieces?.length ?? 0
+
+    if (foundCount > 0) {
+      const negativePatterns = ["je n'ai pas trouv", 'je n ai pas trouv', 'aucun document']
+      if (negativePatterns.some((p) => normalized.includes(p))) {
+        warnings.push('La réponse indique qu\'aucun document n\'a été trouvé alors que des documents sont présents.')
+      }
+
+      const docMatch = response.match(/(\d+)\s*documents?/i)
+      if (docMatch) {
+        const mentioned = Number(docMatch[1])
+        if (Number.isFinite(mentioned) && mentioned !== foundCount) {
+          warnings.push(`La réponse mentionne ${mentioned} document(s) alors que le résultat contient ${foundCount} document(s).`)
+        }
+      }
+
+      const maxDocRef = Math.min(3, foundCount)
+      const docRefs = [...response.matchAll(/\bDoc\s+(\d+)\b/gi)].map((m) => Number(m[1]))
+      for (const ref of docRefs) {
+        if (!Number.isFinite(ref) || ref < 1 || ref > maxDocRef) {
+          warnings.push(`La réponse référence "Doc ${ref}" qui n'est pas présent dans les documents fournis.`)
+        }
+      }
+    } else {
+      const positivePattern = /\bj['']ai\s+trouv/i
+      if (positivePattern.test(response) && !/\bje\s+n['']?ai\s+pas\s+trouv/i.test(response)) {
+        warnings.push('La réponse indique avoir trouvé un document alors qu\'aucun document n\'a été fourni.')
+      }
+    }
+  }
+
+  if (payload.intent === 'statistiques') {
+    const expectedCount = getExpectedDocumentCountFromStats(payload.statistiques)
+    if (expectedCount !== null) {
+      const docMatch = response.match(/(\d+)\s*documents?/i)
+      if (docMatch) {
+        const mentioned = Number(docMatch[1])
+        if (Number.isFinite(mentioned) && mentioned !== expectedCount) {
+          warnings.push(`La réponse mentionne ${mentioned} document(s) alors que les statistiques indiquent ${expectedCount}.`)
+        }
+      }
+      if (expectedCount > 0 && normalized.includes('aucun document')) {
+        warnings.push('La réponse indique 0 document alors que les statistiques indiquent un nombre non nul.')
+      }
+    }
+  }
+
+  return { isValid: warnings.length === 0, warnings }
+}
+
 export function isLlmConfigured(): boolean {
   if (!LLM_ENABLED) return false
-
-  // Pour OpenAI, on exige une clé API. Pour un fournisseur local compatible
-  // OpenAI (ex: Ollama, LM Studio), on peut se contenter de BASE_URL.
-  if (PROVIDER === 'openai') {
-    return Boolean(API_KEY)
-  }
-  
-  // Pour Mistral, vérifier la clé API Mistral
-  if (PROVIDER === 'mistral') {
-    return Boolean(MISTRAL_API_KEY)
-  }
-
-  return true
+  return Boolean(MISTRAL_API_KEY)
 }
 
 // Détermine si Mistral est configuré comme alternative
@@ -211,6 +511,21 @@ function sanitizeText(value: string | undefined | null): string {
 
 export function buildPrompt(payload: LlmPayload): string {
   const parts: string[] = []
+
+  if (payload.conversationSummary) {
+    parts.push(`[MEMOIRE CONVERSATION]\n${sanitizeText(payload.conversationSummary)}`)
+  }
+
+  if (payload.conversationState && Object.keys(payload.conversationState).length > 0) {
+    const entries = Object.entries(payload.conversationState)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .slice(0, 20)
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? sanitizeText(v) : JSON.stringify(v)}`)
+
+    if (entries.length > 0) {
+      parts.push(`[ETAT CONTEXTE]\n${entries.join('\n')}`)
+    }
+  }
 
   // Contexte de la base de données pour validation
   if (payload.dbContext) {
@@ -271,22 +586,55 @@ export function buildPrompt(payload: LlmPayload): string {
   return parts.join('\n\n')
 }
 
-async function callOpenAi(prompt: string, modelOverride?: string): Promise<LlmResult> {
+export function buildConversationSystemPrompt(): string {
+  return `Tu es l'assistant ACS, spécialisé dans l'assurance et le courtage.
+
+RÈGLES CRITIQUES DE RÉPONSE :
+1. **Réponds DIRECTEMENT à la question** sans phrases d'introduction creuses ("Je vais t'expliquer", "Laisse-moi te dire", etc.).
+2. **Commence immédiatement par le contenu** de la réponse.
+3. **Sois concis et précis** : 2-4 phrases maximum pour une définition simple.
+4. **Si tu ne sais pas** ou si la question est hors de ton domaine, dis-le clairement : "Je ne peux pas répondre à cette question car elle sort du domaine de l'assurance et du courtage."
+5. **N'invente JAMAIS** de chiffres, dates, références ou noms de documents.
+6. **Utilise un ton professionnel mais accessible**, tutoiement autorisé.
+
+Exemples de BONNES réponses :
+- Question : "C'est quoi une franchise absolue ?"
+- Réponse : "Une franchise absolue est un montant fixe qui reste toujours à ta charge. L'assureur indemnise uniquement la partie du sinistre qui dépasse la franchise. Par exemple, avec une franchise de 500€ et un sinistre de 1200€, tu reçois 700€."
+
+Exemples de MAUVAISES réponses (à éviter) :
+- "Je vais t'expliquer simplement ce que c'est..."
+- "Laisse-moi te dire ce qu'est une franchise..."
+- "Voici ce que tu dois savoir sur..."
+
+Réponds en français.`
+}
+
+type OpenAiCallOptions = {
+  modelOverride?: string
+  maxTokens?: number
+  temperature?: number
+  systemPrompt?: string
+}
+
+async function callOpenAi(prompt: string, options?: OpenAiCallOptions): Promise<LlmResult> {
   const url = `${BASE_URL.replace(/\/$/, '')}/chat/completions`
   const started = Date.now()
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: modelOverride || MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: `Tu es un assistant d'archives intelligent et très convivial nommé ACS Assistant. Tu dois t'exprimer comme un humain naturel et amical, jamais comme un robot ou une IA.
+  let response: Response
+  try {
+    response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: options?.modelOverride || MODEL,
+        messages: [
+          {
+            role: 'system',
+            content:
+              options?.systemPrompt ??
+              `Tu es un assistant d'archives intelligent et très convivial nommé ACS Assistant. Tu dois t'exprimer comme un humain naturel et amical, jamais comme un robot ou une IA.
       
       STYLE ET TON:
       - Utilise un langage simple, chaleureux et engageant, comme un collègue compétent qui parle à un ami
@@ -309,16 +657,23 @@ async function callOpenAi(prompt: string, modelOverride?: string): Promise<LlmRe
       - Propose occasionnellement des perspectives ou conseils pertinents
       
       Tu es un assistant expert en archivage documentaire, pas un assistant généraliste. Concentre-toi sur l'aide à la gestion des archives, documents et statistiques de l'utilisateur.`,
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      temperature: 0.8,
-      max_tokens: 300,
-    }),
-  })
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: options?.temperature ?? 0.8,
+        max_tokens: options?.maxTokens ?? 300,
+      }),
+    })
+  } catch (error: any) {
+    const elapsedErr = Date.now() - started
+    if (error?.name === 'AbortError') {
+      throw new Error(`LLM (OpenAI-compatible) timeout après ${LLM_TIMEOUT_MS} ms (durée réelle: ${elapsedErr} ms)`) 
+    }
+    throw new Error(`LLM (OpenAI-compatible) erreur réseau: ${error?.message || String(error)}`)
+  }
 
   const elapsed = Date.now() - started
 
@@ -349,8 +704,79 @@ async function callOpenAi(prompt: string, modelOverride?: string): Promise<LlmRe
   }
 }
 
-// Prompt système optimisé pour des réponses naturelles et contextuelles
-const SYSTEM_PROMPT = `Tu es l'assistant ACS, un collègue sympa expert en archivage documentaire.
+// Appel Claude (Anthropic Messages API)
+async function callClaude(prompt: string, options?: OpenAiCallOptions): Promise<LlmResult> {
+  const url = `${CLAUDE_BASE_URL.replace(/\/$/, '')}/messages`
+  const started = Date.now()
+  let response: Response
+  try {
+    response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': CLAUDE_API_KEY,
+        // Version stable de l'API Anthropic
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: options?.modelOverride || CLAUDE_MODEL,
+        max_tokens: options?.maxTokens ?? 300,
+        temperature: options?.temperature ?? 0.8,
+        system: options?.systemPrompt ?? SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      }),
+    })
+  } catch (error: any) {
+    const elapsedErr = Date.now() - started
+    if (error?.name === 'AbortError') {
+      throw new Error(`Claude LLM timeout après ${LLM_TIMEOUT_MS} ms (durée réelle: ${elapsedErr} ms)`)
+    }
+    throw new Error(`Claude LLM erreur réseau: ${error?.message || String(error)}`)
+  }
+
+  const elapsed = Date.now() - started
+
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(`Claude LLM (${response.status}) ${detail}`)
+  }
+
+  const json = (await response.json()) as {
+    content?: Array<{ type: string; text?: string }>
+    usage?: { input_tokens?: number; output_tokens?: number }
+  }
+
+  const content = (json.content?.[0]?.text ?? '').trim()
+  if (!content) {
+    throw new Error('Réponse Claude LLM vide')
+  }
+
+  return {
+    content,
+    telemetry: {
+      provider: 'claude',
+      model: CLAUDE_MODEL,
+      durationMs: elapsed,
+      tokensInput: json.usage?.input_tokens,
+      tokensOutput: json.usage?.output_tokens,
+    },
+  }
+}
+
+// Prompt système optimisé pour des réponses naturelles, contextuelles et limitées au domaine ACS + assurance / courtage
+const SYSTEM_PROMPT = `Tu es l'assistant ACS, un collègue sympa expert en archivage documentaire ET en assurance / courtage (contrats, garanties, sinistres, primes, etc.).
+
+PÉRIMÈTRE:
+- Tu réponds UNIQUEMENT à des questions liées:
+  - aux documents et archives ACS (courriers, pièces, contrats, avenants, factures, sinistres, etc.)
+  - au métier de l'assurance et du courtage (produits, garanties, pratiques, obligations, gestion de sinistres, relation client, etc.)
+- Si la question sort totalement de ce périmètre (cuisine, sport, politique, programmation, vie personnelle, etc.), tu le dis poliment et tu invites l'utilisateur à poser une question en lien avec l'assurance ou les archives ACS.
+- Tu ne donnes jamais d'avis médicaux, ni de conseils juridiques généraux en dehors du contexte assurance / courtage.
 
 PERSONNALITÉ:
 - Tu es chaleureux, direct et efficace
@@ -365,6 +791,11 @@ CONVERSATION:
 - SOUVIENS-TOI de tout ce qui a été dit dans la conversation
 - Si l'utilisateur dit "lui", "ce client", "le même", réfère-toi au contexte précédent
 - Sois cohérent avec tes réponses précédentes
+
+ASSURANCE / COURTAGE:
+- Quand la question porte sur l'assurance ou le courtage, répond de façon pédagogique et concrète.
+- Tu peux donner des exemples pratiques, mais sans inventer de données spécifiques à ACS si elles ne sont pas fournies.
+- Si la réponse dépend de procédures internes ACS non précisées, reste générique et propose de vérifier avec la documentation interne ou un responsable.
 
 DOCUMENTS:
 - Réponds UNIQUEMENT avec les données fournies dans [DONNÉES VÉRIFIÉES] et [DOCUMENTS TROUVÉS]
@@ -387,7 +818,8 @@ STYLE:
 async function callMistral(
   prompt: string, 
   useAdvancedModel: boolean = false,
-  conversationHistory: Array<{role: 'user' | 'assistant', content: string}> = []
+  conversationHistory: Array<{role: 'user' | 'assistant', content: string}> = [],
+  options?: { historyLimit?: number; maxTokens?: number; systemPrompt?: string; temperature?: number }
 ): Promise<LlmResult> {
   const url = `${MISTRAL_BASE_URL.replace(/\/$/, '')}/chat/completions`
   const started = Date.now()
@@ -395,11 +827,12 @@ async function callMistral(
 
   // Construire les messages avec l'historique
   const messages: Array<{role: string, content: string}> = [
-    { role: 'system', content: SYSTEM_PROMPT }
+    { role: 'system', content: options?.systemPrompt ?? SYSTEM_PROMPT }
   ]
   
   // Ajouter l'historique de conversation (8 derniers messages pour un meilleur contexte)
-  for (const msg of conversationHistory.slice(-8)) {
+  const historyLimit = Math.max(0, options?.historyLimit ?? 8)
+  for (const msg of conversationHistory.slice(-historyLimit)) {
     messages.push({ role: msg.role, content: msg.content })
   }
   
@@ -408,19 +841,28 @@ async function callMistral(
 
   console.log(`=== MISTRAL: ${messages.length} messages dans la conversation ===`)
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${MISTRAL_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: model,
-      messages,
-      temperature: 0.7, // Un peu plus haut pour des réponses plus naturelles
-      max_tokens: 250, // Un peu plus pour les conversations
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${MISTRAL_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: model,
+        messages,
+        temperature: options?.temperature ?? 0.7,
+        max_tokens: options?.maxTokens ?? 250,
+      }),
+    })
+  } catch (error: any) {
+    const elapsedErr = Date.now() - started
+    if (error?.name === 'AbortError') {
+      throw new Error(`Mistral LLM timeout après ${LLM_TIMEOUT_MS} ms (durée réelle: ${elapsedErr} ms)`)
+    }
+    throw new Error(`Mistral LLM erreur réseau: ${error?.message || String(error)}`)
+  }
 
   const elapsed = Date.now() - started
 
@@ -457,76 +899,46 @@ export async function generateLlmAnswer(payload: LlmPayload): Promise<LlmResult>
     throw new Error('LLM non configuré')
   }
 
+  const isFactualDocuments = payload.intent === 'documents' && Array.isArray(payload.pieces)
+  const isFactualStatistiques = payload.intent === 'statistiques' && Boolean(payload.statistiques)
+  const isFactual = isFactualDocuments || isFactualStatistiques
+
+  const historyLimit = isFactual ? HISTORY_LIMIT_FACTUAL : HISTORY_LIMIT_DEFAULT
+  const maxTokens = isFactualDocuments
+    ? MAX_TOKENS_DOCUMENTS_FACTUAL
+    : payload.intent === 'statistiques'
+      ? MAX_TOKENS_STATISTIQUES
+      : MAX_TOKENS_DEFAULT
+
   // Récupérer l'historique de conversation si sessionId fourni
-  const conversationHistory = payload.sessionId 
+  const conversationHistory = payload.sessionId
     ? getConversationHistory(payload.sessionId).map(m => ({ role: m.role, content: m.content }))
     : []
 
   console.log(`=== LLM INFO: Provider = ${PROVIDER}, Historique = ${conversationHistory.length} messages ===`)
 
   const basePrompt = buildPrompt(payload)
-  const prompt = enrichPromptWithLearning(basePrompt, payload.question)
+  const prompt = isFactual ? basePrompt : enrichPromptWithLearning(basePrompt, payload.question)
 
-  // Stratégie multi-modèles
-  if (PROVIDER === 'mistral') {
-    const complexity = estimateComplexity(payload)
-    const useAdvancedModel = complexity > COMPLEXITY_THRESHOLD
-    
-    console.log(`=== MISTRAL: Complexité ${complexity}, modèle ${useAdvancedModel ? MISTRAL_MODEL_ADVANCED : MISTRAL_MODEL_DEFAULT} ===`)
-    
-    const result = await callMistral(prompt, useAdvancedModel, conversationHistory)
-    
-    // Sauvegarder dans l'historique (mémoire + persistance si token disponible)
-    if (payload.sessionId) {
-      if (payload.token) {
-        // Avec persistance en base de données
-        await addToConversationWithPersistence(payload.sessionId, 'user', payload.question, payload.token)
-        await addToConversationWithPersistence(payload.sessionId, 'assistant', result.content, payload.token)
-      } else {
-        // Cache mémoire uniquement
-        addToConversation(payload.sessionId, 'user', payload.question)
-        addToConversation(payload.sessionId, 'assistant', result.content)
-      }
-    }
-    
-    return result
-  }
-  
-  // Fallback à Mistral si configuré comme alternative
-  if (isMistralConfigured() && !['openai', 'ollama', 'local', 'mistral'].includes(PROVIDER)) {
-    console.log(`=== MISTRAL FALLBACK ===`)
-    const result = await callMistral(prompt, false, conversationHistory)
-    
-    if (payload.sessionId) {
-      if (payload.token) {
-        await addToConversationWithPersistence(payload.sessionId, 'user', payload.question, payload.token)
-        await addToConversationWithPersistence(payload.sessionId, 'assistant', result.content, payload.token)
-      } else {
-        addToConversation(payload.sessionId, 'user', payload.question)
-        addToConversation(payload.sessionId, 'assistant', result.content)
-      }
-    }
-    
-    return result
-  }
+  const complexity = estimateComplexity(payload)
+  const useAdvancedModel = complexity > COMPLEXITY_THRESHOLD
 
-  // Providers compatibles OpenAI
-  if (!['openai', 'ollama', 'local'].includes(PROVIDER)) {
-    throw new Error(`Fournisseur LLM non pris en charge: ${PROVIDER}`)
-  }
+  console.log(`=== MISTRAL: Complexité ${complexity}, modèle ${useAdvancedModel ? MISTRAL_MODEL_ADVANCED : MISTRAL_MODEL_DEFAULT} ===`)
 
-  const result = await callOpenAi(prompt)
-  
-  if (payload.sessionId) {
-    if (payload.token) {
-      await addToConversationWithPersistence(payload.sessionId, 'user', payload.question, payload.token)
-      await addToConversationWithPersistence(payload.sessionId, 'assistant', result.content, payload.token)
-    } else {
-      addToConversation(payload.sessionId, 'user', payload.question)
-      addToConversation(payload.sessionId, 'assistant', result.content)
+  const result = await callMistral(prompt, useAdvancedModel, conversationHistory, {
+    historyLimit,
+    maxTokens,
+    systemPrompt: payload.customSystemPrompt,
+  })
+
+  const validation = validateLlmContent(payload, result.content)
+  if (!validation.isValid) {
+    console.warn('LLM validation failed (mistral):', validation.warnings)
+    if (isFactual) {
+      throw new Error('Réponse LLM invalide')
     }
   }
-  
+
   return result
 }
 

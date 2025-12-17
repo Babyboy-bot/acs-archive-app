@@ -449,7 +449,16 @@ export default function PageClients() {
       
       const { response, data } = await apiFetchJson(url)
       if (!response.ok) {
-        throw new Error((data as any)?.detail || 'Impossible de charger les clients')
+        const message = (data as any)?.detail as string | undefined
+
+        // Cas courant : utilisateur non authentifié
+        if (response.status === 401) {
+          console.warn('Chargement des clients non autorisé (401):', message || 'Unauthorized')
+          setErreur(message || 'Vous devez être connecté pour voir les clients.')
+          return
+        }
+
+        throw new Error(message || 'Impossible de charger les clients')
       }
       const bruts: ClientDRF[] = Array.isArray(data)
         ? data
@@ -476,7 +485,15 @@ export default function PageClients() {
     try {
       const { response, data } = await apiFetchJson(`/exercices/?client=${clientId}`)
       if (!response.ok) {
-        throw new Error((data as any)?.detail || 'Impossible de charger les exercices du client')
+        const message = (data as any)?.detail as string | undefined
+
+        if (response.status === 401) {
+          console.warn('Chargement des exercices non autorisé (401):', message || 'Unauthorized')
+          setErreur(message || 'Vous devez être connecté pour voir les exercices du client.')
+          return
+        }
+
+        throw new Error(message || 'Impossible de charger les exercices du client')
       }
 
       const bruts: any[] = Array.isArray(data)

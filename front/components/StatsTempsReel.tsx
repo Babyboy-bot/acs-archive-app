@@ -37,8 +37,21 @@ export function StatsTempsReel({ intervalMs = 5000 }: StatsTempsReelProps) {
   const chargerStats = async () => {
     try {
       const { response, data } = await apiFetchJson('/stats/')
-      if (!response.ok || !data || typeof data !== 'object') {
-        throw new Error((data as any)?.erreur || (data as any)?.detail || 'Erreur lors du chargement des statistiques')
+      if (!response.ok) {
+        const message = (data as any)?.erreur || (data as any)?.detail
+
+        // Cas classique : utilisateur non authentifié -> on ne casse pas l'UI, on garde les stats à 0
+        if (response.status === 401) {
+          console.warn('Stats non chargées (non authentifié):', message || '401 Unauthorized')
+          return
+        }
+
+        throw new Error(message || 'Erreur lors du chargement des statistiques')
+      }
+
+      if (!data || typeof data !== 'object') {
+        console.warn('Réponse /stats/ inattendue:', data)
+        return
       }
 
       const documents = Number((data as any).documents ?? 0)

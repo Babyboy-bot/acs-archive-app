@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth import authenticate
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.db.models import Q, Count
 from django.db.models.functions import Coalesce, TruncMonth
 from datetime import timedelta
@@ -62,18 +63,168 @@ except ImportError:
     PDF_EXTRACTION_AVAILABLE = False
 
 from .models import (
-    Utilisateur, Client, Exercice, Risque,
-    Document, DocumentChunk, AssistantConversation, AssistantMessage,
+    Utilisateur,
+    Client,
+    Exercice,
+    Risque,
+    Document,
+    DocumentChunk,
+    AssistantConversation,
+    AssistantMessage,
+    LlmMonthlyQuota,
+    LlmUsage,
 )
 from .serializers import (
-    UtilisateurSerializer, UtilisateurListSerializer, LoginSerializer,
-    ClientSimpleSerializer, ClientSerializer,
-    ExerciceSimpleSerializer, ExerciceSerializer,
-    RisqueSimpleSerializer, RisqueSerializer,
+    UtilisateurSerializer,
+    UtilisateurListSerializer,
+    LoginSerializer,
+    ClientSimpleSerializer,
+    ClientSerializer,
+    ExerciceSimpleSerializer,
+    ExerciceSerializer,
+    RisqueSimpleSerializer,
+    RisqueSerializer,
     DocumentSerializer,
-    AssistantConversationSerializer, AssistantMessageSerializer,
+    AssistantConversationSerializer,
+    AssistantMessageSerializer,
 )
 from .permissions import RoleBasedPermission, IsOwnerOrAdmin
+
+
+# ============================================================================
+# GESTION DES QUOTAS LLM (BACKEND)
+# ============================================================================
+
+DEFAULT_MONTHLY_LIMIT = getattr(settings, 'ASSISTANT_LLM_MONTHLY_LIMIT', 30000)
+QUOTA_DISABLED = str(getattr(settings, 'ASSISTANT_LLM_QUOTA_DISABLED', 'false')).lower() == 'true'
+
+
+def _llm_year_month(dt: timezone.datetime) -> str:
+    """Retourne une clé AAAA-MM pour le mois courant."""
+
+    return dt.strftime('%Y-%m')
+
+
+def consume_quota(utilisateur: Utilisateur, estimated_tokens: int, purpose: str, ts=None) -> dict:
+    """Vérifie et décrémente le quota mensuel LLM pour un utilisateur.
+
+    Retourne un dict {allowed, remaining, percentage} conformément au contrat
+    attendu par le front.
+    """
+
+    ts = ts or timezone.now()
+    year_month = _llm_year_month(ts)
+
+    quota, _ = LlmMonthlyQuota.objects.get_or_create(
+        utilisateur=utilisateur,
+        year_month=year_month,
+        defaults={'limit': DEFAULT_MONTHLY_LIMIT},
+    )
+
+    if QUOTA_DISABLED:
+        quota.tokens_used += estimated_tokens
+        quota.save(update_fields=['tokens_used'])
+        return {
+            'allowed': True,
+            'remaining': DEFAULT_MONTHLY_LIMIT,
+            'percentage': 0.0,
+        }
+
+    if quota.tokens_used + estimated_tokens > quota.limit:
+        remaining = max(0, quota.limit - quota.tokens_used)
+        logging.info(
+            "LLM_QUOTA_CONSUME blocked user=%s month=%s used=%s limit=%s estimated=%s remaining=%s purpose=%s",
+            utilisateur.id,
+            year_month,
+            quota.tokens_used,
+            quota.limit,
+            estimated_tokens,
+            remaining,
+            purpose,
+        )
+        return {
+            'allowed': False,
+            'remaining': remaining,
+            'percentage': quota.tokens_used / quota.limit if quota.limit else 1.0,
+        }
+
+    quota.tokens_used += estimated_tokens
+    quota.save(update_fields=['tokens_used'])
+
+    remaining = max(0, quota.limit - quota.tokens_used)
+    logging.info(
+        "LLM_QUOTA_CONSUME ok user=%s month=%s used=%s limit=%s estimated=%s remaining=%s purpose=%s",
+        utilisateur.id,
+        year_month,
+        quota.tokens_used,
+        quota.limit,
+        estimated_tokens,
+        remaining,
+        purpose,
+    )
+    return {
+        'allowed': True,
+        'remaining': remaining,
+        'percentage': quota.tokens_used / quota.limit if quota.limit else 0.0,
+    }
+
+
+def log_llm_usage(
+    utilisateur: Utilisateur,
+    provider: str,
+    model: str,
+    purpose: str,
+    tokens_input: int | None,
+    tokens_output: int | None,
+    ts=None,
+) -> None:
+    """Journalise un appel LLM détaillé et met à jour le compteur mensuel.
+
+    Cette fonction est appelée en asynchrone logique côté front, après l'appel
+    LLM, pour enregistrer les tokens réellement consommés.
+    """
+
+    ts = ts or timezone.now()
+    ti = tokens_input or 0
+    to = tokens_output or 0
+    total = ti + to
+
+    if total <= 0:
+        total = 0
+
+    usage = LlmUsage.objects.create(
+        utilisateur=utilisateur,
+        timestamp=ts,
+        provider=provider,
+        model=model,
+        purpose=purpose,
+        tokens_input=ti,
+        tokens_output=to,
+        tokens_total=total,
+    )
+
+    year_month = _llm_year_month(ts)
+    quota, _ = LlmMonthlyQuota.objects.get_or_create(
+        utilisateur=utilisateur,
+        year_month=year_month,
+        defaults={'limit': DEFAULT_MONTHLY_LIMIT},
+    )
+    quota.tokens_used += total
+    quota.save(update_fields=['tokens_used'])
+
+    logging.info(
+        "LLM_USAGE_LOG user=%s provider=%s model=%s purpose=%s tokens_input=%s tokens_output=%s tokens_total=%s month=%s quota_used=%s quota_limit=%s",
+        utilisateur.id,
+        provider,
+        model,
+        purpose,
+        ti,
+        to,
+        total,
+        year_month,
+        quota.tokens_used,
+        quota.limit,
+    )
 
 
 @api_view(['POST'])
@@ -258,13 +409,349 @@ def documents_search_view(request):
         fichier_url = payload.get('fichier_url')
         results.append({
             'id': payload.get('id'),
-            'titre': payload.get('titre') or '',
-            'description': payload.get('description') or '',
-            'url': fichier_url,
-            'icone': 'document',
+            'titre': payload.get('titre'),
+            'client': payload.get('client'),
+            'exercice': payload.get('exercice'),
+            'risque': payload.get('risque'),
+            'type_courrier': payload.get('type_courrier_label'),
+            'cree_le': payload.get('cree_le'),
+            'fichier_url': fichier_url,
         })
 
     return Response({'resultats': results})
+
+
+# ============================================================================
+# ENDPOINTS QUOTAS LLM
+# ============================================================================
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def llm_quota_consume(request):
+    """Vérifie et consomme une partie du quota LLM mensuel de l'utilisateur.
+
+    Body attendu:
+    {
+      "estimated_tokens": 400,
+      "purpose": "answer",
+      "timestamp": "2025-12-12T16:00:00Z"  (optionnel)
+    }
+    """
+
+    utilisateur = request.user
+    data = request.data or {}
+
+    try:
+        estimated = int(data.get('estimated_tokens') or 0)
+    except (TypeError, ValueError):
+        logging.warning("LLM_QUOTA_CONSUME bad_estimated_tokens user=%s payload=%s", utilisateur.id, data)
+        return Response({'detail': 'estimated_tokens invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if estimated <= 0:
+        logging.warning("LLM_QUOTA_CONSUME non_positive_estimated user=%s value=%s", utilisateur.id, estimated)
+        return Response({'detail': 'estimated_tokens doit être > 0'}, status=status.HTTP_400_BAD_REQUEST)
+
+    purpose = data.get('purpose') or 'answer'
+    ts_str = data.get('timestamp')
+    ts = parse_datetime(ts_str) if ts_str else None
+
+    decision = consume_quota(utilisateur, estimated, purpose, ts)
+    return Response(decision, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def llm_usage_log(request):
+    """Journalise un appel LLM (usage réel en tokens).
+
+    Body attendu:
+    {
+      "provider": "mistral",
+      "model": "mistral-medium-latest",
+      "purpose": "answer",
+      "tokens_input": 320,
+      "tokens_output": 180,
+      "timestamp": "2025-12-12T16:00:00Z"
+    }
+    """
+
+    utilisateur = request.user
+    data = request.data or {}
+
+    provider = data.get('provider') or 'unknown'
+    model = data.get('model') or 'unknown'
+    purpose = data.get('purpose') or 'answer'
+    ts_str = data.get('timestamp')
+    ts = parse_datetime(ts_str) if ts_str else None
+
+    try:
+        tokens_input = int(data.get('tokens_input') or 0)
+        tokens_output = int(data.get('tokens_output') or 0)
+    except (TypeError, ValueError):
+        logging.warning("LLM_USAGE_LOG bad_tokens user=%s payload=%s", utilisateur.id, data)
+        return Response({'detail': 'tokens_input ou tokens_output invalide(s)'}, status=status.HTTP_400_BAD_REQUEST)
+
+    log_llm_usage(
+        utilisateur=utilisateur,
+        provider=provider,
+        model=model,
+        purpose=purpose,
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
+        ts=ts,
+    )
+
+    return Response({'status': 'ok'}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def llm_quota_status(request):
+    """Retourne l'état du quota LLM courant pour l'utilisateur.
+
+    Réponse:
+    {
+      "limit": 30000,
+      "tokens_used": 12345,
+      "remaining": 17655,
+      "percentage": 0.41,
+      "year_month": "2025-12"
+    }
+    """
+
+    utilisateur = request.user
+    now_dt = timezone.now()
+    year_month = _llm_year_month(now_dt)
+
+    quota, _ = LlmMonthlyQuota.objects.get_or_create(
+        utilisateur=utilisateur,
+        year_month=year_month,
+        defaults={'limit': DEFAULT_MONTHLY_LIMIT},
+    )
+
+    if QUOTA_DISABLED:
+        return Response(
+            {
+                'limit': DEFAULT_MONTHLY_LIMIT,
+                'tokens_used': 0,
+                'remaining': DEFAULT_MONTHLY_LIMIT,
+                'percentage': 0.0,
+                'year_month': year_month,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    remaining = max(0, quota.limit - quota.tokens_used)
+    percentage = quota.tokens_used / quota.limit if quota.limit else 0.0
+
+    return Response(
+        {
+            'limit': quota.limit,
+            'tokens_used': quota.tokens_used,
+            'remaining': remaining,
+            'percentage': percentage,
+            'year_month': year_month,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def assistant_health(request):
+    """Retourne un état de santé technique de l'assistant LLM.
+
+    Vérifie la configuration de base du provider LLM (provider, clés, URLs) et
+    expose aussi l'état de la recherche sémantique.
+
+    Réponse JSON minimale:
+    {
+      "provider": "claude" | "mistral" | "openai" | ...,
+      "llm_enabled": true/false,
+      "config_ok": true/false,
+      "errors": ["..."] ,
+      "semantic_search_available": true/false
+    }
+    """
+
+    provider = (getattr(settings, 'ASSISTANT_LLM_PROVIDER', 'openai') or 'openai').lower()
+    llm_enabled = (str(getattr(settings, 'ASSISTANT_LLM_ENABLED', 'true')).lower() != 'false')
+
+    errors: list[str] = []
+
+    # Vérifier la configuration selon le provider déclaré
+    if not llm_enabled:
+        errors.append('LLM désactivé via ASSISTANT_LLM_ENABLED=false')
+    else:
+        if provider in ('openai',):
+            api_key = getattr(settings, 'ASSISTANT_LLM_API_KEY', None) or getattr(settings, 'OPENAI_API_KEY', None)
+            base_url = getattr(settings, 'ASSISTANT_LLM_BASE_URL', 'https://api.openai.com/v1')
+            if not api_key:
+                errors.append('Clé API OpenAI manquante (ASSISTANT_LLM_API_KEY ou OPENAI_API_KEY)')
+            if not isinstance(base_url, str) or not base_url:
+                errors.append('ASSISTANT_LLM_BASE_URL invalide ou vide')
+        elif provider in ('claude', 'anthropic'):
+            claude_key = getattr(settings, 'CLAUDE_API_KEY', None) or getattr(settings, 'ANTHROPIC_API_KEY', None)
+            claude_url = getattr(settings, 'CLAUDE_BASE_URL', 'https://api.anthropic.com/v1')
+            if not claude_key:
+                errors.append('Clé API Claude/Anthropic manquante (CLAUDE_API_KEY ou ANTHROPIC_API_KEY)')
+            if not isinstance(claude_url, str) or not claude_url:
+                errors.append('CLAUDE_BASE_URL invalide ou vide')
+        elif provider == 'mistral':
+            mistral_key = getattr(settings, 'MISTRAL_API_KEY', None)
+            mistral_url = getattr(settings, 'MISTRAL_BASE_URL', 'https://api.mistral.ai/v1')
+            if not mistral_key:
+                errors.append('Clé API Mistral manquante (MISTRAL_API_KEY)')
+            if not isinstance(mistral_url, str) or not mistral_url:
+                errors.append('MISTRAL_BASE_URL invalide ou vide')
+        else:
+            # Providers compatibles OpenAI custom ou locaux
+            base_url = getattr(settings, 'ASSISTANT_LLM_BASE_URL', None)
+            if not base_url:
+                errors.append(f'Provider LLM "{provider}" non reconnu et ASSISTANT_LLM_BASE_URL non défini')
+
+    config_ok = llm_enabled and not errors
+
+    data = {
+        'provider': provider,
+        'llm_enabled': llm_enabled,
+        'config_ok': bool(config_ok),
+        'errors': errors,
+        'semantic_search_available': bool(SEMANTIC_SEARCH_AVAILABLE),
+    }
+
+    logging.info(
+        "ASSISTANT_HEALTH provider=%s enabled=%s config_ok=%s semantic_search_available=%s errors=%s",
+        provider,
+        llm_enabled,
+        bool(config_ok),
+        bool(SEMANTIC_SEARCH_AVAILABLE),
+        ";".join(errors) if errors else "",
+    )
+
+    return Response(data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def llm_admin_stats(request):
+    """Stats LLM pour les administrateurs.
+
+    Retourne:
+    - tokens_par_utilisateur: liste des utilisateurs avec leur consommation
+    - usage_mensuel: consommation totale par mois
+    - top_utilisateurs: les 10 utilisateurs les plus actifs
+    - total_tokens: somme totale de tous les tokens
+    """
+
+    utilisateur = request.user
+    if utilisateur.role not in ['ADMIN', 'ARCHIVISTE']:
+        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+
+    now_dt = timezone.now()
+    current_month = _llm_year_month(now_dt)
+
+    # Tokens par utilisateur pour le mois courant
+    quotas_mois = LlmMonthlyQuota.objects.filter(year_month=current_month).select_related('utilisateur')
+    tokens_par_utilisateur = [
+        {
+            'utilisateur_id': q.utilisateur.id,
+            'nom_utilisateur': q.utilisateur.nom_utilisateur,
+            'nom_complet': f"{q.utilisateur.prenom} {q.utilisateur.nom}",
+            'tokens_used': q.tokens_used,
+            'limit': q.limit,
+            'percentage': q.tokens_used / q.limit if q.limit else 0,
+        }
+        for q in quotas_mois
+    ]
+
+    # Usage mensuel (tous les mois)
+    from django.db.models import Sum
+    usage_mensuel = (
+        LlmMonthlyQuota.objects.values('year_month')
+        .annotate(total_tokens=Sum('tokens_used'))
+        .order_by('-year_month')[:12]
+    )
+
+    # Top 10 utilisateurs (mois courant)
+    top_utilisateurs = sorted(tokens_par_utilisateur, key=lambda x: x['tokens_used'], reverse=True)[:10]
+
+    # Total tokens (tous les temps)
+    total_tokens = LlmUsage.objects.aggregate(total=Sum('tokens_total'))['total'] or 0
+
+    return Response(
+        {
+            'tokens_par_utilisateur': tokens_par_utilisateur,
+            'usage_mensuel': list(usage_mensuel),
+            'top_utilisateurs': top_utilisateurs,
+            'total_tokens': total_tokens,
+            'current_month': current_month,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def llm_admin_history(request):
+    """Historique détaillé des requêtes LLM (admin uniquement).
+
+    Query params:
+    - utilisateur_id: filtrer par utilisateur
+    - provider: filtrer par provider (mistral, openai)
+    - purpose: filtrer par purpose (router, answer, summary)
+    - limit: nombre de résultats (défaut 100, max 500)
+    """
+
+    utilisateur = request.user
+    if utilisateur.role not in ['ADMIN', 'ARCHIVISTE']:
+        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+
+    queryset = LlmUsage.objects.select_related('utilisateur').all()
+
+    # Filtres
+    utilisateur_id = request.query_params.get('utilisateur_id')
+    if utilisateur_id:
+        queryset = queryset.filter(utilisateur_id=utilisateur_id)
+
+    provider = request.query_params.get('provider')
+    if provider:
+        queryset = queryset.filter(provider=provider)
+
+    purpose = request.query_params.get('purpose')
+    if purpose:
+        queryset = queryset.filter(purpose=purpose)
+
+    # Limite
+    try:
+        limit = int(request.query_params.get('limit', 100))
+        limit = min(limit, 500)
+    except (TypeError, ValueError):
+        limit = 100
+
+    usages = queryset.order_by('-timestamp')[:limit]
+
+    data = [
+        {
+            'id': u.id,
+            'utilisateur': {
+                'id': u.utilisateur.id,
+                'nom_utilisateur': u.utilisateur.nom_utilisateur,
+                'nom_complet': f"{u.utilisateur.prenom} {u.utilisateur.nom}",
+            },
+            'timestamp': u.timestamp.isoformat(),
+            'provider': u.provider,
+            'model': u.model,
+            'purpose': u.purpose,
+            'tokens_input': u.tokens_input,
+            'tokens_output': u.tokens_output,
+            'tokens_total': u.tokens_total,
+        }
+        for u in usages
+    ]
+
+    return Response({'history': data, 'count': len(data)}, status=status.HTTP_200_OK)
 
 
 setattr(documents_search_view, 'ressource', 'documents')
@@ -651,6 +1138,52 @@ class AssistantMessageViewSet(viewsets.ModelViewSet):
         conversation.dernier_message_le = message.cree_le
         conversation.nombre_messages = (conversation.nombre_messages or 0) + 1
         conversation.save(update_fields=['dernier_message_le', 'nombre_messages'])
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def assistant_feedback(request):
+    data = request.data or {}
+    interaction_id = data.get('interactionId') or data.get('interaction_id')
+    feedback = data.get('feedback')
+    comment = data.get('comment')
+
+    if not interaction_id or not feedback:
+        return Response({'detail': 'interactionId et feedback sont requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    qs = AssistantMessage.objects.select_related('conversation', 'conversation__utilisateur').filter(
+        conversation__utilisateur=request.user,
+        metadata__interactionId=interaction_id,
+    )
+
+    if not qs.exists():
+        return Response({'detail': 'Aucun message correspondant à cet interactionId'}, status=status.HTTP_404_NOT_FOUND)
+
+    updated = 0
+    for msg in qs:
+        meta = msg.metadata or {}
+        fb_meta = meta.get('feedback') or {}
+        fb_meta.update(
+            {
+                'value': feedback,
+                'comment': comment,
+                'timestamp': timezone.now().isoformat(),
+            }
+        )
+        meta['feedback'] = fb_meta
+        msg.metadata = meta
+        msg.save(update_fields=['metadata'])
+        updated += 1
+
+    logging.info(
+        "ASSISTANT_FEEDBACK user=%s interaction_id=%s feedback=%s updated_messages=%s",
+        request.user.id,
+        interaction_id,
+        feedback,
+        updated,
+    )
+
+    return Response({'success': True, 'updated': updated}, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])

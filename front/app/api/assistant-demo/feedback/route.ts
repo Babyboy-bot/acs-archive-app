@@ -8,6 +8,9 @@
 import { NextResponse } from 'next/server'
 import { processFeedbackRequest, getLearningStats } from '../learning'
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
@@ -33,6 +36,20 @@ export async function POST(request: Request) {
       feedback,
       comment,
     })
+    // Propager le feedback au backend pour le lier aux messages persistés
+    try {
+      const cookie = request.headers.get('cookie') ?? ''
+      await fetch(`${API_BASE}assistant/feedback/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify({ interactionId, feedback, comment }),
+      })
+    } catch (err) {
+      console.warn('Erreur lors de la persistance du feedback côté backend:', err)
+    }
     
     if (result.success) {
       return NextResponse.json({ 

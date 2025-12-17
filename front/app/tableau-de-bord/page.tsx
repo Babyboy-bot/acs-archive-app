@@ -255,6 +255,17 @@ export default function DashboardUltraModerne() {
               </Link>
             ) : null}
 
+            {peutAccederParametres ? (
+              <Link href="/admin-llm">
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-theme-muted transition-all border-2 border-transparent hover:border-purple-200">
+                  <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <Icon name="sparkles" size="lg" />
+                  </div>
+                  <span className="font-medium text-theme-primary">Stats LLM</span>
+                </motion.button>
+              </Link>
+            ) : null}
+
             {!peutCreerDocuments && !peutAccederRecherche && !peutAccederParametres ? (
               <div className="col-span-full text-sm text-gray-500">
                 Aucune action rapide disponible avec votre rôle actuel.

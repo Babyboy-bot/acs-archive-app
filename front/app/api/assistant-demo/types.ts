@@ -45,6 +45,31 @@ export type AssistantRestriction = {
 }
 
 
+export type AssistantTrace = {
+  mode?: 'recherche_document' | 'conversation' | 'salutation' | 'confirmation'
+  intent: 'documents' | 'statistiques'
+  typeMessage?: string
+  criteres?: {
+    client?: string | null
+    annee?: string | null
+    risque?: string | null
+    typeDocument?: string | null
+  }
+  documentSearch?: {
+    totalFound: number
+    filteredFound: number
+    messageNonTrouve: boolean
+    criteresUtilises?: Record<string, unknown>
+    criteresNonTrouves?: string[]
+  }
+  llm?: {
+    used: boolean
+    provider?: string
+    model?: string
+    durationMs?: number
+  }
+}
+
 export type AssistantResponse = {
   question: string
   type: 'documents' | 'statistiques'
@@ -57,4 +82,6 @@ export type AssistantResponse = {
   restriction?: AssistantRestriction
   // Système d'apprentissage
   interactionId?: string  // ID pour le feedback utilisateur (👍/👎)
+  // Traçabilité métier de la réponse
+  trace?: AssistantTrace
 }

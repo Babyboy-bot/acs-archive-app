@@ -6,7 +6,8 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
-    login_view, logout_view,
+    login_view,
+    logout_view,
     UtilisateurViewSet,
     ClientViewSet,
     ExerciceViewSet,
@@ -21,6 +22,13 @@ from .views import (
     documents_search_view,
     AssistantConversationViewSet,
     AssistantMessageViewSet,
+    llm_quota_consume,
+    llm_usage_log,
+    llm_quota_status,
+    llm_admin_stats,
+    llm_admin_history,
+    assistant_health,
+    assistant_feedback,
 )
 
 # Router pour les ViewSets
@@ -42,9 +50,16 @@ urlpatterns = [
     path('documents/search/', documents_search_view, name='documents-search'),
     path('stats/', stats_view, name='stats'),
     path('assistant/stats/', assistant_stats_view, name='assistant-stats'),
+    path('assistant/feedback/', assistant_feedback, name='assistant-feedback'),
+    path('assistant/health/', assistant_health, name='assistant-health'),
     path('assistant/documents/search/tfidf/', assistant_document_search_view, name='assistant-document-search-tfidf'),
     path('assistant/documents/search/faiss/', assistant_document_search_faiss_view, name='assistant-document-search-faiss'),
     path('assistant/documents/search/semantic/', assistant_semantic_search_view, name='assistant-document-search-semantic'),
+    path('assistant/llm/quota/consume/', llm_quota_consume, name='assistant-llm-quota-consume'),
+    path('assistant/llm/usage/', llm_usage_log, name='assistant-llm-usage-log'),
+    path('assistant/llm/quota/', llm_quota_status, name='assistant-llm-quota-status'),
+    path('assistant/llm/admin/stats/', llm_admin_stats, name='assistant-llm-admin-stats'),
+    path('assistant/llm/admin/history/', llm_admin_history, name='assistant-llm-admin-history'),
     
     # Routes des ViewSets
     path('', include(router.urls)),

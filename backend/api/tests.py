@@ -11,7 +11,16 @@ from django.utils import timezone
 from datetime import timedelta
 from unittest import skip
 
-from .models import Utilisateur, Client, Exercice, Risque, Categorie, Document
+from .models import (
+    Utilisateur,
+    Client,
+    Exercice,
+    Risque,
+    Categorie,
+    Document,
+    LlmMonthlyQuota,
+    LlmUsage,
+)
 
 
 class UtilisateurTests(APITestCase):
@@ -216,3 +225,186 @@ class AssistantAPITests(APITestCase):
 
             response = self.client.post(url, {'question': 'Combien de documents ?'}, format='json')
             self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+class LlmQuotaTests(APITestCase):
+    """Tests pour les endpoints de gestion de quota LLM."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='llm.user',
+            nom='LLM',
+            prenom='User',
+            password='StrongPass123!',
+            role='ADMIN',
+            email='llm@test.com',
+        )
+        # Authentifier directement l'utilisateur pour les tests d'API
+        self.client.force_authenticate(user=self.user)
+
+    def test_llm_quota_consume_allowed(self):
+        """Consommation de quota autorisée quand on est sous la limite."""
+
+        url = reverse('assistant-llm-quota-consume')
+        response = self.client.post(
+            url,
+            {
+                'estimated_tokens': 100,
+                'purpose': 'answer',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertTrue(data['allowed'])
+        self.assertIn('remaining', data)
+        self.assertIn('percentage', data)
+
+        # Vérifier que le quota mensuel a bien été créé et incrémenté
+        quotas = LlmMonthlyQuota.objects.filter(utilisateur=self.user)
+        self.assertEqual(quotas.count(), 1)
+        quota = quotas.first()
+        self.assertIsNotNone(quota)
+        self.assertEqual(quota.tokens_used, 100)
+
+    def test_llm_quota_consume_block_when_exceeded(self):
+        """Consommation de quota refusée quand la limite serait dépassée."""
+
+        # Créer un quota existant presque plein
+        now = timezone.now()
+        year_month = now.strftime('%Y-%m')
+        quota = LlmMonthlyQuota.objects.create(
+            utilisateur=self.user,
+            year_month=year_month,
+            tokens_used=90,
+            limit=100,
+        )
+
+        url = reverse('assistant-llm-quota-consume')
+        response = self.client.post(
+            url,
+            {
+                'estimated_tokens': 20,  # dépasserait la limite de 100
+                'purpose': 'answer',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertFalse(data['allowed'])
+        self.assertEqual(data['remaining'], 10)
+
+        quota.refresh_from_db()
+        # La consommation estimée n'a pas été ajoutée
+        self.assertEqual(quota.tokens_used, 90)
+
+    def test_llm_usage_log_creates_usage_and_updates_quota(self):
+        """Journaliser un appel LLM doit créer un LlmUsage et incrémenter le quota mensuel."""
+
+        url = reverse('assistant-llm-usage-log')
+        ts = timezone.now().isoformat()
+        response = self.client.post(
+            url,
+            {
+                'provider': 'claude',
+                'model': 'claude-test',
+                'purpose': 'answer',
+                'tokens_input': 120,
+                'tokens_output': 80,
+                'timestamp': ts,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json().get('status'), 'ok')
+
+        usages = LlmUsage.objects.filter(utilisateur=self.user)
+        self.assertEqual(usages.count(), 1)
+        usage = usages.first()
+        self.assertIsNotNone(usage)
+        self.assertEqual(usage.tokens_input, 120)
+        self.assertEqual(usage.tokens_output, 80)
+        self.assertEqual(usage.tokens_total, 200)
+
+        # Vérifier que le quota mensuel a été incrémenté de 200
+        now = timezone.now()
+        year_month = now.strftime('%Y-%m')
+        quota = LlmMonthlyQuota.objects.get(utilisateur=self.user, year_month=year_month)
+        self.assertEqual(quota.tokens_used, 200)
+
+    def test_llm_quota_status(self):
+        """L'endpoint de statut de quota renvoie les informations courantes."""
+
+        # Préparer un quota avec quelques tokens utilisés
+        now = timezone.now()
+        year_month = now.strftime('%Y-%m')
+        LlmMonthlyQuota.objects.create(
+            utilisateur=self.user,
+            year_month=year_month,
+            tokens_used=500,
+            limit=1000,
+        )
+
+        url = reverse('assistant-llm-quota-status')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['tokens_used'], 500)
+        self.assertEqual(data['limit'], 1000)
+        self.assertEqual(data['remaining'], 500)
+        self.assertAlmostEqual(data['percentage'], 0.5)
+
+
+class AssistantHealthTests(APITestCase):
+    """Tests pour l'endpoint assistant_health (état de santé LLM)."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='health.user',
+            nom='Health',
+            prenom='User',
+            password='StrongPass123!',
+            role='ADMIN',
+            email='health@test.com',
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_assistant_health_claude_ok(self):
+        """Configuration Claude valide doit retourner config_ok=True."""
+
+        from django.test import override_settings
+
+        with override_settings(
+            ASSISTANT_LLM_PROVIDER='claude',
+            ASSISTANT_LLM_ENABLED='true',
+            CLAUDE_API_KEY='test-key',
+            CLAUDE_BASE_URL='https://api.anthropic.com/v1',
+        ):
+            response = self.client.get(reverse('assistant-health'))
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            data = response.json()
+            self.assertEqual(data['provider'], 'claude')
+            self.assertTrue(data['llm_enabled'])
+            self.assertTrue(data['config_ok'])
+            self.assertIsInstance(data['semantic_search_available'], bool)
+
+    def test_assistant_health_missing_key(self):
+        """Configuration incomplète doit signaler des erreurs et config_ok=False."""
+
+        from django.test import override_settings
+
+        with override_settings(
+            ASSISTANT_LLM_PROVIDER='claude',
+            ASSISTANT_LLM_ENABLED='true',
+            CLAUDE_API_KEY='',  # clé manquante
+        ):
+            response = self.client.get(reverse('assistant-health'))
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            data = response.json()
+            self.assertFalse(data['config_ok'])
+            self.assertGreaterEqual(len(data['errors']), 1)

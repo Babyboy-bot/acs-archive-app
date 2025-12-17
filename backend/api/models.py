@@ -294,6 +294,8 @@ class AssistantConversation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     utilisateur = models.ForeignKey(Utilisateur, on_delete=models.CASCADE, related_name='assistant_conversations')
     titre = models.CharField(max_length=255, blank=True)
+    memoire_resume = models.TextField(blank=True, default='')
+    memoire_etat = models.JSONField(default=dict, blank=True)
     cree_le = models.DateTimeField(auto_now_add=True, db_column='creeLe')
     modifie_le = models.DateTimeField(auto_now=True, db_column='modifieLe')
     dernier_message_le = models.DateTimeField(null=True, blank=True)
@@ -335,3 +337,66 @@ class AssistantMessage(models.Model):
 
     def __str__(self):
         return f'[{self.role}] {self.contenu[:50]}'
+
+
+class LlmMonthlyQuota(models.Model):
+    """Compteur mensuel de tokens LLM par utilisateur.
+
+    Permet de savoir rapidement si un utilisateur a dépassé son quota du mois
+    sans recalcul à partir de l'historique complet.
+    """
+
+    utilisateur = models.ForeignKey(
+        Utilisateur,
+        on_delete=models.CASCADE,
+        related_name='llm_quotas',
+    )
+    year_month = models.CharField(max_length=7)  # 'YYYY-MM'
+    tokens_used = models.PositiveIntegerField(default=0)
+    limit = models.PositiveIntegerField(default=30000)
+
+    class Meta:
+        db_table = 'llm_monthly_quotas'
+        verbose_name = 'Quota LLM mensuel'
+        verbose_name_plural = 'Quotas LLM mensuels'
+        unique_together = [['utilisateur', 'year_month']]
+        ordering = ['-year_month']
+
+    def __str__(self) -> str:  # pragma: no cover - représentation simple
+        return f"{self.utilisateur_id} {self.year_month}: {self.tokens_used}/{self.limit}"
+
+
+class LlmUsage(models.Model):
+    """Journal détaillé des appels LLM par utilisateur.
+
+    Sert pour l'audit, les statistiques d'usage et le recalage éventuel des comptes.
+    """
+
+    PURPOSE_CHOICES = [
+        ('router', 'Router'),
+        ('answer', 'Answer'),
+        ('summary', 'Summary'),
+    ]
+
+    utilisateur = models.ForeignKey(
+        Utilisateur,
+        on_delete=models.CASCADE,
+        related_name='llm_usages',
+    )
+    timestamp = models.DateTimeField()
+    provider = models.CharField(max_length=50)
+    model = models.CharField(max_length=100)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES)
+    tokens_input = models.PositiveIntegerField(default=0)
+    tokens_output = models.PositiveIntegerField(default=0)
+    tokens_total = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = 'llm_usage'
+        verbose_name = "Usage LLM"
+        verbose_name_plural = "Usages LLM"
+        ordering = ['-timestamp']
+
+    def __str__(self) -> str:  # pragma: no cover - représentation simple
+        return f"{self.utilisateur_id} {self.purpose} {self.tokens_total} @ {self.timestamp}"
+

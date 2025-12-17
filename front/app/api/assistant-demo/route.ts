@@ -26,9 +26,9 @@ function verifierRateLimit(request: Request): { ok: boolean; remaining: number }
 }
 
 import { NextResponse } from 'next/server'
-import type { AssistantResponse, DocumentPiece, Statistiques } from './types'
+import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, buildConversationSystemPrompt } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -2007,6 +2007,45 @@ function buildBackendUrl(path: string): URL {
   return new URL(path, API_BASE)
 }
 
+/**
+ * Journalise l'usage réel d'un appel LLM (télémétrie).
+ * Appelé après un appel LLM réussi pour enregistrer les tokens consommés.
+ */
+async function logLlmUsage(
+  telemetry: {
+    provider: string
+    model: string
+    tokensInput?: number
+    tokensOutput?: number
+    durationMs?: number
+  },
+  purpose: 'router' | 'answer' | 'summary',
+  token: string | null
+): Promise<void> {
+  if (!token) return
+
+  try {
+    const url = buildBackendUrl('/api/assistant/llm/usage/')
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token,
+      },
+      body: JSON.stringify({
+        provider: telemetry.provider,
+        model: telemetry.model,
+        purpose,
+        tokens_input: telemetry.tokensInput ?? 0,
+        tokens_output: telemetry.tokensOutput ?? 0,
+        timestamp: new Date().toISOString(),
+      }),
+    })
+  } catch (error) {
+    console.warn('Failed to log LLM usage:', error)
+  }
+}
+
 function extraireTokenDepuisCookies(request: Request): string | null {
   const cookieHeader = request.headers.get('cookie')
   if (!cookieHeader) return null
@@ -2939,19 +2978,27 @@ export async function POST(request: Request) {
         modeAssistant === 'confirmation'
           ? "D'accord. Dis-moi ce que tu souhaites que je fasse (par exemple : ouvrir un des documents trouvés, t'expliquer plus en détail, ou relancer une recherche)."
           : 'Je suis l\'assistant ACS. Je peux t\'aider à trouver des documents. Essaie par exemple : "avenant 2018 de 3CB risque santé".'
-      
+      let llmUsed = false
+
       if (isLlmConfigured()) {
         try {
-          const { content } = await generateLlmAnswer({
+          const { content, telemetry } = await generateLlmAnswer({
             question: questionOriginale,
             intent: 'documents',
             sessionId,
             token,
+            customSystemPrompt: buildConversationSystemPrompt(),
           })
           narrationTexte = content
-        } catch {
-          // Garder la réponse heuristique
+          llmUsed = true
+          if (telemetry) {
+            await logLlmUsage(telemetry, 'answer', token)
+          }
+        } catch (llmError) {
+          console.warn('LLM indisponible (conversation), fallback heuristique.', llmError)
         }
+      } else {
+        console.warn('LLM non configuré côté front (conversation). Vérifie MISTRAL_API_KEY dans front/.env.local')
       }
 
       const reponseConv: AssistantResponse = {
@@ -2961,7 +3008,7 @@ export async function POST(request: Request) {
         pieces: [],
         insights: [],
         actions: [],
-        narration: { texte: narrationTexte, source: isLlmConfigured() ? 'llm' : 'heuristique' },
+        narration: { texte: narrationTexte, source: llmUsed ? 'llm' : 'heuristique' },
       }
       
       addToConversation(sessionId, 'user', questionOriginale)
@@ -3006,6 +3053,9 @@ export async function POST(request: Request) {
             telemetry,
           }
           incrementLlmSuccess()
+          if (telemetry) {
+            await logLlmUsage(telemetry, 'answer', token)
+          }
         } catch (llmError) {
           console.warn('LLM indisponible pour salutation, fallback heuristique.', llmError)
           incrementLlmFallback()
@@ -3120,6 +3170,9 @@ export async function POST(request: Request) {
               })
               narrationComptage = { texte: content, source: 'llm', telemetry }
               incrementLlmSuccess()
+              if (telemetry) {
+                await logLlmUsage(telemetry, 'answer', token)
+              }
             } catch {
               narrationComptage = {
                 texte: `Le client ${clientCible} possède ${nombreDocs} document${nombreDocs > 1 ? 's' : ''} dans les archives.`,
@@ -3246,6 +3299,9 @@ export async function POST(request: Request) {
               telemetry,
             }
             incrementLlmSuccess()
+            if (telemetry) {
+              await logLlmUsage(telemetry, 'answer', token)
+            }
           } catch (llmError) {
             console.warn('Assistant LLM (client spécifique) indisponible, fallback heuristique.', llmError)
             incrementLlmFallback()
@@ -3410,6 +3466,7 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
             intent: 'documents',
             sessionId,
             token,
+            customSystemPrompt: buildConversationSystemPrompt(),
           })
           narration = {
             texte: content,
@@ -3417,6 +3474,9 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
             telemetry,
           }
           incrementLlmSuccess()
+          if (telemetry) {
+            await logLlmUsage(telemetry, 'answer', token)
+          }
         } catch (llmError) {
           console.warn('Assistant LLM (définition générale) indisponible, fallback heuristique.', llmError)
           incrementLlmFallback()
@@ -3540,6 +3600,9 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
           telemetry,
         }
         incrementLlmSuccess()
+        if (telemetry) {
+          await logLlmUsage(telemetry, 'answer', token)
+        }
       } catch (llmError) {
         console.warn('Assistant LLM (documents) indisponible, fallback heuristique.', llmError)
         incrementLlmFallback()
@@ -3669,6 +3732,31 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
       userId: token ? 'authenticated' : null,
     })
 
+    const trace: AssistantTrace = {
+      mode: modeAssistant,
+      intent,
+      typeMessage,
+      criteres: {
+        client: clientFinal ?? clientContexte ?? null,
+        annee: anneeFinal ?? anneeContexte ?? null,
+        risque: risqueFinal ?? risqueContexte ?? null,
+        typeDocument: typeDocumentDemande ?? typeDocumentContexte ?? null,
+      },
+      documentSearch: {
+        totalFound: piecesRecherche.length,
+        filteredFound: filtrage.pertinents.length,
+        messageNonTrouve,
+        criteresUtilises: filtrage.criteresUtilises,
+        criteresNonTrouves: filtrage.criteresNonTrouves,
+      },
+      llm: {
+        used: narration?.source === 'llm',
+        provider: narration?.telemetry?.provider,
+        model: narration?.telemetry?.model,
+        durationMs: narration?.telemetry?.durationMs,
+      },
+    }
+
     const réponse: AssistantResponse = {
       question,
       type: 'documents',
@@ -3676,8 +3764,9 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
       pieces,
       insights,
       actions,
-            narration,
+      narration,
       interactionId, // Pour permettre le feedback 👍/👎
+      trace,
     }
 
     // =========================================================================

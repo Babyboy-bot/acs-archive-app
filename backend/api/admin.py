@@ -4,7 +4,8 @@ Configuration de l'interface d'administration Django
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
-    Utilisateur, Client, Exercice, Risque, Document
+    Utilisateur, Client, Exercice, Risque, Document,
+    LlmMonthlyQuota, LlmUsage
 )
 
 
@@ -94,3 +95,40 @@ class DocumentAdmin(admin.ModelAdmin):
             'fields': ('cree_le', 'modifie_le')
         }),
     )
+
+
+@admin.register(LlmMonthlyQuota)
+class LlmMonthlyQuotaAdmin(admin.ModelAdmin):
+    """Administration des quotas LLM mensuels"""
+    
+    list_display = ['utilisateur', 'year_month', 'tokens_used', 'limit', 'percentage_used']
+    list_filter = ['year_month']
+    search_fields = ['utilisateur__nom_utilisateur', 'utilisateur__nom', 'utilisateur__prenom']
+    ordering = ['-year_month', 'utilisateur__nom_utilisateur']
+    readonly_fields = ['percentage_used']
+    
+    def percentage_used(self, obj):
+        """Calcule le pourcentage d'utilisation du quota"""
+        if obj.limit > 0:
+            return f"{(obj.tokens_used / obj.limit * 100):.1f}%"
+        return "N/A"
+    percentage_used.short_description = 'Utilisation'
+
+
+@admin.register(LlmUsage)
+class LlmUsageAdmin(admin.ModelAdmin):
+    """Administration des logs d'usage LLM"""
+    
+    list_display = ['utilisateur', 'timestamp', 'provider', 'model', 'purpose', 'tokens_total']
+    list_filter = ['provider', 'purpose', 'timestamp']
+    search_fields = ['utilisateur__nom_utilisateur', 'utilisateur__nom', 'utilisateur__prenom', 'model']
+    ordering = ['-timestamp']
+    readonly_fields = ['timestamp', 'utilisateur', 'provider', 'model', 'purpose', 'tokens_input', 'tokens_output', 'tokens_total']
+    
+    def has_add_permission(self, request):
+        """Empêcher la création manuelle de logs"""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Empêcher la modification des logs"""
+        return False

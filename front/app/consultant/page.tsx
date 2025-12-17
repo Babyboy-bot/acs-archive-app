@@ -8,6 +8,7 @@ import { getToken, getUtilisateurActif, SessionUtilisateur, supprimerSession } f
 import { apiFetchJson } from '@/lib/api'
 import { printBlob } from '@/lib/print'
 import { RoleUtilisateur } from '@/types'
+import { OnboardingGuide } from '@/components/OnboardingGuide'
 
 interface PieceJustificativeMetadata extends Record<string, unknown> {
   url?: string
@@ -55,6 +56,44 @@ interface AssistantConversationSummary {
   nombre_messages?: number
 }
 
+// Réponses API typées pour l'assistant
+type AssistantConversationListResponse =
+  | AssistantConversationSummary[]
+  | {
+      results: AssistantConversationSummary[]
+    }
+
+interface AssistantMessageApi {
+  id: string
+  role: 'USER' | 'ASSISTANT' | string
+  contenu: string
+  cree_le?: string
+  metadata?: Record<string, unknown> | null
+}
+
+type AssistantMessageListResponse =
+  | AssistantMessageApi[]
+  | {
+      results: AssistantMessageApi[]
+    }
+
+interface DocumentListeApi {
+  results?: Array<{
+    id: string
+    titre: string
+    cree_le: string
+    risque_detail?: {
+      exercice_info?: {
+        client?: string
+      }
+    } | null
+  }>
+}
+
+interface DocumentDetailApi {
+  fichier_url?: string | null
+}
+
 
 const LOCAL_STORAGE_KEY = 'acs-assistant-conversation-v1'
 const ACTIVE_CONVERSATION_KEY = 'acs-assistant-active-conversation-id'
@@ -69,6 +108,8 @@ export default function ConsultantChatPage() {
   const [typingIndicator, setTypingIndicator] = useState(false)
   const [utilisateur, setUtilisateur] = useState<SessionUtilisateur | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [dbExampleQuestion, setDbExampleQuestion] = useState<string | null>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('theme')
@@ -100,9 +141,15 @@ export default function ConsultantChatPage() {
 
     if (!user) return
 
+    // Vérifier si c'est la première visite de l'assistant
+    const hasSeenOnboarding = localStorage.getItem('acs-assistant-onboarding-seen')
+    if (!hasSeenOnboarding) {
+      setShowOnboarding(true)
+    }
+
     const chargerConversations = async () => {
       try {
-        const { data } = await apiFetchJson<any>('assistant/conversations/')
+        const { data } = await apiFetchJson<AssistantConversationListResponse>('assistant/conversations/')
         const items = Array.isArray(data) ? data : data?.results ?? []
         setConversations(items)
 
@@ -123,7 +170,35 @@ export default function ConsultantChatPage() {
     }
 
     void chargerConversations()
+  }, [router])
+
+  // Charger une question d'exemple basée sur un client réel de la base (documents récents)
+  useEffect(() => {
+    const chargerExempleDepuisBdd = async () => {
+      try {
+        const { data } = await apiFetchJson<DocumentListeApi>('documents/?page_size=10&ordering=-cree_le')
+        const docs = (data?.results ?? []) as NonNullable<DocumentListeApi['results']>
+        const docAvecClient = docs.find(
+          (d) => d?.risque_detail?.exercice_info && typeof d.risque_detail.exercice_info.client === 'string',
+        )
+        if (docAvecClient && docAvecClient.risque_detail && docAvecClient.risque_detail.exercice_info) {
+          const clientNom = docAvecClient.risque_detail.exercice_info.client
+          if (clientNom && typeof clientNom === 'string') {
+            setDbExampleQuestion(`Montre-moi les documents concernant le client ${clientNom}.`)
+          }
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement de la question d\'exemple depuis la BDD:', error)
+      }
+    }
+
+    void chargerExempleDepuisBdd()
   }, [])
+
+  const handleCloseOnboarding = () => {
+    setShowOnboarding(false)
+    localStorage.setItem('acs-assistant-onboarding-seen', 'true')
+  }
 
   // Charger l'historique de conversation depuis localStorage
   useEffect(() => {
@@ -221,8 +296,8 @@ export default function ConsultantChatPage() {
       // on récupère le document complet via l'API /documents/<id>/
       if (!fichierUrl) {
         try {
-          const { data } = await apiFetchJson<any>(`documents/${piece.id}/`)
-          fichierUrl = (data?.fichier_url as string | undefined) ?? null
+          const { data } = await apiFetchJson<DocumentDetailApi>(`documents/${piece.id}/`)
+          fichierUrl = data?.fichier_url ?? null
         } catch (error) {
           console.error("Erreur lors de la récupération du document pour ouverture:", error)
         }
@@ -323,7 +398,7 @@ export default function ConsultantChatPage() {
         const titrePropose = userMessage.content.length > 100 ? userMessage.content.slice(0, 100) : userMessage.content
 
         if (!currentConversationId) {
-          const { data } = await apiFetchJson<any>('assistant/conversations/', {
+          const { data } = await apiFetchJson<AssistantConversationSummary>('assistant/conversations/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ titre: titrePropose }),
@@ -352,7 +427,7 @@ export default function ConsultantChatPage() {
         }
 
         if (currentConversationId) {
-          await apiFetchJson<any>('assistant/messages/', {
+          await apiFetchJson<unknown>('assistant/messages/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -418,7 +493,11 @@ export default function ConsultantChatPage() {
               conversation: currentConversationId,
               role: 'ASSISTANT',
               contenu: assistantMessage.content,
-              metadata: { pieces },
+              metadata: {
+                pieces,
+                trace: data.trace,
+                interactionId: data.interactionId,
+              },
             }),
           })
         } catch (error) {
@@ -446,7 +525,7 @@ export default function ConsultantChatPage() {
     if (!confirmation) return
 
     try {
-      await apiFetchJson<any>(`assistant/conversations/${id}/`, {
+      await apiFetchJson<unknown>(`assistant/conversations/${id}/`, {
         method: 'DELETE',
       })
 
@@ -507,10 +586,10 @@ export default function ConsultantChatPage() {
 
     setIsLoading(true)
     try {
-      const { data } = await apiFetchJson<any>(`assistant/messages/?conversation=${id}`)
+      const { data } = await apiFetchJson<AssistantMessageListResponse>(`assistant/messages/?conversation=${id}`)
       const items = Array.isArray(data) ? data : data?.results ?? []
 
-      const nouveauxMessages: Message[] = items.map((m: any) => {
+      const nouveauxMessages: Message[] = items.map((m: AssistantMessageApi) => {
         const apiRole = (m.role as string) || 'ASSISTANT'
         const role: 'user' | 'assistant' = apiRole === 'USER' ? 'user' : 'assistant'
         const timestamp = m.cree_le ? new Date(m.cree_le as string) : new Date()
@@ -706,6 +785,20 @@ export default function ConsultantChatPage() {
           <Icon name={sidebarOpen ? 'chevron-left' : 'menu'} size="sm" />
         </button>
 
+        {/* Bouton Aide */}
+        <button
+          onClick={() => setShowOnboarding(true)}
+          className={`absolute top-4 right-16 z-10 p-2 rounded-md transition-colors ${
+            isDark
+              ? 'text-gray-400 hover:text-white hover:bg-theme-card/10'
+              : 'text-gray-500 hover:text-theme-primary hover:bg-theme-base'
+          }`}
+          aria-label="Aide"
+          title="Guide d'utilisation"
+        >
+          <Icon name="bell" size="sm" />
+        </button>
+
         {/* Toggle thème clair/sombre */}
         <button
           onClick={() => setTheme(isDark ? 'light' : 'dark')}
@@ -742,8 +835,61 @@ export default function ConsultantChatPage() {
                 Posez-moi une question sur vos documents, contrats ou pièces justificatives.
                 Je suis là pour vous aider !
               </p>
+              {/* Suggestions de questions */}
+              <div className="flex flex-col items-stretch gap-3 w-full max-w-xl">
+                <p className={isDark ? 'text-gray-400 text-sm mb-1' : 'text-gray-500 text-sm mb-1'}>
+                  Idées de questions que vous pouvez poser :
+                </p>
 
-                                        </div>
+                {/* 1) Question sur documents ACS, basée si possible sur un vrai client extrait de la BDD */}
+                <button
+                  type="button"
+                  onClick={() => setInput(dbExampleQuestion ?? 'Montre-moi les documents récents pour un client précis.')} 
+                  className={`text-left px-4 py-3 rounded-lg border text-sm transition-colors ${
+                    isDark
+                      ? 'border-gray-600 bg-[#2a2b32] hover:bg-[#343541] text-gray-100'
+                      : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-800'
+                  }`}
+                  disabled={!dbExampleQuestion}
+                >
+                  <span className="font-medium block mb-1">Rechercher des documents ACS pour un client réel</span>
+                  <span className="block text-xs opacity-80">
+                    {dbExampleQuestion
+                      ? dbExampleQuestion
+                      : "Chargement d'un exemple de client depuis la base..."}
+                  </span>
+                </button>
+
+                {/* 2) Question sur le fonctionnement d'ACS (hors documents précis) */}
+                <button
+                  type="button"
+                  onClick={() => setInput('Comment ACS classe les documents d\'un nouveau client et par quel critère je peux les retrouver facilement ?')}
+                  className={`text-left px-4 py-3 rounded-lg border text-sm transition-colors ${
+                    isDark
+                      ? 'border-gray-600 bg-[#2a2b32] hover:bg-[#343541] text-gray-100'
+                      : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-800'
+                  }`}
+                >
+                  <span className="font-medium block mb-1">Comprendre le fonctionnement des archives ACS</span>
+                  <span className="block text-xs opacity-80">Par exemple : comment les documents sont organisés et retrouvés dans ACS.</span>
+                </button>
+
+                {/* 3) Question métier assurance / courtage */}
+                <button
+                  type="button"
+                  onClick={() => setInput('Explique-moi simplement la différence entre une franchise absolue et une franchise relative en assurance.')}
+                  className={`text-left px-4 py-3 rounded-lg border text-sm transition-colors ${
+                    isDark
+                      ? 'border-gray-600 bg-[#2a2b32] hover:bg-[#343541] text-gray-100'
+                      : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-800'
+                  }`}
+                >
+                  <span className="font-medium block mb-1">Poser une question métier assurance / courtage</span>
+                  <span className="block text-xs opacity-80">Par exemple : demander une explication sur un concept d\'assurance.</span>
+                </button>
+              </div>
+
+            </div>
           ) : (
             // Conversation
             <div className="max-w-3xl mx-auto w-full py-8 px-4">
@@ -754,13 +900,7 @@ export default function ConsultantChatPage() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
-                  className={`py-6 -mx-4 px-4 rounded-lg mb-4 ${
-                    message.role === 'assistant'
-                      ? isDark
-                        ? 'bg-[#444654]'
-                        : 'bg-theme-card'
-                      : 'bg-transparent'
-                  }`}
+                  className="py-3 mb-2"
                   data-message-id={message.id}
                 >
                   <div className="flex gap-4 max-w-3xl mx-auto">
@@ -783,156 +923,167 @@ export default function ConsultantChatPage() {
 
                     {/* Contenu */}
                     <div className="flex-1 min-w-0">
-                      <p
-                        className={`${
-                          isDark ? 'text-white' : 'text-theme-primary'
-                        } whitespace-pre-wrap leading-relaxed`}
+                      <div
+                        className={`rounded-2xl px-4 py-3 transition-colors border ${
+                          message.role === 'assistant'
+                            ? isDark
+                              ? 'bg-[#444654] border-white/10 text-white'
+                              : 'bg-white border-gray-200 shadow-sm text-theme-primary'
+                            : isDark
+                              ? 'bg-[#343541] border-white/5 text-gray-100'
+                              : 'bg-[#f9fafb] border-gray-200 text-gray-900'
+                        }`}
                       >
-                        {message.content}
-                      </p>
-
-                      {/* Pièces justificatives */}
-                      {message.pieces && message.pieces.length > 0 && (
-                        <div
-                          className={`mt-4 space-y-3 border-t pt-3 ${
-                            isDark ? 'border-white/10' : 'border-theme'
-                          }`}
+                        <p
+                          className={
+                            'whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px]'
+                          }
                         >
-                          <p
-                            className={`text-sm flex items-center gap-2 ${
-                              isDark ? 'text-gray-400' : 'text-theme-secondary'
+                          {message.content}
+                        </p>
+
+                        {/* Pièces justificatives */}
+                        {message.pieces && message.pieces.length > 0 && (
+                          <div
+                            className={`mt-4 space-y-3 border-t pt-3 ${
+                              isDark ? 'border-white/10' : 'border-gray-200'
                             }`}
                           >
-                            <Icon name="document" size="xs" />
-                            {message.pieces.length} pièce{message.pieces.length > 1 ? 's' : ''} justificative{message.pieces.length > 1 ? 's' : ''}
-                          </p>
-                          <div className="grid gap-3">
-                            {message.pieces.map((piece) => (
-                              <div
-                                key={piece.id}
-                                onClick={() => {
-                                  void ouvrirPiece(piece)
-                                }}
-                                className={`rounded-lg p-4 border cursor-pointer ${
-                                  isDark
-                                    ? 'bg-[#2d2d3a] border-white/10 hover:bg-theme-card/5'
-                                    : 'bg-theme-card border-theme hover:bg-theme-card'
-                                }`}
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="flex-1 min-w-0">
-                                    <h4
-                                      className={`font-medium truncate ${
-                                        isDark ? 'text-white' : 'text-theme-primary'
-                                      }`}
-                                    >
-                                      {piece.metadata?.titre || piece.source || 'Document'}
-                                    </h4>
-                                    <div className="flex flex-wrap gap-2 mt-2">
-                                      {piece.metadata?.client && (
-                                        <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded">
-                                          {piece.metadata.client}
-                                        </span>
-                                      )}
-                                      {piece.metadata?.risque && (
-                                        <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
-                                          {piece.metadata.risque}
-                                        </span>
-                                      )}
-                                      {piece.metadata?.type && (
-                                        <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
-                                          {piece.metadata.type}
-                                        </span>
-                                      )}
-                                      {piece.metadata?.date_document_formatee && (
-                                        <span className="text-xs bg-theme-card0/20 text-gray-400 px-2 py-1 rounded">
-                                          {piece.metadata.date_document_formatee}
-                                        </span>
-                                      )}
+                            <p
+                              className={`text-sm flex items-center gap-2 ${
+                                isDark ? 'text-gray-300' : 'text-gray-600'
+                              }`}
+                            >
+                              <Icon name="document" size="xs" />
+                              {message.pieces.length} pièce{message.pieces.length > 1 ? 's' : ''} justificative{message.pieces.length > 1 ? 's' : ''}
+                            </p>
+                            <div className="grid gap-3">
+                              {message.pieces.map((piece) => (
+                                <div
+                                  key={piece.id}
+                                  onClick={() => {
+                                    void ouvrirPiece(piece)
+                                  }}
+                                  className={`rounded-xl p-4 border cursor-pointer transition-colors ${
+                                    isDark
+                                      ? 'bg-[#2d2d3a] border-white/10 hover:bg-[#3a3b46]'
+                                      : 'bg-white border-gray-200 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex-1 min-w-0">
+                                      <h4
+                                        className={`font-medium truncate ${
+                                          isDark ? 'text-white' : 'text-theme-primary'
+                                        }`}
+                                      >
+                                        {piece.metadata?.titre || piece.source || 'Document'}
+                                      </h4>
+                                      <div className="flex flex-wrap gap-2 mt-2">
+                                        {piece.metadata?.client && (
+                                          <span className="text-xs bg-blue-500/15 text-blue-400 px-2 py-1 rounded-full">
+                                            {piece.metadata.client}
+                                          </span>
+                                        )}
+                                        {piece.metadata?.risque && (
+                                          <span className="text-xs bg-purple-500/15 text-purple-400 px-2 py-1 rounded-full">
+                                            {piece.metadata.risque}
+                                          </span>
+                                        )}
+                                        {piece.metadata?.type && (
+                                          <span className="text-xs bg-green-500/15 text-green-400 px-2 py-1 rounded-full">
+                                            {piece.metadata.type}
+                                          </span>
+                                        )}
+                                        {piece.metadata?.date_document_formatee && (
+                                          <span className="text-xs bg-gray-500/10 text-gray-400 px-2 py-1 rounded-full">
+                                            {piece.metadata.date_document_formatee}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {(() => {
+                                        const brut = piece.content || ''
+                                        const lignesFiltrees = brut
+                                          .split('\n')
+                                          .filter((ligne) => {
+                                            const trimmed = ligne.trim()
+                                            if (!trimmed) return false
+                                            if (trimmed.startsWith('Client :')) return false
+                                            if (trimmed.startsWith('Type de courrier :')) return false
+                                            return true
+                                          })
+                                        const contenuAffiche = lignesFiltrees.join('\n').trim()
+                                        if (!contenuAffiche) return null
+                                        return (
+                                          <p
+                                            className={`text-sm mt-2 line-clamp-2 ${
+                                              isDark ? 'text-gray-300' : 'text-gray-600'
+                                            }`}
+                                          >
+                                            {contenuAffiche}
+                                          </p>
+                                        )
+                                      })()}
                                     </div>
-                                    {(() => {
-                                      const brut = piece.content || ''
-                                      const lignesFiltrees = brut
-                                        .split('\n')
-                                        .filter((ligne) => {
-                                          const trimmed = ligne.trim()
-                                          if (!trimmed) return false
-                                          if (trimmed.startsWith('Client :')) return false
-                                          if (trimmed.startsWith('Type de courrier :')) return false
-                                          return true
-                                        })
-                                      const contenuAffiche = lignesFiltrees.join('\n').trim()
-                                      if (!contenuAffiche) return null
-                                      return (
-                                        <p
-                                          className={`text-sm mt-2 line-clamp-2 ${
-                                            isDark ? 'text-gray-400' : 'text-theme-secondary'
-                                          }`}
-                                        >
-                                          {contenuAffiche}
-                                        </p>
-                                      )
-                                    })()}
-                                  </div>
 
-                                  {/* Actions supprimées pour épurer l'interface des cartes de pièces justificatives */}
+                                    {/* Actions supprimées pour épurer l'interface des cartes de pièces justificatives */}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      
-                                                                  
-                      {/* Feedback Buttons - Système d'apprentissage */}
-                      {message.role === 'assistant' && message.interactionId && !message.isError && (
-                        <div className={`mt-4 pt-3 border-t flex items-center gap-3 ${
-                          isDark ? 'border-white/10' : 'border-theme'
-                        }`}>
-                          <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-theme-tertiary'}`}>
-                            Cette réponse vous a-t-elle aidé ?
-                          </span>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleFeedback(message.id, message.interactionId!, 'like')}
-                              disabled={message.feedbackGiven !== undefined && message.feedbackGiven !== null}
-                              className={`p-1.5 rounded-md transition-all ${
-                                message.feedbackGiven === 'like'
-                                  ? 'bg-green-500/20 text-green-500'
-                                  : message.feedbackGiven
-                                    ? 'opacity-30 cursor-not-allowed text-gray-400'
-                                    : isDark
-                                      ? 'hover:bg-green-500/20 text-gray-400 hover:text-green-500'
-                                      : 'hover:bg-green-100 text-gray-400 hover:text-green-600'
-                              }`}
-                              title="Bonne réponse"
-                            >
-                                👍
-                            </button>
-                            <button
-                              onClick={() => handleFeedback(message.id, message.interactionId!, 'dislike')}
-                              disabled={message.feedbackGiven !== undefined && message.feedbackGiven !== null}
-                              className={`p-1.5 rounded-md transition-all ${
-                                message.feedbackGiven === 'dislike'
-                                  ? 'bg-red-500/20 text-red-500'
-                                  : message.feedbackGiven
-                                    ? 'opacity-30 cursor-not-allowed text-gray-400'
-                                    : isDark
-                                      ? 'hover:bg-red-500/20 text-gray-400 hover:text-red-500'
-                                      : 'hover:bg-red-100 text-gray-400 hover:text-red-600'
-                              }`}
-                              title="Mauvaise réponse"
-                            >
-                                👎
-                            </button>
-                          </div>
-                          {message.feedbackGiven && (
-                            <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-theme-tertiary'}`}>
-                              Merci pour votre retour !
+                        )}
+
+                        {/* Feedback Buttons - Système d'apprentissage */}
+                        {message.role === 'assistant' && message.interactionId && !message.isError && (
+                          <div className={`mt-4 pt-3 border-t flex flex-wrap items-center gap-3 ${
+                            isDark ? 'border-white/10' : 'border-gray-200'
+                          }`}>
+                            <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                              Cette réponse vous a-t-elle aidé ?
                             </span>
-                          )}
-                        </div>
-                      )}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleFeedback(message.id, message.interactionId!, 'like')}
+                                disabled={message.feedbackGiven !== undefined && message.feedbackGiven !== null}
+                                className={`p-1.5 rounded-md transition-all ${
+                                  message.feedbackGiven === 'like'
+                                    ? 'bg-green-500/20 text-green-500'
+                                    : message.feedbackGiven
+                                      ? 'opacity-30 cursor-not-allowed text-gray-400'
+                                      : isDark
+                                        ? 'hover:bg-green-500/20 text-gray-400 hover:text-green-500'
+                                        : 'hover:bg-green-100 text-gray-400 hover:text-green-600'
+                                }`}
+                                title="Bonne réponse"
+                              >
+                                  👍
+                              </button>
+                              <button
+                                onClick={() => handleFeedback(message.id, message.interactionId!, 'dislike')}
+                                disabled={message.feedbackGiven !== undefined && message.feedbackGiven !== null}
+                                className={`p-1.5 rounded-md transition-all ${
+                                  message.feedbackGiven === 'dislike'
+                                    ? 'bg-red-500/20 text-red-500'
+                                    : message.feedbackGiven
+                                      ? 'opacity-30 cursor-not-allowed text-gray-400'
+                                      : isDark
+                                        ? 'hover:bg-red-500/20 text-gray-400 hover:text-red-500'
+                                        : 'hover:bg-red-100 text-gray-400 hover:text-red-600'
+                                }`}
+                                title="Mauvaise réponse"
+                              >
+                                  👎
+                              </button>
+                            </div>
+                            {message.feedbackGiven && (
+                              <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                Merci pour votre retour !
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </motion.div>
@@ -1029,6 +1180,11 @@ export default function ConsultantChatPage() {
           </p>
         </div>
       </div>
+
+      {/* Guide d'onboarding */}
+      {showOnboarding && (
+        <OnboardingGuide onClose={handleCloseOnboarding} autoShow={showOnboarding} />
+      )}
     </div>
   )
 }
