@@ -1,6 +1,6 @@
 'use client'
 
-import { Navigation } from '@/components/Navigation'
+import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
@@ -9,6 +9,9 @@ import { hasPermission, canAccessSection } from '@/lib/permissions'
 import { PreviewPDF } from '@/components/PreviewPDF'
 import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
 import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
+import { useRequireAuth } from '@/hooks/useRequireAuth'
+import { useTheme } from '@/hooks/useTheme'
+import { FormModal } from '@/components/ui/FormModal'
 
 type UtilisateurAPI = {
   id: string
@@ -87,6 +90,8 @@ function formatRelativeDate(isoDate: string | null) {
 }
 
 export default function PageUtilisateurs() {
+  // Tous les hooks doivent être appelés AVANT tout return conditionnel
+  const { estAuthentifie, chargement: authChargement } = useRequireAuth()
   useEnforceNonConsultant()
   const utilisateurCourant = useUtilisateurCourant()
   const role = utilisateurCourant?.role ?? null
@@ -95,9 +100,12 @@ export default function PageUtilisateurs() {
     hasPermission(role, 'utilisateurs', 'creer') ||
     hasPermission(role, 'utilisateurs', 'modifier') ||
     hasPermission(role, 'utilisateurs', 'supprimer')
+  const { isDark } = useTheme()
 
   const [recherche, setRecherche] = useState('')
   const [filtreRole, setFiltreRole] = useState('')
+  const [pageUtilisateurs, setPageUtilisateurs] = useState(1)
+  const UTILISATEURS_PAR_PAGE = 9
   const [afficherFormulaire, setAfficherFormulaire] = useState(false)
   const [utilisateurs, setUtilisateurs] = useState<UtilisateurAPI[]>([])
   const [chargement, setChargement] = useState(true)
@@ -183,6 +191,21 @@ export default function PageUtilisateurs() {
       dernierAccesLibelle: formatRelativeDate(user.derniereConnexion)
     }))
   }, [utilisateurs, recherche, filtreRole])
+
+  const utilisateursPagination = useMemo(() => {
+    const total = utilisateursFiltres.length
+    const totalPages = Math.max(1, Math.ceil(total / UTILISATEURS_PAR_PAGE))
+    const page = Math.min(Math.max(1, pageUtilisateurs), totalPages)
+    const start = (page - 1) * UTILISATEURS_PAR_PAGE
+    const end = start + UTILISATEURS_PAR_PAGE
+    const items = utilisateursFiltres.slice(start, end)
+    return { items, total, page, totalPages }
+  }, [utilisateursFiltres, pageUtilisateurs])
+
+  // Réinitialiser la page lors du changement de filtres
+  useEffect(() => {
+    setPageUtilisateurs(1)
+  }, [recherche, filtreRole])
 
   const getRoleInfo = (role: string) => roles.find(r => r.value === role) || roles[0]
 
@@ -325,28 +348,8 @@ export default function PageUtilisateurs() {
         body: JSON.stringify(payload)
       })
 
-      if (!response.ok) {
-        let msg = ''
-        if (data && typeof data === 'object') {
-          msg = Object.entries(data as any)
-            .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
-            .join('\n')
-        } else {
-          msg = (data as any)?.erreur || (data as any)?.detail || ''
-        }
-        console.error('Erreur API création/mise à jour utilisateur:', data)
-        setErreur(msg || `Erreur HTTP ${response.status}`)
-        return
-      }
-
-      if (!data || typeof data !== 'object' || !('success' in data) || !(data as any).success) {
-        const msg =
-          (data as any)?.erreur ||
-          (data as any)?.detail ||
-          `Réponse inattendue lors ${estEdition ? 'de la mise à jour' : 'de la création'} de l’utilisateur`
-        console.error('Réponse inattendue API utilisateurs:', data)
-        setErreur(msg)
-        return
+      if (!response.ok || !data || typeof data !== 'object' || !('success' in data) || !(data as any).success) {
+        throw new Error((data as any)?.erreur || (data as any)?.detail || `Erreur lors ${estEdition ? 'de la mise à jour' : 'de la création'} de l’utilisateur`)
       }
 
       await chargerUtilisateurs(false)
@@ -359,18 +362,30 @@ export default function PageUtilisateurs() {
 
       fermerFormulaire()
     } catch (error: any) {
-      console.error('Erreur réseau ou inattendue lors de la soumission utilisateur:', error)
-      setErreur(error?.message || 'Erreur de connexion au serveur')
+      console.error('Erreur soumission utilisateur:', error)
+      setErreur(error?.message || 'Erreur lors de l’enregistrement de l’utilisateur')
     } finally {
       setSoumissionEnCours(false)
     }
   }
 
+  // Attendre la vérification d'authentification (après tous les hooks)
+  if (authChargement || !estAuthentifie) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-theme-base">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-theme-secondary text-sm">Vérification de l'authentification...</p>
+        </div>
+      </div>
+    )
+  }
+
   if (!peutVoirUtilisateurs) {
     return (
-      <div className="min-h-screen bg-theme-base text-theme-primary">
-        <Navigation />
-        <main className="container mx-auto px-4 py-16 flex flex-col items-center text-center gap-6">
+      <div className="min-h-screen bg-theme-base text-theme-primary flex">
+        <Sidebar />
+        <main className="flex-1 ml-64 p-8 overflow-auto flex flex-col items-center text-center gap-6">
           <div className="flex items-center gap-3 text-red-600">
             <Icon name="shield" size="lg" />
             <h1 className="text-3xl font-bold text-gray-900">Accès restreint</h1>
@@ -384,40 +399,39 @@ export default function PageUtilisateurs() {
   }
 
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary">
-      <Navigation />
+    <div className="min-h-screen bg-theme-base text-theme-primary flex">
+      <Sidebar />
       
-      <main className="container mx-auto px-4 py-8">
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
+      <main className="flex-1 ml-64 p-10 overflow-auto">
+        {/* En-tête minimaliste */}
+        <motion.header 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           className="mb-8"
         >
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
-                <Icon name="users" size="xl" className="text-red-600" />
-                Utilisateurs
-              </h1>
-              <p className="text-gray-600">{utilisateursFiltres.length} utilisateur{utilisateursFiltres.length > 1 ? 's' : ''} • {stats.actifs} actif{stats.actifs > 1 ? 's' : ''}</p>
+              <p className="text-sm font-medium text-theme-secondary uppercase tracking-wider mb-1">Administration</p>
+              <h1 className="text-3xl font-semibold text-theme-primary">Utilisateurs</h1>
+              <p className="text-sm text-theme-secondary mt-1">{utilisateursFiltres.length} utilisateur{utilisateursFiltres.length > 1 ? 's' : ''} · {stats.actifs} actif{stats.actifs > 1 ? 's' : ''}</p>
             </div>
-            {peutGerersUtilisateurs ? (
+            {peutGerersUtilisateurs && (
               <button
                 onClick={ouvrirCreation}
-                className="px-5 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
               >
-                <Icon name="user" size="sm" />
-                Nouvel utilisateur
+                <Icon name="plus" size="sm" />
+                Nouveau
               </button>
-            ) : null}
+            )}
           </div>
-        </motion.div>
+        </motion.header>
 
         {erreur && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm"
           >
             {erreur}
           </motion.div>
@@ -425,325 +439,154 @@ export default function PageUtilisateurs() {
 
         {messageSucces && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 text-green-700 dark:text-green-400 text-sm"
           >
             {messageSucces}
           </motion.div>
         )}
 
+        {/* Stats compactes */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6"
+        >
+          <div className="bg-theme-card border border-theme rounded-xl p-4">
+            <p className="text-2xl font-semibold text-red-600">{stats.admins}</p>
+            <p className="text-xs text-theme-secondary">Admins</p>
+          </div>
+          <div className="bg-theme-card border border-theme rounded-xl p-4">
+            <p className="text-2xl font-semibold text-blue-600">{stats.archivistes}</p>
+            <p className="text-xs text-theme-secondary">Archivistes</p>
+          </div>
+          <div className="bg-theme-card border border-theme rounded-xl p-4">
+            <p className="text-2xl font-semibold text-green-600">{stats.consultants}</p>
+            <p className="text-xs text-theme-secondary">Consultants</p>
+          </div>
+          <div className="bg-theme-card border border-theme rounded-xl p-4">
+            <p className="text-2xl font-semibold text-theme-primary">{stats.total}</p>
+            <p className="text-xs text-theme-secondary">Total</p>
+          </div>
+        </motion.div>
+
+        {/* Filtres */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"
+          className="mb-6 flex flex-col md:flex-row gap-3"
         >
-          <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-2xl p-6 text-white shadow-lg">
-            <Icon name="star" size="lg" className="mb-2" />
-            <p className="text-3xl font-bold">{stats.admins}</p>
-            <p className="text-sm opacity-90">Administrateurs</p>
+          <div className="flex-1 relative">
+            <Icon name="search" size="sm" className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary" />
+            <input
+              type="text"
+              value={recherche}
+              onChange={(e) => setRecherche(e.target.value)}
+              placeholder="Rechercher..."
+              className="w-full pl-10 pr-4 py-2.5 text-sm bg-theme-card border border-theme rounded-lg focus:border-red-400 focus:ring-1 focus:ring-red-200 transition-all outline-none"
+            />
           </div>
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg">
-            <Icon name="shield" size="lg" className="mb-2" />
-            <p className="text-3xl font-bold">{stats.archivistes}</p>
-            <p className="text-sm opacity-90">Archivistes</p>
-          </div>
-          <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl p-6 text-white shadow-lg">
-            <Icon name="users" size="lg" className="mb-2" />
-            <p className="text-3xl font-bold">{stats.consultants}</p>
-            <p className="text-sm opacity-90">Consultants</p>
-          </div>
-          <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-6 text-white shadow-lg">
-            <Icon name="users" size="lg" className="mb-2" />
-            <p className="text-3xl font-bold">{stats.total}</p>
-            <p className="text-sm opacity-90">Total</p>
-          </div>
-        </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white rounded-2xl shadow-lg p-6 mb-6"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="relative">
-              <input
-                type="text"
-                value={recherche}
-                onChange={(e) => setRecherche(e.target.value)}
-                placeholder="Rechercher par nom, prénom, email..."
-                className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-              />
-              <div className="absolute left-4 top-1/2 -translate-y-1/2">
-                <Icon name="search" className="text-gray-400" />
-              </div>
-            </div>
-
-            <select
-              value={filtreRole}
-              onChange={(e) => setFiltreRole(e.target.value)}
-              className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none"
-            >
-              {roles.map((r) => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </select>
-          </div>
-        </motion.div>
-
-        {peutGerersUtilisateurs && afficherFormulaire && formulaireUtilisateur ? (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            className="mb-6 bg-white rounded-2xl shadow-lg border border-red-100"
+          <select
+            value={filtreRole}
+            onChange={(e) => setFiltreRole(e.target.value)}
+            className="px-4 py-2.5 text-sm bg-theme-card border border-theme rounded-lg focus:border-blue-400 outline-none min-w-[160px]"
           >
-            <form onSubmit={soumettreUtilisateur} className="p-6 space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                    <Icon name="user" size="md" />
-                    {formulaireUtilisateur.id ? 'Modifier un utilisateur' : 'Nouvel utilisateur'}
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    {formulaireUtilisateur.id
-                      ? 'Mettre à jour les informations du compte sélectionné.'
-                      : 'Renseignez les informations du consultant à créer.'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={fermerFormulaire}
-                  className="px-3 py-2 text-sm font-semibold text-gray-600 hover:text-gray-900"
-                >
-                  Annuler
-                </button>
-              </div>
+            {roles.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </motion.div>
 
-              {erreur && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-                  {erreur}
-                </div>
-              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Prénom</label>
-                  <input
-                    type="text"
-                    value={formulaireUtilisateur.prenom}
-                    onChange={(event) => mettreAJourFormulaire('prenom', event.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none"
-                    placeholder="Ex. Jeanne"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nom</label>
-                  <input
-                    type="text"
-                    value={formulaireUtilisateur.nom}
-                    onChange={(event) => mettreAJourFormulaire('nom', event.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none"
-                    placeholder="Ex. Martin"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Adresse e-mail</label>
-                  <input
-                    type="email"
-                    value={formulaireUtilisateur.email}
-                    onChange={(event) => mettreAJourFormulaire('email', event.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none"
-                    placeholder="exemple@entreprise.fr"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nom d’utilisateur</label>
-                  <input
-                    type="text"
-                    value={formulaireUtilisateur.nomUtilisateur}
-                    onChange={(event) => mettreAJourFormulaire('nomUtilisateur', event.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none"
-                    placeholder="Identifiant de connexion"
-                    autoComplete="username"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Rôle</label>
-                  <select
-                    value={formulaireUtilisateur.role}
-                    onChange={(event) => mettreAJourFormulaire('role', event.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none"
-                  >
-                    {roles
-                      .filter((role) => role.value)
-                      .map((role) => (
-                        <option key={role.value} value={role.value}>
-                          {role.label}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <label className="flex items-center gap-3 px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50">
-                  <input
-                    type="checkbox"
-                    checked={formulaireUtilisateur.estActif}
-                    onChange={(event) => mettreAJourFormulaire('estActif', event.target.checked)}
-                    className="h-5 w-5 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                  />
-                  <span className="text-sm font-semibold text-gray-700">Compte actif</span>
-                </label>
-              </div>
-
-              {!formulaireUtilisateur.id ? (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Mot de passe</label>
-                  <input
-                    type="password"
-                    value={formulaireUtilisateur.motDePasse}
-                    onChange={(event) => mettreAJourFormulaire('motDePasse', event.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
-                    placeholder="Minimum 8 caractères"
-                    autoComplete="new-password"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nouveau mot de passe (optionnel)</label>
-                  <input
-                    type="password"
-                    value={formulaireUtilisateur.motDePasse}
-                    onChange={(event) => mettreAJourFormulaire('motDePasse', event.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
-                    placeholder="Laisser vide pour conserver l’actuel"
-                    autoComplete="new-password"
-                  />
-                </div>
-              )}
-
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={fermerFormulaire}
-                  className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition"
-                  disabled={soumissionEnCours}
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={soumissionEnCours}
-                  className="px-5 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition disabled:opacity-60"
-                >
-                  {soumissionEnCours
-                    ? 'Enregistrement...'
-                    : formulaireUtilisateur.id
-                      ? 'Mettre à jour'
-                      : 'Créer l’utilisateur'}
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        ) : null}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {utilisateursFiltres.map((user, index) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {utilisateursPagination.items.map((user, index) => (
             <motion.div
               key={user.id}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 + index * 0.1 }}
-              whileHover={{ y: -5, scale: 1.02 }}
-              className="bg-white rounded-2xl shadow-lg overflow-hidden group"
+              transition={{ delay: 0.1 + index * 0.03 }}
+              className="group bg-theme-card border border-theme rounded-xl overflow-hidden hover:shadow-lg hover:border-red-200 transition-all duration-300"
             >
-              <div className="p-6">
-                <div className="flex items-start gap-4 mb-4">
-                  <motion.div
-                    whileHover={{ scale: 1.1, rotate: 5 }}
-                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg flex-shrink-0"
+              {/* Header avec avatar et statut */}
+              <div className="relative p-5 pb-4">
+                <div className="flex items-center gap-4">
+                  {/* Avatar */}
+                  <div 
+                    className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-semibold text-sm shadow-sm"
                     style={{ backgroundColor: user.couleur }}
                   >
                     {user.avatar}
-                  </motion.div>
+                  </div>
 
+                  {/* Infos principales */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-bold text-lg text-gray-900 group-hover:text-red-600 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-theme-primary truncate group-hover:text-red-600 transition-colors">
                         {user.prenom} {user.nom}
                       </h3>
-                      {user.estActif ? (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full flex items-center gap-1">
-                          <Icon name="check" size="xs" />
-                          Actif
-                        </span>
-                      ) : (
-                        <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-full">
-                          Inactif
-                        </span>
-                      )}
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${user.estActif ? 'bg-green-500' : 'bg-gray-300'}`} />
                     </div>
-                    <p className="text-sm text-gray-600 mb-2 flex items-center gap-1">
-                      <Icon name="at" size="xs" />
-                      {user.email}
-                    </p>
-                    
-                    <div className="flex items-center gap-2">
-                      <span 
-                        className="px-3 py-1 rounded-full text-xs font-semibold text-white"
-                        style={{ backgroundColor: getRoleInfo(user.role).couleur }}
-                      >
-                        {getRoleInfo(user.role).label}
-                      </span>
-                      <span className="text-xs text-gray-500 flex items-center gap-1">
-                        <Icon name="clock" size="xs" />
-                        {user.dernierAccesLibelle}
-                      </span>
-                    </div>
+                    <p className="text-sm text-theme-secondary truncate">@{user.nomUtilisateur}</p>
                   </div>
-                </div>
 
-                <div className="flex gap-2 pt-4 border-t border-gray-100">
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => ouvrirProfil(user)}
-                    className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-1"
+                  {/* Badge rôle */}
+                  <span 
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-white flex-shrink-0"
+                    style={{ backgroundColor: getRoleInfo(user.role).couleur }}
                   >
-                    <Icon name="eye" size="sm" />
-                    Profil
-                  </motion.button>
-                  {peutGerersUtilisateurs ? (
-                    <>
-                      <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => ouvrirEdition(user)}
-                        className="flex-1 py-2 bg-white border border-gray-200 rounded-xl font-medium hover:bg-gray-100 transition-colors"
-                      >
-                        Modifier
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => basculerActivation(user)}
-                        disabled={actionEnCours === user.id}
-                        className={`flex-1 py-2 rounded-xl font-medium transition-colors flex items-center gap-2 ${
-                          user.estActif
-                            ? 'bg-red-50 text-red-600 hover:bg-red-100'
-                            : 'bg-green-50 text-green-600 hover:bg-green-100'
-                        }`}
-                      >
-                        <Icon name={user.estActif ? 'user' : 'check'} size="sm" />
-                        {user.estActif ? 'Désactiver' : 'Activer'}
-                      </motion.button>
-                    </>
-                  ) : null}
+                    {getRoleInfo(user.role).label}
+                  </span>
                 </div>
+              </div>
+
+              {/* Détails */}
+              <div className="px-5 pb-4 space-y-2">
+                <div className="flex items-center gap-2 text-sm text-theme-secondary">
+                  <Icon name="at" size="xs" className="text-theme-secondary/60" />
+                  <span className="truncate">{user.email || '—'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-theme-secondary">
+                  <Icon name="clock" size="xs" className="text-theme-secondary/60" />
+                  <span>{user.dernierAccesLibelle}</span>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="px-5 py-3 bg-theme-base/50 border-t border-theme flex items-center gap-2">
+                <button
+                  onClick={() => ouvrirProfil(user)}
+                  className="flex-1 py-2 text-sm font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-card rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="eye" size="xs" />
+                  Voir
+                </button>
+                {peutGerersUtilisateurs && (
+                  <>
+                    <button
+                      onClick={() => ouvrirEdition(user)}
+                      className="flex-1 py-2 text-sm font-medium text-theme-secondary hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <Icon name="edit" size="xs" />
+                      Modifier
+                    </button>
+                    <button
+                      onClick={() => basculerActivation(user)}
+                      disabled={actionEnCours === user.id}
+                      className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 ${
+                        user.estActif
+                          ? 'text-theme-secondary hover:text-red-600 hover:bg-red-50'
+                          : 'text-theme-secondary hover:text-green-600 hover:bg-green-50'
+                      }`}
+                    >
+                      <Icon name={user.estActif ? 'close' : 'check'} size="xs" />
+                      {user.estActif ? 'Désactiver' : 'Activer'}
+                    </button>
+                  </>
+                )}
               </div>
             </motion.div>
           ))}
@@ -822,7 +665,200 @@ export default function PageUtilisateurs() {
             <p className="text-gray-500">Modifiez vos filtres ou ajoutez un nouvel utilisateur</p>
           </motion.div>
         )}
+
+        {/* Pagination */}
+        {utilisateursPagination.totalPages > 1 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mt-6 flex items-center justify-between"
+          >
+            <p className="text-sm text-theme-secondary">
+              Page {utilisateursPagination.page} sur {utilisateursPagination.totalPages} · {utilisateursPagination.total} utilisateur{utilisateursPagination.total > 1 ? 's' : ''}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPageUtilisateurs(1)}
+                disabled={utilisateursPagination.page <= 1}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                ««
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageUtilisateurs((prev) => Math.max(1, prev - 1))}
+                disabled={utilisateursPagination.page <= 1}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                ←
+              </button>
+              <span className="px-3 py-1.5 text-sm font-medium text-theme-primary">
+                {utilisateursPagination.page}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPageUtilisateurs((prev) => Math.min(utilisateursPagination.totalPages, prev + 1))}
+                disabled={utilisateursPagination.page >= utilisateursPagination.totalPages}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                →
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageUtilisateurs(utilisateursPagination.totalPages)}
+                disabled={utilisateursPagination.page >= utilisateursPagination.totalPages}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                »»
+              </button>
+            </div>
+          </motion.div>
+        )}
       </main>
+
+      {/* Modale de création/modification utilisateur */}
+      {peutGerersUtilisateurs && formulaireUtilisateur && (
+        <FormModal
+          isOpen={afficherFormulaire}
+          onClose={fermerFormulaire}
+          title={formulaireUtilisateur.id ? 'Modifier un utilisateur' : 'Nouvel utilisateur'}
+          isDark={isDark}
+          size="lg"
+        >
+          <form onSubmit={soumettreUtilisateur} className="space-y-4">
+            {erreur && (
+              <div className={`rounded-lg px-4 py-3 text-sm ${isDark ? 'bg-red-900/30 border border-red-800 text-red-400' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                {erreur}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Prénom</label>
+                <input
+                  type="text"
+                  value={formulaireUtilisateur.prenom}
+                  onChange={(event) => mettreAJourFormulaire('prenom', event.target.value)}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                  placeholder="Ex. Jeanne"
+                />
+              </div>
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Nom</label>
+                <input
+                  type="text"
+                  value={formulaireUtilisateur.nom}
+                  onChange={(event) => mettreAJourFormulaire('nom', event.target.value)}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                  placeholder="Ex. Martin"
+                />
+              </div>
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Adresse e-mail</label>
+                <input
+                  type="email"
+                  value={formulaireUtilisateur.email}
+                  onChange={(event) => mettreAJourFormulaire('email', event.target.value)}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-blue-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                  placeholder="exemple@entreprise.fr"
+                />
+              </div>
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Nom d'utilisateur</label>
+                <input
+                  type="text"
+                  value={formulaireUtilisateur.nomUtilisateur}
+                  onChange={(event) => mettreAJourFormulaire('nomUtilisateur', event.target.value)}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-blue-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                  placeholder="Identifiant de connexion"
+                  autoComplete="username"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Rôle</label>
+                <select
+                  value={formulaireUtilisateur.role}
+                  onChange={(event) => mettreAJourFormulaire('role', event.target.value)}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-blue-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                >
+                  {roles
+                    .filter((r) => r.value)
+                    .map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <label className={`flex items-center gap-3 px-3 py-2 border rounded-lg ${
+                isDark ? 'bg-slate-700 border-slate-600' : 'bg-gray-50 border-gray-200'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={formulaireUtilisateur.estActif}
+                  onChange={(event) => mettreAJourFormulaire('estActif', event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                />
+                <span className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>Compte actif</span>
+              </label>
+            </div>
+
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
+                {formulaireUtilisateur.id ? 'Nouveau mot de passe (optionnel)' : 'Mot de passe'}
+              </label>
+              <input
+                type="password"
+                value={formulaireUtilisateur.motDePasse}
+                onChange={(event) => mettreAJourFormulaire('motDePasse', event.target.value)}
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-purple-400 outline-none ${
+                  isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                }`}
+                placeholder={formulaireUtilisateur.id ? 'Laisser vide pour conserver l\'actuel' : 'Minimum 8 caractères'}
+                autoComplete="new-password"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={fermerFormulaire}
+                disabled={soumissionEnCours}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
+                  isDark ? 'text-slate-300 bg-slate-700 hover:bg-slate-600' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+                }`}
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                disabled={soumissionEnCours}
+                className="flex-1 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {soumissionEnCours
+                  ? 'Enregistrement...'
+                  : formulaireUtilisateur.id
+                    ? 'Mettre à jour'
+                    : 'Créer l\'utilisateur'}
+              </button>
+            </div>
+          </form>
+        </FormModal>
+      )}
     </div>
   )
 }

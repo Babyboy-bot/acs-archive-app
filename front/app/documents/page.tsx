@@ -3,17 +3,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
 import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
+import { useRequireAuth } from '@/hooks/useRequireAuth'
 import { hasPermission } from '@/lib/permissions'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 
-import { Navigation } from '@/components/Navigation'
+import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { PreviewPDF } from '@/components/PreviewPDF'
 import { apiFetchJson, buildApiUrl } from '@/lib/api'
 import { getToken } from '@/lib/session'
 import { printBlob } from '@/lib/print'
 import { exporterCSV, exporterExcel, exporterPDF } from '@/lib/export'
+import { useTheme } from '@/hooks/useTheme'
+import { ConfirmModal } from '@/components/ui/ConfirmModal'
+import { FormModal } from '@/components/ui/FormModal'
 
 type DocumentUI = {
   id: string
@@ -179,17 +183,6 @@ const RISQUE_FALLBACK_TYPES = [
   'TRANSPORT FACULTES',
   'CAUTION',
   'TOUS RISQUES CHANTIER',
-  'ASSISTANCE FRAIS FUNERAIRES',
-  'FRAIS FUNERAIRES',
-  'GLOBALE DOMMAGES',
-  'GLOBALE BANQUE',
-  'ASSURANCE DES STOCKS',
-  'PREVOYANCE COLLECTIVE',
-  'PREVOYANCE ENTREPRISE',
-  'MULTIRISQUE BUREAU',
-  'BRIS DE MACHINE',
-  'EVACUATION SANITAIRE',
-  'VOL ET DETOURNEMENTS',
   'AUTRE',
 ] as const
 
@@ -215,7 +208,10 @@ const formatRisqueLabel = (value?: string | null) => {
 }
 
 export default function PageDocuments() {
+  // Tous les hooks doivent être appelés AVANT tout return conditionnel
+  const { estAuthentifie, chargement: authChargement } = useRequireAuth()
   useEnforceNonConsultant()
+  const { isDark } = useTheme()
   const utilisateur = useUtilisateurCourant()
   const role = utilisateur?.role ?? null
   const peutVoirDocuments = hasPermission(role, 'documents', 'voir')
@@ -226,6 +222,8 @@ export default function PageDocuments() {
   const [recherche, setRecherche] = useState('')
   const [filtreRisque, setFiltreRisque] = useState('')
   const [filtreCourrier, setFiltreCourrier] = useState('')
+  const [pageDocuments, setPageDocuments] = useState(1)
+  const DOCUMENTS_PAR_PAGE = 12
   const VUE_MODE_KEY = 'acs-documents-vue-mode'
   const [vueMode, setVueMode] = useState<'grille' | 'liste'>('grille')
   const [mounted, setMounted] = useState(false)
@@ -255,6 +253,12 @@ export default function PageDocuments() {
   const [referenceEdition, setReferenceEdition] = useState('')
   const [typeCourrierEdition, setTypeCourrierEdition] = useState('')
   const [chargementEdition, setChargementEdition] = useState(false)
+
+  // État pour la modale de confirmation suppression
+  const [modaleSuppressionDocument, setModaleSuppressionDocument] = useState<{ open: boolean; document: DocumentUI | null }>({
+    open: false,
+    document: null
+  })
 
   // Persister le mode d’affichage dans localStorage à chaque changement
   useEffect(() => {
@@ -374,6 +378,21 @@ export default function PageDocuments() {
     })
   }, [documents, recherche, filtreCourrier, filtreRisque])
 
+  const documentsPagination = useMemo(() => {
+    const total = documentsFiltres.length
+    const totalPages = Math.max(1, Math.ceil(total / DOCUMENTS_PAR_PAGE))
+    const page = Math.min(Math.max(1, pageDocuments), totalPages)
+    const start = (page - 1) * DOCUMENTS_PAR_PAGE
+    const end = start + DOCUMENTS_PAR_PAGE
+    const items = documentsFiltres.slice(start, end)
+    return { items, total, page, totalPages }
+  }, [documentsFiltres, pageDocuments])
+
+  // Réinitialiser la page lors du changement de filtres
+  useEffect(() => {
+    setPageDocuments(1)
+  }, [recherche, filtreRisque, filtreCourrier])
+
   const risqueOptions = useMemo(() => {
     const uniques = new Map<string, string>()
 
@@ -440,6 +459,10 @@ export default function PageDocuments() {
     const startPrint = async () => {
       try {
         const headers = new Headers({ Accept: 'application/pdf,image/*' })
+        const token = getToken()
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`)
+        }
 
         const response = await fetch(proxyUrl, {
           credentials: 'include',
@@ -516,13 +539,21 @@ export default function PageDocuments() {
     }
   }
 
-  const supprimerDocument = async (doc: DocumentUI) => {
+  const ouvrirModaleSuppressionDocument = (doc: DocumentUI) => {
     if (!peutSupprimerDocuments) {
       setErreur("Vous n'avez pas la permission de supprimer ce document")
       return
     }
-    const confirmation = window.confirm(`Supprimer définitivement « ${doc.titre} » ?`)
-    if (!confirmation) return
+    setModaleSuppressionDocument({ open: true, document: doc })
+  }
+
+  const fermerModaleSuppressionDocument = () => {
+    setModaleSuppressionDocument({ open: false, document: null })
+  }
+
+  const confirmerSuppressionDocument = async () => {
+    const { document: doc } = modaleSuppressionDocument
+    if (!doc) return
 
     setSuppressionEnCours(doc.id)
     setErreur('')
@@ -543,6 +574,7 @@ export default function PageDocuments() {
       setErreur(error?.message ?? 'Erreur lors de la suppression du document')
     } finally {
       setSuppressionEnCours(null)
+      fermerModaleSuppressionDocument()
     }
   }
 
@@ -637,7 +669,7 @@ export default function PageDocuments() {
     ...Object.entries(COURRIER_LABELS).map(([value, label]) => ({ value, label })),
   ]
 
-  const handleExport = (type: 'pdf' | 'excel' | 'csv') => {
+  const handleExport = async (type: 'pdf' | 'excel' | 'csv') => {
     if (!peutVoirDocuments) {
       setErreur("Vous n'avez pas la permission d'exporter ces documents")
       return
@@ -651,7 +683,7 @@ export default function PageDocuments() {
         exporterPDF(documentsFiltres, 'Liste des documents')
         break
       case 'excel':
-        exporterExcel(documentsFiltres, 'documents')
+        await exporterExcel(documentsFiltres, 'documents')
         break
       case 'csv':
         exporterCSV(documentsFiltres, 'documents')
@@ -660,493 +692,288 @@ export default function PageDocuments() {
     setMenuExportOuvert(false)
   }
 
+  // Attendre la vérification d'authentification (après tous les hooks)
+  if (authChargement || !estAuthentifie) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-theme-base">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-theme-secondary text-sm">Vérification de l'authentification...</p>
+        </div>
+      </div>
+    )
+  }
+
   if (!mounted) {
     return null
   }
 
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary">
-      <Navigation />
+    <div className="min-h-screen bg-theme-base text-theme-primary flex">
+      <Sidebar />
 
-      <main className="container mx-auto px-4 py-8 space-y-6">
+      <main className="flex-1 ml-64 p-10 overflow-auto">
+        {/* En-tête minimaliste */}
         <motion.header
-          initial={{ opacity: 0, y: -12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mb-8"
         >
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent flex items-center gap-3">
-              <Icon name="folder" size="xl" className="text-red-600" />
-              Documents
-            </h1>
-            <p className="text-gray-600">
-              {documentsFiltres.length} document{documentsFiltres.length > 1 ? 's' : ''} disponible
-              {documentsFiltres.length > 1 ? 's' : ''}
-            </p>
-          </div>
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-theme-secondary uppercase tracking-wider mb-1">Gestion</p>
+              <h1 className="text-3xl font-semibold text-theme-primary">Documents</h1>
+              <p className="text-sm text-theme-secondary mt-1">
+                {documentsFiltres.length} document{documentsFiltres.length > 1 ? 's' : ''}
+              </p>
+            </div>
 
-          <div className="flex items-center gap-3">
-            {peutVoirDocuments ? (
-              <div className="relative">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setMenuExportOuvert((prev) => !prev)}
-                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-                >
-                  <Icon name="download" size="sm" />
-                  Exporter
-                </motion.button>
-                {menuExportOuvert && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-10"
+            <div className="flex items-center gap-2">
+              {peutVoirDocuments && (
+                <div className="relative">
+                  <button
+                    onClick={() => setMenuExportOuvert((prev) => !prev)}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-theme-secondary bg-theme-card border border-theme rounded-lg hover:bg-theme-muted transition-colors"
                   >
-                    <button
-                      onClick={() => handleExport('pdf')}
-                      className="w-full px-4 py-3 hover:bg-red-50 transition-colors text-left flex items-center gap-2"
+                    <Icon name="download" size="sm" />
+                    Exporter
+                  </button>
+                  {menuExportOuvert && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="absolute right-0 mt-2 w-40 bg-theme-card border border-theme rounded-lg shadow-lg overflow-hidden z-10"
                     >
-                      <Icon name="document" size="sm" className="text-red-600" />
-                      <span className="font-medium">Export PDF</span>
-                    </button>
-                    <button
-                      onClick={() => handleExport('excel')}
-                      className="w-full px-4 py-3 hover:bg-green-50 transition-colors text-left flex items-center gap-2"
-                    >
-                      <Icon name="card" size="sm" className="text-green-600" />
-                      <span className="font-medium">Export Excel</span>
-                    </button>
-                    <button
-                      onClick={() => handleExport('csv')}
-                      className="w-full px-4 py-3 hover:bg-blue-50 transition-colors text-left flex items-center gap-2"
-                    >
-                      <Icon name="document" size="sm" className="text-blue-600" />
-                      <span className="font-medium">Export CSV</span>
-                    </button>
-                  </motion.div>
-                )}
-              </div>
-            ) : null}
-            {peutCreerDocuments ? (
-              <Link href="/documents/nouveau">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-                >
-                  <Icon name="upload" size="sm" />
-                  Nouveau document
-                </motion.button>
-              </Link>
-            ) : null}
+                      <button onClick={() => handleExport('pdf')} className="w-full px-4 py-2.5 text-sm text-left hover:bg-theme-muted transition-colors">PDF</button>
+                      <button onClick={() => handleExport('excel')} className="w-full px-4 py-2.5 text-sm text-left hover:bg-theme-muted transition-colors">Excel</button>
+                      <button onClick={() => handleExport('csv')} className="w-full px-4 py-2.5 text-sm text-left hover:bg-theme-muted transition-colors">CSV</button>
+                    </motion.div>
+                  )}
+                </div>
+              )}
+              {peutCreerDocuments && (
+                <Link href="/documents/nouveau">
+                  <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
+                    <Icon name="plus" size="sm" />
+                    Nouveau
+                  </button>
+                </Link>
+              )}
+            </div>
           </div>
         </motion.header>
 
-        <motion.section
-          initial={{ opacity: 0, y: 12 }}
+        {/* Barre de filtres minimaliste */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-2xl shadow-lg p-6 space-y-4"
+          transition={{ delay: 0.05 }}
+          className="mb-6 flex flex-col md:flex-row gap-3"
         >
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-2">
-              <div className="relative">
-                <input
-                  type="text"
-                  value={recherche}
-                  onChange={(e) => setRecherche(e.target.value)}
-                  placeholder="Rechercher par titre, client, référence..."
-                  className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                />
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                  <Icon name="search" size="sm" />
-                </span>
-              </div>
-            </div>
-
-            <select
-              value={filtreRisque}
-              onChange={(e) => setFiltreRisque(e.target.value)}
-              className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none"
-            >
-              <option value="">Tous les risques</option>
-              {risqueOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-
+          <div className="flex-1 relative">
+            <Icon name="search" size="sm" className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary" />
+            <input
+              type="text"
+              value={recherche}
+              onChange={(e) => setRecherche(e.target.value)}
+              placeholder="Rechercher..."
+              className="w-full pl-10 pr-4 py-2.5 text-sm bg-theme-card border border-theme rounded-lg focus:border-red-400 focus:ring-1 focus:ring-red-200 transition-all outline-none"
+            />
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-600">Affichage :</span>
+          <select
+            value={filtreRisque}
+            onChange={(e) => setFiltreRisque(e.target.value)}
+            className="px-4 py-2.5 text-sm bg-theme-card border border-theme rounded-lg focus:border-blue-400 outline-none min-w-[160px]"
+          >
+            <option value="">Tous les risques</option>
+            {risqueOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+
+          <div className="flex border border-theme rounded-lg overflow-hidden">
             <button
               onClick={() => setVueMode('grille')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                vueMode === 'grille'
-                  ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
+              className={`px-3 py-2 text-sm transition-colors ${vueMode === 'grille' ? 'bg-theme-muted text-theme-primary' : 'text-theme-secondary hover:bg-theme-muted/50'}`}
             >
               <Icon name="card" size="sm" />
-              Grille
             </button>
             <button
               onClick={() => setVueMode('liste')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                vueMode === 'liste'
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
+              className={`px-3 py-2 text-sm transition-colors ${vueMode === 'liste' ? 'bg-theme-muted text-theme-primary' : 'text-theme-secondary hover:bg-theme-muted/50'}`}
             >
               <Icon name="document" size="sm" />
-              Liste
             </button>
           </div>
-        </motion.section>
+        </motion.div>
 
-        {documentEdite && peutModifierDocuments && (
-          <motion.section
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-2xl shadow-lg p-6 space-y-4"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Icon name="edit" size="sm" />
-                  Modifier le document
-                </h2>
-                <p className="text-sm text-gray-500 mt-1 truncate max-w-xl">{documentEdite.titre}</p>
-              </div>
-              <button
-                type="button"
-                onClick={annulerEditionDocument}
-                disabled={chargementEdition}
-                className="text-xs font-medium text-gray-500 hover:text-gray-700"
-              >
-                Fermer
-              </button>
-            </div>
-
-            <form
-              onSubmit={soumettreEditionDocument}
-              className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
-            >
-              <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Titre</label>
-                <input
-                  type="text"
-                  value={titreEdition}
-                  onChange={(e) => setTitreEdition(e.target.value)}
-                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm outline-none"
-                  placeholder="Titre du document"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Référence</label>
-                <input
-                  type="text"
-                  value={referenceEdition}
-                  onChange={(e) => setReferenceEdition(e.target.value)}
-                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm outline-none"
-                  placeholder="Référence (facultatif)"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Type de courrier</label>
-                <select
-                  value={typeCourrierEdition || documentEdite.typeCourrier || ''}
-                  onChange={(e) => setTypeCourrierEdition(e.target.value)}
-                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm outline-none"
-                >
-                  <option value="">(inchangé)</option>
-                  {Object.entries(COURRIER_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-
-              <div className="md:col-span-4 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={annulerEditionDocument}
-                  disabled={chargementEdition}
-                  className="px-4 py-2 text-sm font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={chargementEdition}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl shadow hover:shadow-lg disabled:opacity-50 flex items-center gap-2"
-                >
-                  {chargementEdition ? (
-                    <span>Enregistrement...</span>
-                  ) : (
-                    <>
-                      <Icon name="check" size="sm" />
-                      Enregistrer
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </motion.section>
-        )}
 
         {erreur && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm"
           >
             {erreur}
           </motion.div>
         )}
 
         {chargement ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-          >
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="h-64 bg-white rounded-2xl shadow-lg animate-pulse" />
+              <div key={index} className="h-48 bg-theme-card border border-theme rounded-xl animate-pulse" />
             ))}
-          </motion.div>
+          </div>
         ) : vueMode === 'grille' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {documentsFiltres.map((doc, index) => {
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {documentsPagination.items.map((doc, index) => {
               const fichierUrl = extraireUrlDocument(doc)
               return (
                 <motion.div
                   key={doc.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + index * 0.05 }}
-                  whileHover={{ y: -6, scale: 1.01 }}
-                  className="bg-white rounded-2xl shadow-lg overflow-hidden flex flex-col"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: index * 0.02 }}
+                  className="bg-theme-card border border-theme rounded-xl p-5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors group"
                 >
-                  <div
-                    className="h-32 relative flex items-center justify-center"
-                    style={{ background: `linear-gradient(135deg, ${doc.color}dd 0%, ${doc.color} 100%)` }}
-                  >
-                    <span className="absolute top-4 right-4 bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-white text-xs font-semibold">
-                      {doc.exercice}
-                    </span>
-                    <Icon name="document-solid" size="xl" className="text-white opacity-90" />
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-theme-muted">
+                      <Icon name="document" size="sm" className="text-theme-secondary" />
+                    </div>
+                    <span className="text-xs text-theme-secondary">{doc.exercice}</span>
                   </div>
 
-                  <div className="p-6 space-y-4 flex-1 flex flex-col">
-                    <div>
-                      <h3 className="font-bold text-lg text-gray-900 mb-1">{doc.titre}</h3>
-                      <p className="text-sm text-gray-500 font-mono">{doc.reference || '—'}</p>
-                    </div>
+                  <h3 className="font-medium text-theme-primary text-sm mb-1 line-clamp-2">{doc.titre}</h3>
+                  <p className="text-xs text-theme-secondary font-mono mb-3">{doc.reference || '—'}</p>
 
-                    <div className="space-y-2 text-sm text-gray-600">
-                      <div className="flex items-center gap-2">
-                        <Icon name="building" size="xs" />
-                        <span>{doc.client}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Icon name="calendar" size="xs" />
-                        <span>{doc.date}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Icon name="inbox" size="xs" />
-                        <span>{doc.taille}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Icon name="tag" size="xs" />
-                        <span className="text-xs font-semibold" style={{ color: doc.color }}>
-                          {doc.risque}
-                        </span>
-                      </div>
+                  <div className="space-y-1.5 text-xs text-theme-secondary mb-4">
+                    <div className="flex items-center gap-2">
+                      <Icon name="building" size="xs" />
+                      <span className="truncate">{doc.client}</span>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: doc.color }} />
+                      <span>{doc.risque}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>{doc.date}</span>
+                      <span>{doc.taille}</span>
+                    </div>
+                  </div>
 
-                    <div>
-                      <span
-                        className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700"
-                        style={{ backgroundColor: `${doc.color}20`, color: doc.color }}
+                  <div className="flex items-center gap-1 pt-3 border-t border-theme">
+                    <button
+                      onClick={() => telechargerDocument(doc)}
+                      disabled={!fichierUrl}
+                      className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors disabled:opacity-40"
+                      title="Télécharger"
+                    >
+                      <Icon name="download" size="sm" />
+                    </button>
+                    <button
+                      onClick={() => imprimerDocument(doc)}
+                      disabled={!fichierUrl}
+                      className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors disabled:opacity-40"
+                      title="Imprimer"
+                    >
+                      <Icon name="print" size="sm" />
+                    </button>
+                    <button
+                      onClick={() => ouvrirDansNouvelOnglet(doc)}
+                      disabled={!fichierUrl}
+                      className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors disabled:opacity-40"
+                      title="Voir"
+                    >
+                      <Icon name="eye" size="sm" />
+                    </button>
+                    {peutModifierDocuments && (
+                      <button
+                        onClick={() => ouvrirEditionDocument(doc)}
+                        className="p-2 text-theme-secondary hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                        title="Modifier"
                       >
-                        {libelleCourrier(doc.typeCourrier)}
-                      </span>
-                    </div>
-
-                    <div className="flex gap-2 pt-2 mt-auto flex-wrap">
-                      <motion.button
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => telechargerDocument(doc)}
-                        disabled={!fichierUrl}
-                        className="flex-1 py-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        <Icon name="edit" size="sm" />
+                      </button>
+                    )}
+                    {peutSupprimerDocuments && (
+                      <button
+                        onClick={() => ouvrirModaleSuppressionDocument(doc)}
+                        disabled={suppressionEnCours === doc.id}
+                        className="p-2 text-theme-secondary hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-40 ml-auto"
+                        title="Supprimer"
                       >
-                        <Icon name="download" size="sm" />
-                        Télécharger
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => imprimerDocument(doc)}
-                        disabled={!fichierUrl}
-                        className="flex-1 py-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        <Icon name="print" size="sm" />
-                        Imprimer
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => ouvrirDansNouvelOnglet(doc)}
-                        disabled={!fichierUrl}
-                        className="flex-1 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        <Icon name="eye" size="sm" />
-                        Voir
-                      </motion.button>
-                      {peutModifierDocuments && (
-                        <motion.button
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.97 }}
-                          type="button"
-                          onClick={() => ouvrirEditionDocument(doc)}
-                          className="flex-1 py-2 bg-white border border-blue-200 text-blue-600 rounded-lg font-medium hover:bg-blue-50 transition-all flex items-center justify-center gap-2"
-                        >
-                          <Icon name="edit" size="sm" />
-                          Modifier
-                        </motion.button>
-                      )}
-                      {peutSupprimerDocuments ? (
-                        <motion.button
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.97 }}
-                          onClick={() => supprimerDocument(doc)}
-                          disabled={suppressionEnCours === doc.id}
-                          className="py-2 px-3 bg-white border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
-                        >
-                          <Icon name="trash" size="sm" />
-                          {suppressionEnCours === doc.id ? 'Suppression…' : 'Supprimer'}
-                        </motion.button>
-                      ) : null}
-                    </div>
+                        <Icon name="trash" size="sm" />
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               )
             })}
           </div>
         ) : (
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <div className="bg-theme-card border border-theme rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Document</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Client</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Risque</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Type</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Date</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Taille</th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">Actions</th>
+                <thead>
+                  <tr className="border-b border-theme">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">Document</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">Client</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">Risque</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">Type</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">Date</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-theme-secondary uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {documentsFiltres.map((doc, index) => {
+                <tbody className="divide-y divide-theme">
+                  {documentsPagination.items.map((doc, index) => {
                     const fichierUrl = extraireUrlDocument(doc)
                     return (
                       <motion.tr
                         key={doc.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.1 + index * 0.04 }}
-                        className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: index * 0.02 }}
+                        className="hover:bg-theme-muted/50 transition-colors"
                       >
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center">
-                              <Icon name="document-solid" className="text-gray-600" />
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-theme-muted">
+                              <Icon name="document" size="xs" className="text-theme-secondary" />
                             </div>
-                            <div>
-                              <p className="font-semibold text-gray-900">{doc.titre}</p>
-                              <p className="text-sm text-gray-500 font-mono">{doc.reference || '—'}</p>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-theme-primary truncate">{doc.titre}</p>
+                              <p className="text-xs text-theme-secondary font-mono">{doc.reference || '—'}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-gray-700">{doc.client}</td>
-                        <td className="px-6 py-4">
-                          <span
-                            className="px-3 py-1 rounded-full text-xs font-semibold"
-                            style={{ backgroundColor: `${doc.color}20`, color: doc.color }}
-                          >
+                        <td className="px-4 py-3 text-sm text-theme-primary">{doc.client}</td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1.5 text-xs text-theme-secondary">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: doc.color }} />
                             {doc.risque}
                           </span>
                         </td>
-                        <td className="px-6 py-4">
-                          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
-                            {libelleCourrier(doc.typeCourrier)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-gray-600 text-sm">{doc.date}</td>
-                        <td className="px-6 py-4 text-gray-600 text-sm">{doc.taille}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center justify-end gap-2">
-                            <motion.button
-                              whileHover={{ scale: 1.05 }}
-                              onClick={() => telechargerDocument(doc)}
-                              disabled={!fichierUrl}
-                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              title="Télécharger"
-                            >
-                              <Icon name="download" size="sm" />
-                            </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.05 }}
-                              onClick={() => imprimerDocument(doc)}
-                              disabled={!fichierUrl}
-                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              title="Imprimer"
-                            >
-                              <Icon name="print" size="sm" />
-                            </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.05 }}
-                              onClick={() => ouvrirDansNouvelOnglet(doc)}
-                              disabled={!fichierUrl}
-                              className="p-2 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              title="Voir"
-                            >
-                              <Icon name="eye" size="sm" />
-                            </motion.button>
+                        <td className="px-4 py-3 text-xs text-theme-secondary">{libelleCourrier(doc.typeCourrier)}</td>
+                        <td className="px-4 py-3 text-xs text-theme-secondary">{doc.date}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => telechargerDocument(doc)} disabled={!fichierUrl} className="p-1.5 text-theme-secondary hover:text-theme-primary rounded transition-colors disabled:opacity-40" title="Télécharger">
+                              <Icon name="download" size="xs" />
+                            </button>
+                            <button onClick={() => ouvrirDansNouvelOnglet(doc)} disabled={!fichierUrl} className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors disabled:opacity-40" title="Voir">
+                              <Icon name="eye" size="xs" />
+                            </button>
                             {peutModifierDocuments && (
-                              <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                onClick={() => ouvrirEditionDocument(doc)}
-                                disabled={chargementEdition && documentEdite?.id === doc.id}
-                                className="p-2 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-60"
-                                title="Modifier"
-                              >
-                                <Icon name="edit" size="sm" className="text-blue-600" />
-                              </motion.button>
+                              <button onClick={() => ouvrirEditionDocument(doc)} className="p-1.5 text-theme-secondary hover:text-blue-600 rounded transition-colors" title="Modifier">
+                                <Icon name="edit" size="xs" />
+                              </button>
                             )}
-                            {peutSupprimerDocuments ? (
-                              <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                onClick={() => supprimerDocument(doc)}
-                                disabled={suppressionEnCours === doc.id}
-                                className="p-2 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-60"
-                                title="Supprimer"
-                              >
-                                <Icon name="trash" size="sm" className="text-red-600" />
-                              </motion.button>
-                            ) : null}
+                            {peutSupprimerDocuments && (
+                              <button onClick={() => ouvrirModaleSuppressionDocument(doc)} disabled={suppressionEnCours === doc.id} className="p-1.5 text-theme-secondary hover:text-red-600 rounded transition-colors disabled:opacity-40" title="Supprimer">
+                                <Icon name="trash" size="xs" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </motion.tr>
@@ -1160,23 +987,71 @@ export default function PageDocuments() {
 
         {!chargement && documentsFiltres.length === 0 && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center py-16 bg-white rounded-2xl shadow-lg"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center py-16 bg-theme-card border border-theme rounded-xl"
           >
-            <Icon name="folder" size="xl" className="mx-auto mb-4 text-gray-400" />
-            <p className="text-xl font-semibold text-gray-700 mb-2">Aucun document trouvé</p>
-            <p className="text-gray-500 mb-6">Modifiez vos filtres ou ajoutez un nouveau document</p>
-            <Link href="/documents/nouveau">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg inline-flex items-center gap-2"
+            <Icon name="folder" size="lg" className="mx-auto mb-3 text-theme-secondary" />
+            <p className="text-sm font-medium text-theme-primary mb-1">Aucun document trouvé</p>
+            <p className="text-xs text-theme-secondary mb-4">Modifiez vos filtres ou ajoutez un nouveau document</p>
+            {peutCreerDocuments && (
+              <Link href="/documents/nouveau">
+                <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
+                  <Icon name="plus" size="sm" />
+                  Ajouter
+                </button>
+              </Link>
+            )}
+          </motion.div>
+        )}
+
+        {/* Pagination */}
+        {!chargement && documentsPagination.totalPages > 1 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mt-6 flex items-center justify-between"
+          >
+            <p className="text-sm text-theme-secondary">
+              Page {documentsPagination.page} sur {documentsPagination.totalPages} · {documentsPagination.total} document{documentsPagination.total > 1 ? 's' : ''}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPageDocuments(1)}
+                disabled={documentsPagination.page <= 1}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                <Icon name="upload" size="sm" />
-                Ajouter un document
-              </motion.button>
-            </Link>
+                ««
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageDocuments((prev) => Math.max(1, prev - 1))}
+                disabled={documentsPagination.page <= 1}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                ←
+              </button>
+              <span className="px-3 py-1.5 text-sm font-medium text-theme-primary">
+                {documentsPagination.page}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPageDocuments((prev) => Math.min(documentsPagination.totalPages, prev + 1))}
+                disabled={documentsPagination.page >= documentsPagination.totalPages}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                →
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageDocuments(documentsPagination.totalPages)}
+                disabled={documentsPagination.page >= documentsPagination.totalPages}
+                className="px-3 py-1.5 text-sm border border-theme rounded-lg hover:bg-theme-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                »»
+              </button>
+            </div>
           </motion.div>
         )}
 
@@ -1190,6 +1065,95 @@ export default function PageDocuments() {
           urlDocument={documentPreview?.url ?? undefined}
         />
       </main>
+
+      {/* Modale d'édition document */}
+      {documentEdite && peutModifierDocuments && (
+        <FormModal
+          isOpen={!!documentEdite}
+          onClose={annulerEditionDocument}
+          title={`Modifier : ${documentEdite.titre}`}
+          isDark={isDark}
+          size="md"
+        >
+          <form onSubmit={soumettreEditionDocument} className="space-y-4">
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Titre *</label>
+              <input
+                type="text"
+                value={titreEdition}
+                onChange={(e) => setTitreEdition(e.target.value)}
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-blue-400 outline-none ${
+                  isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                }`}
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Référence</label>
+                <input
+                  type="text"
+                  value={referenceEdition}
+                  onChange={(e) => setReferenceEdition(e.target.value)}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-blue-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Type</label>
+                <select
+                  value={typeCourrierEdition || documentEdite.typeCourrier || ''}
+                  onChange={(e) => setTypeCourrierEdition(e.target.value)}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-blue-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                >
+                  <option value="">(inchangé)</option>
+                  {Object.entries(COURRIER_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={annulerEditionDocument}
+                disabled={chargementEdition}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
+                  isDark ? 'text-slate-300 bg-slate-700 hover:bg-slate-600' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+                }`}
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                disabled={chargementEdition}
+                className="flex-1 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {chargementEdition ? 'Enregistrement...' : 'Enregistrer'}
+              </button>
+            </div>
+          </form>
+        </FormModal>
+      )}
+
+      {/* Modale de confirmation suppression document */}
+      <ConfirmModal
+        isOpen={modaleSuppressionDocument.open}
+        onClose={fermerModaleSuppressionDocument}
+        onConfirm={confirmerSuppressionDocument}
+        title="Supprimer le document"
+        message={`Êtes-vous sûr de vouloir supprimer définitivement « ${modaleSuppressionDocument.document?.titre} » ? Cette action est irréversible.`}
+        confirmText="Supprimer"
+        cancelText="Annuler"
+        variant="danger"
+        isLoading={suppressionEnCours === modaleSuppressionDocument.document?.id}
+        isDark={isDark}
+      />
     </div>
   )
 }

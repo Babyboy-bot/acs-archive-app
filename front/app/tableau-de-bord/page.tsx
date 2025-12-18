@@ -1,18 +1,19 @@
 'use client'
 
-import { Navigation } from '@/components/Navigation'
-import { Icon } from '@/components/Icon'
-import { StatsTempsReel } from '@/components/StatsTempsReel'
-import { motion } from 'framer-motion'
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
-import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { apiFetchJson } from '@/lib/api'
-import { formatDistanceToNow } from 'date-fns'
-import { fr } from 'date-fns/locale'
-import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
-import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
-import { canAccessSection, hasPermission } from '@/lib/permissions'
+import Link from 'next/link'
+import { motion } from 'framer-motion'
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
+
+// Composants
+import { Sidebar, Icon, StatsTempsReel } from '@/components'
+import { AuthLoadingScreen, AccessDenied, PageHeader } from '@/components/common'
+
+// Hooks
+import { useUtilisateurCourant, useEnforceNonConsultant, useRequireAuth } from '@/hooks'
+
+// Lib
+import { apiFetchJson, canAccessSection, hasPermission, formatDateRelative } from '@/lib'
 
 type DocumentApi = {
   id: string
@@ -34,8 +35,11 @@ type RisqueApi = {
 }
 
 export default function DashboardUltraModerne() {
+  // Tous les hooks doivent être appelés AVANT tout return conditionnel
+  const { estAuthentifie, chargement: authChargement } = useRequireAuth()
   useEnforceNonConsultant()
   const utilisateurCourant = useUtilisateurCourant()
+  
   const role = utilisateurCourant?.role ?? null
   const peutVoirStats = hasPermission(role, 'stats', 'voir')
   const peutVoirDocuments = hasPermission(role, 'documents', 'voir')
@@ -55,6 +59,9 @@ export default function DashboardUltraModerne() {
   }, [])
 
   useEffect(() => {
+    // Ne pas charger les données si pas authentifié
+    if (!estAuthentifie) return
+    
     let ignore = false
 
     const chargerDonnees = async () => {
@@ -142,7 +149,7 @@ export default function DashboardUltraModerne() {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [estAuthentifie])
 
   const documentsRecentsAffiches = useMemo(() => {
     return documentsRecents.map((doc) => ({
@@ -154,248 +161,271 @@ export default function DashboardUltraModerne() {
     }))
   }, [documentsRecents])
 
+  // Attendre la vérification d'authentification (après tous les hooks)
+  if (authChargement || !estAuthentifie) {
+    return <AuthLoadingScreen />
+  }
+
   if (!peutVoirStats) {
     return (
-      <div className="min-h-screen bg-theme-base text-theme-primary">
-        <Navigation />
-        <main className="container mx-auto px-4 py-16 flex flex-col items-center text-center gap-6">
-          <div className="flex items-center gap-3 text-red-600">
-            <Icon name="shield" size="lg" />
-            <h1 className="text-3xl font-bold text-theme-primary">Accès restreint</h1>
-          </div>
-          <p className="text-theme-secondary max-w-xl">
-            Ce tableau de bord est réservé aux administrateurs et archivistes. Veuillez contacter un administrateur si vous avez besoin d'un accès élargi.
-          </p>
+      <div className="min-h-screen bg-theme-base text-theme-primary flex">
+        <Sidebar />
+        <main className="flex-1 ml-64 p-8">
+          <AccessDenied 
+            title="Accès restreint"
+            description="Ce tableau de bord est réservé aux administrateurs et archivistes. Veuillez contacter un administrateur si vous avez besoin d'un accès élargi."
+          />
         </main>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary">
-      <Navigation />
+    <div className="min-h-screen bg-theme-base text-theme-primary flex">
+      <Sidebar />
       
-      <main className="container mx-auto px-4 py-8">
-        {/* En-tête */}
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+      <main className="flex-1 ml-64 p-10 overflow-auto">
+        {/* En-tête minimaliste */}
+        <motion.header 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mb-10"
         >
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2">
-            Dashboard ACS Archive
+          <p className="text-sm font-medium text-theme-secondary uppercase tracking-wider mb-1">Vue d'ensemble</p>
+          <h1 className="text-3xl font-semibold text-theme-primary">
+            Tableau de bord
           </h1>
-          <p className="text-theme-secondary">Bienvenue ! Voici un aperçu de votre système d'archivage</p>
-        </motion.div>
+        </motion.header>
 
-        {erreur ? (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        {erreur && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm"
+          >
             {erreur}
-          </div>
-        ) : loading ? (
-          <div className="mb-6 rounded-xl border border-blue-100 bg-white px-4 py-3 text-sm text-blue-600">
-            Chargement des dernières données...
-          </div>
-        ) : null}
+          </motion.div>
+        )}
+
+        {loading && !erreur && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-8 flex items-center gap-3 text-theme-secondary text-sm"
+          >
+            <div className="w-4 h-4 border-2 border-theme-secondary border-t-transparent rounded-full animate-spin" />
+            Chargement...
+          </motion.div>
+        )}
 
         {/* Stats temps réel */}
-        {peutVoirStats ? (
+        {peutVoirStats && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-            className="mb-8"
+            transition={{ delay: 0.1 }}
+            className="mb-10"
           >
             <StatsTempsReel intervalMs={5000} />
           </motion.div>
-        ) : null}
+        )}
 
-        {/* Actions rapides */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
+        {/* Actions rapides - Style minimaliste */}
+        <motion.section 
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-theme-card rounded-2xl shadow-lg p-6 mb-8"
+          transition={{ delay: 0.15 }}
+          className="mb-10"
         >
-          <h2 className="text-xl font-bold text-theme-primary mb-4 flex items-center gap-2">
-            <Icon name="bolt" className="text-red-600" />
-            Actions Rapides
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {peutCreerDocuments ? (
+          <h2 className="text-xs font-semibold text-theme-secondary uppercase tracking-wider mb-4">Actions rapides</h2>
+          <div className="flex flex-wrap gap-3">
+            {peutCreerDocuments && (
               <Link href="/documents/nouveau">
-                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-theme-muted transition-all border-2 border-transparent hover:border-red-200">
-                  <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                    <Icon name="upload" size="lg" />
-                  </div>
-                  <span className="font-medium text-theme-primary">Upload</span>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }} 
+                  whileTap={{ scale: 0.98 }} 
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-theme-card border border-theme rounded-lg text-sm font-medium text-theme-primary hover:border-red-300 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all"
+                >
+                  <Icon name="upload" size="sm" className="text-red-500" />
+                  Nouveau document
                 </motion.button>
               </Link>
-            ) : null}
+            )}
 
-            {peutAccederRecherche ? (
+            {peutAccederRecherche && (
               <Link href="/recherche">
-                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-theme-muted transition-all border-2 border-transparent hover:border-blue-200">
-                  <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                    <Icon name="search" size="lg" />
-                  </div>
-                  <span className="font-medium text-theme-primary">Recherche</span>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }} 
+                  whileTap={{ scale: 0.98 }} 
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-theme-card border border-theme rounded-lg text-sm font-medium text-theme-primary hover:border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all"
+                >
+                  <Icon name="search" size="sm" className="text-blue-500" />
+                  Rechercher
                 </motion.button>
               </Link>
-            ) : null}
+            )}
 
-            {peutAccederParametres ? (
+            {peutAccederParametres && (
               <Link href="/parametres">
-                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-theme-muted transition-all border-2 border-transparent hover:border-green-200">
-                  <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                    <Icon name="settings" size="lg" />
-                  </div>
-                  <span className="font-medium text-theme-primary">Paramètres</span>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }} 
+                  whileTap={{ scale: 0.98 }} 
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-theme-card border border-theme rounded-lg text-sm font-medium text-theme-primary hover:border-gray-400 transition-all"
+                >
+                  <Icon name="settings" size="sm" className="text-theme-secondary" />
+                  Paramètres
                 </motion.button>
               </Link>
-            ) : null}
-
-            {peutAccederParametres ? (
-              <Link href="/admin-llm">
-                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-3 p-4 rounded-xl hover:bg-theme-muted transition-all border-2 border-transparent hover:border-purple-200">
-                  <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-                    <Icon name="sparkles" size="lg" />
-                  </div>
-                  <span className="font-medium text-theme-primary">Stats LLM</span>
-                </motion.button>
-              </Link>
-            ) : null}
-
-            {!peutCreerDocuments && !peutAccederRecherche && !peutAccederParametres ? (
-              <div className="col-span-full text-sm text-gray-500">
-                Aucune action rapide disponible avec votre rôle actuel.
-              </div>
-            ) : null}
+            )}
           </div>
-        </motion.div>
+        </motion.section>
 
-        {/* Graphiques */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Graphiques - Design épuré */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-10">
           <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.4 }}
-            className="bg-theme-card rounded-2xl shadow-lg p-6"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-theme-card border border-theme rounded-xl p-6"
           >
-            <h3 className="text-lg font-bold text-theme-primary mb-4 flex items-center gap-2">
-              <Icon name="chart" className="text-red-600" />
-              Évolution des Documents
-            </h3>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-sm font-semibold text-theme-primary">Évolution mensuelle</h3>
+              <span className="text-xs text-theme-secondary">12 derniers mois</span>
+            </div>
             {mounted && evolutionDocuments.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={280}>
                 <AreaChart data={evolutionDocuments}>
                   <defs>
                     <linearGradient id="colorClient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#D32027" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#D32027" stopOpacity={0.1}/>
+                      <stop offset="0%" stopColor="#D32027" stopOpacity={0.3}/>
+                      <stop offset="100%" stopColor="#D32027" stopOpacity={0}/>
                     </linearGradient>
                     <linearGradient id="colorCompagnie" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0066B3" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#0066B3" stopOpacity={0.1}/>
+                      <stop offset="0%" stopColor="#0066B3" stopOpacity={0.3}/>
+                      <stop offset="100%" stopColor="#0066B3" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="mois" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
-                  <Tooltip />
-                  <Legend />
-                  <Area type="monotone" dataKey="ACS_Client" stroke="#D32027" fillOpacity={1} fill="url(#colorClient)" />
-                  <Area type="monotone" dataKey="ACS_Compagnie" stroke="#0066B3" fillOpacity={1} fill="url(#colorCompagnie)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                  <XAxis dataKey="mois" stroke="var(--color-text-secondary)" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="var(--color-text-secondary)" fontSize={11} tickLine={false} axisLine={false} />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'var(--color-card)', 
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '8px',
+                      fontSize: '12px'
+                    }} 
+                  />
+                  <Area type="monotone" dataKey="ACS_Client" stroke="#D32027" strokeWidth={2} fillOpacity={1} fill="url(#colorClient)" name="Vers Client" />
+                  <Area type="monotone" dataKey="ACS_Compagnie" stroke="#0066B3" strokeWidth={2} fillOpacity={1} fill="url(#colorCompagnie)" name="Vers Compagnie" />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <p className="text-sm text-theme-secondary">Aucune donnée disponible pour le moment.</p>
+              <div className="h-[280px] flex items-center justify-center text-sm text-theme-secondary">
+                Aucune donnée disponible
+              </div>
             )}
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.5 }}
-            className="bg-theme-card rounded-2xl shadow-lg p-6"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="bg-theme-card border border-theme rounded-xl p-6"
           >
-            <h3 className="text-lg font-bold text-theme-primary mb-4 flex items-center gap-2">
-              <Icon name="shield" className="text-blue-600" />
-              Répartition par Risques
-            </h3>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-sm font-semibold text-theme-primary">Répartition par risques</h3>
+              <span className="text-xs text-theme-secondary">{risques.length} types</span>
+            </div>
             {mounted && risques.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={280}>
                 <PieChart>
                   <Pie
                     data={risques}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`}
+                    label={({ percent }) => `${percent ? (percent * 100).toFixed(0) : 0}%`}
                     outerRadius={100}
-                    fill="#8884d8"
+                    paddingAngle={0}
                     dataKey="value"
                   >
                     {risques.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'var(--color-card)', 
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '8px',
+                      fontSize: '12px'
+                    }} 
+                  />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <p className="text-sm text-theme-secondary">Aucune donnée de risque disponible.</p>
+              <div className="h-[280px] flex items-center justify-center text-sm text-theme-secondary">
+                Aucune donnée disponible
+              </div>
+            )}
+            {/* Légende compacte */}
+            {risques.length > 0 && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4">
+                {risques.slice(0, 5).map((r, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs text-theme-secondary">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: r.color }} />
+                    {r.name}
+                  </div>
+                ))}
+              </div>
             )}
           </motion.div>
         </div>
 
-        {/* Documents récents */}
-        <div className="grid grid-cols-1 gap-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
-            className="bg-theme-card rounded-2xl shadow-lg p-6"
-          >
-            <h3 className="text-lg font-bold text-theme-primary mb-4 flex items-center gap-2">
-              <Icon name="document" className="text-red-600" />
-              Documents Récents
-            </h3>
-            {documentsRecentsAffiches.length > 0 ? (
-              <div className="space-y-3">
-                {documentsRecentsAffiches.map((doc, index) => (
-                  <motion.div
-                    key={doc.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.7 + index * 0.1 }}
-                    whileHover={{ x: 5 }}
-                    className="flex items-center gap-4 p-4 rounded-xl hover:bg-theme-muted cursor-pointer transition-all border border-transparent hover:border-theme"
-                  >
-                    <div className="w-12 h-12 bg-theme-muted rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Icon name="document-solid" className="text-theme-secondary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-theme-primary truncate">{doc.titre}</p>
-                      <p className="text-sm text-theme-secondary">{doc.client} • {doc.risque}</p>
-                    </div>
-                    <div className="text-xs text-theme-secondary">
-                      {formatDistanceToNow(new Date(doc.date), { addSuffix: true, locale: fr })}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-theme-secondary">Aucun document récent trouvé.</p>
-            )}
-            <Link href="/documents">
-              <motion.button whileHover={{ x: 5 }} className="mt-4 w-full text-center py-3 text-red-600 font-medium hover:bg-theme-muted rounded-xl transition-colors flex items-center justify-center gap-2">
-                Voir tous les documents
-                <Icon name="arrow-right" size="sm" />
-              </motion.button>
+        {/* Documents récents - Liste épurée */}
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-theme-card border border-theme rounded-xl"
+        >
+          <div className="flex items-center justify-between p-5 border-b border-theme">
+            <h3 className="text-sm font-semibold text-theme-primary">Documents récents</h3>
+            <Link href="/documents" className="text-xs font-medium text-red-600 hover:text-red-700 transition-colors">
+              Voir tout
             </Link>
-          </motion.div>
-        </div>
+          </div>
+          
+          {documentsRecentsAffiches.length > 0 ? (
+            <div className="divide-y divide-gray-200">
+              {documentsRecentsAffiches.map((doc, index) => (
+                <motion.div
+                  key={doc.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.35 + index * 0.05 }}
+                  className="flex items-center gap-4 p-4 hover:bg-theme-muted/50 transition-colors cursor-pointer"
+                >
+                  <div className="w-9 h-9 bg-theme-muted rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Icon name="document" size="sm" className="text-theme-secondary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-theme-primary truncate">{doc.titre}</p>
+                    <p className="text-xs text-theme-secondary mt-0.5">{doc.client} · {doc.risque}</p>
+                  </div>
+                  <span className="text-xs text-theme-secondary whitespace-nowrap">
+                    {formatDateRelative(doc.date)}
+                  </span>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 text-center text-sm text-theme-secondary">
+              Aucun document récent
+            </div>
+          )}
+        </motion.section>
       </main>
     </div>
   )

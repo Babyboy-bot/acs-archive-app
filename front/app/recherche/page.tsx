@@ -1,14 +1,15 @@
 'use client'
 
-import { Navigation } from '@/components/Navigation'
+import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetchJson, buildApiUrl } from '@/lib/api'
-import { printBlob } from '@/lib/print'
+import { getToken } from '@/lib/session'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { formatDistanceToNow } from 'date-fns'
+import { useRequireAuth } from '@/hooks/useRequireAuth'
 
 type ClientApi = {
   id: string
@@ -235,16 +236,8 @@ const RISQUE_THEMES: Record<string, RisqueTheme> = {
 
 const normalizeRisqueKey = (value?: string | null) => {
   if (!value) return ''
-
-  // Normalisation de base (accents, casse)
-  let v = value
+  return value
     .normalize('NFD')
-
-  // Unifier les variantes d'orthographe pour certains risques connus
-  // Exemple : "Assistance frais funérailles" vs "Assistance frais funéraires"
-  v = v.replace(/funeraill(es?)/gi, 'funeraires')
-
-  return v
     .replace(/[^0-9a-zA-Z\s-]/g, '')
     .replace(/[\s-]+/g, '_')
     .normalize('NFC')
@@ -276,14 +269,6 @@ const RISQUE_FALLBACK_TYPES = [
   { value: 'VOYAGE', label: 'Voyage' },
   { value: 'CAUTION', label: 'Caution' },
   { value: 'TOUS RISQUES CHANTIER', label: 'Tous risques chantier' },
-  { value: 'ASSISTANCE FRAIS FUNERAIRES', label: 'Assistance frais funéraires' },
-  { value: 'FRAIS FUNERAIRES', label: 'Frais funéraires' },
-  { value: 'GLOBALE BANQUE', label: 'Globale banque' },
-  { value: 'ASSURANCE DES STOCKS', label: 'Assurance des stocks' },
-  { value: 'PREVOYANCE COLLECTIVE', label: 'Prévoyance collective' },
-  { value: 'PREVOYANCE ENTREPRISE', label: 'Prévoyance entreprise' },
-  { value: 'MULTIRISQUE BUREAU', label: 'Multirisque bureau' },
-  { value: 'VOL ET DETOURNEMENTS', label: 'Vol et détournements' },
 ]
 
 const RISQUE_LABELS = new Map(
@@ -340,6 +325,9 @@ type DocumentApi = {
 }
 
 export default function PageRecherche() {
+  // Tous les hooks doivent être appelés AVANT tout return conditionnel
+  const { estAuthentifie, chargement: authChargement } = useRequireAuth()
+
   const [client, setClient] = useState('')
   const [exercice, setExercice] = useState('')
   const [risque, setRisque] = useState('')
@@ -361,48 +349,18 @@ export default function PageRecherche() {
   const chargerDocuments = useCallback(async () => {
     setChargementDocuments(true)
     try {
-      const tousLesDocuments: DocumentApi[] = []
+      const { data, response } = await apiFetchJson<{ results?: DocumentApi[] }>(
+        '/documents/?page_size=800&ordering=-cree_le'
+      )
 
-      // On parcourt toutes les pages de /documents/ pour ne rater aucun document.
-      // On commence par la première page, triée du plus récent au plus ancien.
-      let prochaineUrl: string | null = '/documents/?ordering=-cree_le&page_size=200'
-
-      while (prochaineUrl) {
-        const { data, response } = await apiFetchJson<{ results?: DocumentApi[]; next?: string | null }>(
-          prochaineUrl,
-        )
-
-        if (!response.ok) {
-          throw new Error('Réponse invalide de l’API documents')
-        }
-
-        // Cas pagination DRF classique
-        if (data && Array.isArray((data as any).results)) {
-          tousLesDocuments.push(...(((data as any).results ?? []) as DocumentApi[]))
-
-          const nextUrl = (data as any).next as string | null | undefined
-          if (nextUrl) {
-            try {
-              const urlObj = new URL(nextUrl)
-              prochaineUrl = `${urlObj.pathname}${urlObj.search}`
-            } catch {
-              prochaineUrl = null
-            }
-          } else {
-            prochaineUrl = null
-          }
-        } else if (Array.isArray(data)) {
-          // Cas où la pagination serait désactivée
-          tousLesDocuments.push(...(data as DocumentApi[]))
-          prochaineUrl = null
-        } else {
-          prochaineUrl = null
-        }
+      if (!response.ok) {
+        throw new Error('Réponse invalide de l’API documents')
       }
 
-      setDocumentsSource(tousLesDocuments)
+      const docs = Array.isArray(data?.results) ? data!.results : []
+      setDocumentsSource(docs)
       setDocumentsCharges(true)
-      return tousLesDocuments
+      return docs
     } catch (error) {
       console.error('Erreur chargement documents (suggestions)', error)
       setDocumentsSource([])
@@ -427,16 +385,14 @@ export default function PageRecherche() {
         const info = doc.risque_detail?.exercice_info
         const clientDoc = info?.client ?? ''
         const anneeDoc = info?.annee ? String(info.annee) : ''
-        const risqueDoc = doc.risque_detail?.type ?? ''
+        const risqueDoc = (doc.risque_detail?.type ?? '').toUpperCase()
         const typeCourrierDoc = doc.type_courrier ?? ''
 
         const matchClient = criteres.client
           ? clientDoc.toLowerCase().includes(criteres.client.toLowerCase())
           : true
         const matchExercice = criteres.exercice ? anneeDoc === criteres.exercice : true
-        const matchRisque = criteres.risque
-          ? normalizeRisqueKey(risqueDoc) === normalizeRisqueKey(criteres.risque)
-          : true
+        const matchRisque = criteres.risque ? risqueDoc === criteres.risque.toUpperCase() : true
         const matchTypeCourrier = criteres.typeCourrier ? typeCourrierDoc === criteres.typeCourrier : true
 
         return matchClient && matchExercice && matchRisque && matchTypeCourrier
@@ -506,8 +462,6 @@ export default function PageRecherche() {
           : Array.isArray(clientsRes.data?.results)
             ? (clientsRes.data!.results as ClientApi[])
             : []
-
-        clientsData.sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }))
         setClients(clientsData)
 
         const exercicesData: ExerciceApi[] = Array.isArray(exercicesRes.data)
@@ -556,19 +510,15 @@ export default function PageRecherche() {
     setErreur(null)
 
     try {
-      let baseDocuments: DocumentApi[] = documentsSource
-
-      // Au premier appel, on doit utiliser directement le résultat de chargerDocuments,
-      // car setDocumentsSource est asynchrone et l'état n'est pas encore à jour.
       if (!documentsCharges) {
         try {
-          baseDocuments = await chargerDocuments()
+          await chargerDocuments()
         } catch (error) {
           setErreur("Impossible de récupérer les documents.")
         }
       }
 
-      const resultatFiltre = filtrerDocuments(baseDocuments, {
+      const resultatFiltre = filtrerDocuments(documentsSource, {
         client: client || undefined,
         exercice: exercice || undefined,
         risque: risque || undefined,
@@ -588,7 +538,7 @@ export default function PageRecherche() {
   const imprimerResultat = (doc: (typeof resultatsAffiches)[number]) => {
     const url = extraireUrlDocument(doc)
     if (!url) {
-      setErreurTelechargement('Document introuvable sur le serveur')
+      setErreurTelechargement("Document introuvable sur le serveur")
       return
     }
 
@@ -603,6 +553,10 @@ export default function PageRecherche() {
     const startPrint = async () => {
       try {
         const headers = new Headers({ Accept: 'application/pdf,image/*' })
+        const token = getToken()
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`)
+        }
 
         const response = await fetch(proxyUrl, {
           credentials: 'include',
@@ -614,14 +568,91 @@ export default function PageRecherche() {
         }
 
         const blob = await response.blob()
+        const mime = blob.type || response.headers.get('content-type') || ''
+        const candidateUrl = doc.fichierUrl ?? resolvedUrl ?? ''
+        const isPdf =
+          mime.includes('pdf') ||
+          (!mime || mime === 'application/octet-stream') && /\.pdf(?:$|\?|#)/i.test(candidateUrl)
 
-        await printBlob({
-          blob,
-          title: doc.titre || 'Document',
-          mimeType: response.headers.get('content-type'),
-          sourceUrl: doc.fichierUrl ?? doc.source?.fichier_url ?? doc.source?.fichierUrl ?? null,
-          fallbackUrl: resolvedUrl,
-        })
+        const blobUrl = URL.createObjectURL(blob)
+        const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700')
+
+        if (!printWindow) {
+          URL.revokeObjectURL(blobUrl)
+          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+          return
+        }
+
+        const sanitize = (value: string) =>
+          value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+
+        const titreNettoye = sanitize(doc.titre || 'Document')
+
+        const scriptContent = isPdf
+          ? `const iframe = document.querySelector('iframe');
+            const triggerPrint = () => {
+              try {
+                iframe.contentWindow?.focus?.();
+                iframe.contentWindow?.print?.();
+              } catch (e) {
+                window.focus();
+                window.print();
+              }
+              setTimeout(() => window.close(), 500);
+            };
+            if (iframe) {
+              iframe.addEventListener('load', triggerPrint);
+            } else {
+              triggerPrint();
+            }`
+          : `const image = document.querySelector('img');
+            const triggerPrint = () => {
+              try {
+                window.focus();
+                window.print();
+              } catch (e) {
+                window.print();
+              }
+              setTimeout(() => window.close(), 500);
+            };
+            if (!image) {
+              triggerPrint();
+            } else if (image.complete) {
+              triggerPrint();
+            } else {
+              image.addEventListener('load', triggerPrint);
+            }`
+
+        printWindow.document.open()
+        printWindow.document.write(`<!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8" />
+              <title>Impression - ${titreNettoye}</title>
+              <style>
+                html, body { margin: 0; padding: 0; height: 100%; }
+                iframe, img { width: 100%; height: 100%; border: 0; display: block; }
+                img { object-fit: contain; background: #fff; }
+              </style>
+            </head>
+            <body>
+              ${isPdf ? `<iframe src="${blobUrl}"></iframe>` : `<img src="${blobUrl}" alt="${titreNettoye}" />`}
+              <script>
+                ${scriptContent.replace(/<\//g, '<\\/')}
+              <\/script>
+            </body>
+          </html>`)
+        printWindow.document.close()
+
+        const cleanup = () => {
+          URL.revokeObjectURL(blobUrl)
+          printWindow.removeEventListener('beforeunload', cleanup)
+        }
+        printWindow.addEventListener('beforeunload', cleanup)
       } catch (error: any) {
         console.error('Impression recherche', error)
         setErreurTelechargement(error?.message ?? "Impossible d'imprimer le document")
@@ -877,51 +908,53 @@ export default function PageRecherche() {
     return `${(kb / 1024).toFixed(1)} MB`
   }
 
+  // Attendre la vérification d'authentification (après tous les hooks)
+  if (authChargement || !estAuthentifie) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-theme-base">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-theme-secondary text-sm">Vérification de l'authentification...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation />
+    <div className="min-h-screen bg-theme-base text-theme-primary flex">
+      <Sidebar />
       
-      <main className="container mx-auto px-4 py-8">
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
+      <main className="flex-1 ml-64 p-10 overflow-auto">
+        {/* En-tête minimaliste */}
+        <motion.header 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           className="mb-8"
         >
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
-            <Icon name="search" size="xl" className="text-red-600" />
-            Recherche Avancée
-          </h1>
-          <p className="text-gray-600">Trouvez rapidement vos documents par Client → Exercice → Risque</p>
-        </motion.div>
+          <p className="text-sm font-medium text-theme-secondary uppercase tracking-wider mb-1">Exploration</p>
+          <h1 className="text-3xl font-semibold text-theme-primary">Recherche avancée</h1>
+          <p className="text-sm text-theme-secondary mt-1">Client → Exercice → Risque → Documents</p>
+        </motion.header>
 
+        {/* Formulaire de recherche */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-2xl shadow-lg p-8 mb-8"
+          transition={{ delay: 0.05 }}
+          className="bg-theme-card border border-theme rounded-xl p-6 mb-8"
         >
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Critères de recherche</h2>
-          </div>
-
           <form onSubmit={gererRecherche} className="space-y-6">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 }}
-              className="border-l-4 pl-6 py-2"
-              style={{ borderColor: '#D32027' }}
-            >
-              <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                <span className="w-8 h-8 bg-gradient-to-br from-red-500 to-red-600 rounded-lg flex items-center justify-center text-white font-bold">1</span>
-                Client
+            {/* Client */}
+            <div>
+              <label className="block text-xs font-semibold text-theme-secondary uppercase tracking-wider mb-3">
+                1. Client
               </label>
               <input
                 type="text"
                 value={client}
                 onChange={(e) => setClient(e.target.value)}
-                placeholder="Nom du client..."
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                placeholder="Rechercher un client..."
+                className="w-full px-4 py-2.5 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 focus:ring-1 focus:ring-red-200 transition-all outline-none"
                 list="liste-clients"
               />
               <datalist id="liste-clients">
@@ -930,48 +963,42 @@ export default function PageRecherche() {
                 ))}
               </datalist>
               {clients.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs text-gray-500">
-                    <span>
-                      {clientsPagination.total} client
-                      {clientsPagination.total > 1 ? 's' : ''} trouvé
-                      {clientsPagination.total > 1 ? 's' : ''}
-                    </span>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-xs text-theme-secondary mb-2">
+                    <span>{clientsPagination.total} client{clientsPagination.total > 1 ? 's' : ''}</span>
                     {clientsPagination.totalPages > 1 && (
-                      <span>
-                        Page {clientsPagination.page} / {clientsPagination.totalPages}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPageClients((p) => Math.max(1, p - 1))}
+                          disabled={clientsPagination.page <= 1}
+                          className="px-2 py-1 text-xs rounded border border-theme hover:bg-theme-muted disabled:opacity-40"
+                        >
+                          ←
+                        </button>
+                        <span>{clientsPagination.page}/{clientsPagination.totalPages}</span>
+                        <button
+                          type="button"
+                          onClick={() => setPageClients((p) => Math.min(clientsPagination.totalPages, p + 1))}
+                          disabled={clientsPagination.page >= clientsPagination.totalPages}
+                          className="px-2 py-1 text-xs rounded border border-theme hover:bg-theme-muted disabled:opacity-40"
+                        >
+                          →
+                        </button>
+                      </div>
                     )}
                   </div>
-                  {clientsPagination.totalPages > 1 && (
-                    <div className="flex items-center justify-end gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setPageClients((p) => Math.max(1, p - 1))}
-                        disabled={clientsPagination.page <= 1}
-                        className="px-2 py-1 rounded-lg border border-gray-200 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                      >
-                        Précédent
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPageClients((p) => Math.min(clientsPagination.totalPages, p + 1))
-                        }
-                        disabled={clientsPagination.page >= clientsPagination.totalPages}
-                        className="px-2 py-1 rounded-lg border border-gray-200 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                      >
-                        Suivant
-                      </button>
-                    </div>
-                  )}
-                  <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-32 overflow-y-auto">
                     {clientsPagination.items.map((c) => (
                       <button
                         key={c.id}
                         type="button"
                         onClick={() => setClient(c.nom)}
-                        className="w-full text-left px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                        className={`text-left px-3 py-2 text-xs rounded-lg border transition-colors ${
+                          client === c.nom 
+                            ? 'border-red-400 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400' 
+                            : 'border-theme hover:bg-theme-muted'
+                        }`}
                       >
                         {c.nom}
                       </button>
@@ -979,249 +1006,202 @@ export default function PageRecherche() {
                   </div>
                 </div>
               )}
-            </motion.div>
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.3 }}
-              className="border-l-4 pl-6 py-2"
-              style={{ borderColor: '#0066B3' }}
-            >
-              <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                <span className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold">2</span>
-                Exercice (Année)
+            {/* Exercice */}
+            <div>
+              <label className="block text-xs font-semibold text-theme-secondary uppercase tracking-wider mb-3">
+                2. Exercice
               </label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="flex flex-wrap gap-2">
                 {(anneesOptions.length > 0 ? anneesOptions : anneesFallback()).map((annee) => (
-                  <motion.button
+                  <button
                     key={annee}
                     type="button"
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
                     onClick={() => setExercice(String(annee))}
-                    className={`py-3 px-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 ${
+                    className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
                       exercice === String(annee)
-                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 font-medium'
+                        : 'border-theme hover:bg-theme-muted text-theme-primary'
                     }`}
                   >
-                    <Icon name="calendar" size="sm" />
                     {annee}
-                  </motion.button>
+                  </button>
                 ))}
               </div>
-            </motion.div>
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.4 }}
-              className="border-l-4 pl-6 py-2"
-              style={{ borderColor: '#D32027' }}
-            >
-              <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                <span className="w-8 h-8 bg-gradient-to-br from-red-500 to-red-600 rounded-lg flex items-center justify-center text-white font-bold">3</span>
-                Type de Risque
+            {/* Type de Risque */}
+            <div>
+              <label className="block text-xs font-semibold text-theme-secondary uppercase tracking-wider mb-3">
+                3. Type de risque
               </label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="flex flex-wrap gap-2">
                 {typesRisque.map((type) => {
                   const isActif = risque === type
-                  const theme = type ? themeRisque(type) : DEFAULT_RISQUE_THEME
-
                   return (
-                    <motion.button
+                    <button
                       key={type || 'tous'}
                       type="button"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
                       onClick={() => setRisque(type)}
-                      className={`py-3 px-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
-                        isActif ? 'text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                        isActif
+                          ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 font-medium'
+                          : 'border-theme hover:bg-theme-muted text-theme-primary'
                       }`}
-                      style={isActif ? { backgroundColor: theme.badgeBg, color: theme.badgeText } : {}}
                     >
-                      <Icon name="shield" size="sm" />
-                      {type ? labelRisque(type) : 'Tous les risques'}
-                    </motion.button>
+                      {type ? labelRisque(type) : 'Tous'}
+                    </button>
                   )
                 })}
               </div>
-            </motion.div>
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.5 }}
-              className="border-l-4 pl-6 py-2"
-              style={{ borderColor: '#0066B3' }}
-            >
-              <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                <span className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold">4</span>
-                Type de Courrier
+            {/* Type de Courrier */}
+            <div>
+              <label className="block text-xs font-semibold text-theme-secondary uppercase tracking-wider mb-3">
+                4. Type de courrier
               </label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="flex flex-wrap gap-2">
                 {typesCourrier.slice(1).map((type) => {
                   const isActif = typeCourrier === type.value
-                  const theme = type.theme ?? DEFAULT_TYPE_COURRIER_THEME
-
                   return (
-                    <motion.button
+                    <button
                       key={type.value}
                       type="button"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() =>
-                        setTypeCourrier((courrierActuel) => (courrierActuel === type.value ? '' : type.value))
-                      }
-                      className={`py-3 px-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
-                        isActif ? 'text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      onClick={() => setTypeCourrier((courrierActuel) => (courrierActuel === type.value ? '' : type.value))}
+                      className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                        isActif
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 font-medium'
+                          : 'border-theme hover:bg-theme-muted text-theme-primary'
                       }`}
-                      style={isActif ? { backgroundColor: theme.badgeBg } : {}}
                     >
-                      <Icon name="email" size="sm" />
                       {type.label}
-                    </motion.button>
+                    </button>
                   )
                 })}
               </div>
-            </motion.div>
+            </div>
 
-            <div className="flex gap-4 pt-4">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+            {/* Boutons */}
+            <div className="flex gap-3 pt-4 border-t border-theme">
+              <button
                 type="submit"
-                className="flex-1 py-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
                 disabled={chargement}
+                className="flex-1 py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 <Icon name="search" size="sm" />
-                {chargement ? 'Recherche en cours...' : 'Rechercher'}
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                {chargement ? 'Recherche...' : 'Rechercher'}
+              </button>
+              <button
                 type="button"
                 onClick={reinitialiser}
-                className="px-8 py-4 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                className="px-6 py-2.5 text-sm text-theme-secondary hover:bg-theme-muted rounded-lg transition-colors"
               >
                 Réinitialiser
-              </motion.button>
+              </button>
             </div>
           </form>
         </motion.div>
 
         {afficherResultats && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
+          <motion.section
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-2xl shadow-lg p-8"
+            className="bg-theme-card border border-theme rounded-xl"
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <Icon name="folder" size="md" />
-                Résultats ({resultatsAffiches.length} document{resultatsAffiches.length > 1 ? 's' : ''})
+            <div className="flex items-center justify-between p-5 border-b border-theme">
+              <h2 className="text-sm font-semibold text-theme-primary">
+                {resultatsAffiches.length} résultat{resultatsAffiches.length > 1 ? 's' : ''}
               </h2>
             </div>
 
             {erreur ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="p-4 m-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm">
                 {erreur}
               </div>
             ) : resultatsAffiches.length === 0 ? (
-              <div className="text-center text-gray-500 py-10">Aucun document ne correspond aux critères sélectionnés.</div>
+              <div className="text-center text-theme-secondary py-12 text-sm">
+                Aucun document ne correspond aux critères sélectionnés.
+              </div>
             ) : (
-              <div className="space-y-4">
-                {erreurTelechargement ? (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="divide-y divide-theme">
+                {erreurTelechargement && (
+                  <div className="p-4 m-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm">
                     {erreurTelechargement}
                   </div>
-                ) : null}
+                )}
                 {resultatsAffiches.map((doc, index) => (
                   <motion.div
                     key={doc.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    whileHover={{ x: 5 }}
-                    className="border-2 border-gray-200 rounded-xl p-6 hover:border-red-300 hover:shadow-lg transition-all cursor-pointer"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: index * 0.03 }}
+                    className="p-4 hover:bg-theme-muted/50 transition-colors"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 text-sm text-gray-500 mb-3">
-                          <Icon name="folder" size="xs" />
-                          <span className="font-mono">{doc.chemin || 'Chemin indisponible'}</span>
-                        </div>
-
-                        <h3 className="font-bold text-xl text-gray-900 mb-3 hover:text-red-600 transition-colors">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-theme-secondary font-mono mb-1 truncate">
+                          {doc.chemin || '—'}
+                        </p>
+                        <h3 className="font-medium text-theme-primary text-sm mb-2">
                           {doc.titre}
                         </h3>
-
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span
-                            className="px-4 py-2 rounded-full font-semibold text-sm flex items-center gap-2"
-                            style={{ backgroundColor: doc.couleur, color: doc.risqueBadgeTextColor }}
-                          >
-                            <Icon name="shield" size="xs" />
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-theme-muted text-theme-secondary">
                             {doc.risqueLabel}
                           </span>
-                          <span
-                            className="px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2"
-                            style={{ backgroundColor: doc.typeCourrierBadgeBg, color: doc.typeCourrierBadgeText }}
-                          >
-                            <Icon name="email" size="xs" />
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-theme-muted text-theme-secondary">
                             {doc.typeCourrierLabel}
                           </span>
-                          <span className="px-4 py-2 bg-gray-100 text-gray-700 rounded-full text-sm font-medium flex items-center gap-2">
-                            <Icon name="tag" size="xs" />
-                            {doc.reference}
-                          </span>
-                          <span className="px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-medium flex items-center gap-2">
-                            <Icon name="calendar" size="xs" />
-                            {doc.date}
-                          </span>
-                          <span className="px-4 py-2 bg-purple-100 text-purple-700 rounded-full text-sm font-medium flex items-center gap-2">
-                            <Icon name="inbox" size="xs" />
-                            {doc.taille}
-                          </span>
-                          {doc.creeIlYA ? (
-                            <span className="px-4 py-2 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
-                              Ajouté {doc.creeIlYA}
-                            </span>
-                          ) : null}
+                          <span className="text-theme-secondary">{doc.reference}</span>
+                          <span className="text-theme-secondary">·</span>
+                          <span className="text-theme-secondary">{doc.date}</span>
+                          <span className="text-theme-secondary">·</span>
+                          <span className="text-theme-secondary">{doc.taille}</span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 ml-4">
-                        <motion.button 
-                          whileHover={{ scale: 1.2 }}
-                          className="p-3 hover:bg-gray-100 rounded-xl transition-colors" 
-                          title="Voir"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            ouvrirDansNouvelOnglet(doc)
-                          }}
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button 
+                          className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors" 
+                          title="Imprimer"
+                          onClick={(event) => { event.stopPropagation(); imprimerResultat(doc) }}
                         >
-                          <Icon name="eye" size="md" />
-                        </motion.button>
+                          <Icon name="print" size="sm" />
+                        </button>
+                        <button 
+                          className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors" 
+                          title="Voir"
+                          onClick={(event) => { event.stopPropagation(); ouvrirDansNouvelOnglet(doc) }}
+                        >
+                          <Icon name="eye" size="sm" />
+                        </button>
+                        <button 
+                          className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors" 
+                          title="Télécharger"
+                          onClick={(event) => { event.stopPropagation(); telechargerResultat(doc) }}
+                        >
+                          <Icon name="download" size="sm" />
+                        </button>
                       </div>
                     </div>
                   </motion.div>
                 ))}
               </div>
             )}
-          </motion.div>
+          </motion.section>
         )}
 
         {!afficherResultats && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center py-16 bg-white rounded-2xl shadow-lg"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center py-16 bg-theme-card border border-theme rounded-xl"
           >
-            <Icon name="search" size="xl" className="mx-auto mb-4 text-gray-400" />
-            <p className="text-xl font-semibold text-gray-700 mb-2">Utilisez les critères ci-dessus pour rechercher</p>
-            <p className="text-sm text-gray-500">Navigation: Client → Exercice → Risque → Documents</p>
+            <Icon name="search" size="lg" className="mx-auto mb-3 text-theme-secondary" />
+            <p className="text-sm font-medium text-theme-primary mb-1">Lancez une recherche</p>
+            <p className="text-xs text-theme-secondary">Utilisez les filtres ci-dessus pour trouver vos documents</p>
           </motion.div>
         )}
       </main>

@@ -1,15 +1,19 @@
 'use client'
 
-import { Navigation } from '@/components/Navigation'
+import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { apiFetchJson } from '@/lib/api'
+import { useRequireAuth } from '@/hooks/useRequireAuth'
 
 export default function PageNouveauDocument() {
+  // Tous les hooks doivent être appelés AVANT tout return conditionnel
+  const { estAuthentifie, chargement: authChargement } = useRequireAuth()
   const router = useRouter()
+
   const [etape, setEtape] = useState(1)
   const [fichiers, setFichiers] = useState<File[]>([])
   const [chargement, setChargement] = useState(false)
@@ -234,28 +238,38 @@ export default function PageNouveauDocument() {
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
   }
 
+  // Attendre la vérification d'authentification (après tous les hooks)
+  if (authChargement || !estAuthentifie) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-theme-base">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-theme-secondary text-sm">Vérification de l'authentification...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary">
-      <Navigation />
+    <div className="min-h-screen bg-theme-base text-theme-primary flex">
+      <Sidebar />
       
-      <main className="container mx-auto px-4 py-8">
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
+      <main className="flex-1 ml-64 p-10 overflow-auto">
+        {/* En-tête minimaliste */}
+        <motion.header 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           className="mb-8"
         >
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
-            <Icon name="upload" size="xl" className="text-red-600" />
-            Nouveau Document
-          </h1>
-          <p className="text-gray-600">Ajoutez un document à l'archive ACS</p>
-        </motion.div>
+          <p className="text-sm font-medium text-theme-secondary uppercase tracking-wider mb-1">Téléversement</p>
+          <h1 className="text-3xl font-semibold text-theme-primary">Nouveau document</h1>
+        </motion.header>
 
         {erreur && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm"
           >
             {erreur}
           </motion.div>
@@ -263,215 +277,196 @@ export default function PageNouveauDocument() {
 
         {messageSucces && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 text-green-700 dark:text-green-400 text-sm"
           >
             {messageSucces}
           </motion.div>
         )}
 
+        {/* Indicateur d'étapes */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
+          transition={{ delay: 0.05 }}
           className="mb-8"
         >
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-2">
             {[1, 2, 3].map((num) => (
               <div key={num} className="flex items-center">
-                <div className={`flex items-center justify-center w-12 h-12 rounded-full font-bold transition-all ${
+                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-all ${
                   etape >= num
-                    ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg scale-110'
-                    : 'bg-gray-200 text-gray-500'
+                    ? 'bg-red-600 text-white'
+                    : 'bg-theme-muted text-theme-secondary'
                 }`}>
                   {num}
                 </div>
                 {num < 3 && (
-                  <div className={`w-24 h-1 mx-2 transition-all ${
-                    etape > num ? 'bg-gradient-to-r from-red-500 to-blue-500' : 'bg-gray-200'
+                  <div className={`w-16 h-0.5 mx-2 transition-all ${
+                    etape > num ? 'bg-red-600' : 'bg-theme-muted'
                   }`} />
                 )}
               </div>
             ))}
           </div>
-          <div className="flex items-center justify-center gap-32 mt-3">
-            <span className={`text-sm font-medium ${etape === 1 ? 'text-red-600' : 'text-gray-500'}`}>Fichier</span>
-            <span className={`text-sm font-medium ${etape === 2 ? 'text-red-600' : 'text-gray-500'}`}>Informations</span>
-            <span className={`text-sm font-medium ${etape === 3 ? 'text-red-600' : 'text-gray-500'}`}>Validation</span>
+          <div className="flex items-center justify-center gap-16 mt-2">
+            <span className={`text-xs ${etape === 1 ? 'text-red-600 font-medium' : 'text-theme-secondary'}`}>Fichier</span>
+            <span className={`text-xs ${etape === 2 ? 'text-red-600 font-medium' : 'text-theme-secondary'}`}>Informations</span>
+            <span className={`text-xs ${etape === 3 ? 'text-red-600 font-medium' : 'text-theme-secondary'}`}>Validation</span>
           </div>
         </motion.div>
 
         <form onSubmit={soumettreFormulaire}>
           {etape === 1 && (
             <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="bg-white rounded-2xl shadow-lg p-8"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-theme-card border border-theme rounded-xl p-6"
             >
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Sélectionnez vos fichiers</h2>
+              <h2 className="text-sm font-semibold text-theme-primary mb-4">Sélectionnez vos fichiers</h2>
 
               <div
                 {...getRootProps()}
-                className={`border-4 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all ${
+                className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
                   isDragActive
-                    ? 'border-red-500 bg-red-50 scale-105'
-                    : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
+                    ? 'border-red-500 bg-red-50 dark:bg-red-900/10'
+                    : 'border-theme hover:border-red-300 hover:bg-theme-muted/50'
                 }`}
               >
                 <input {...getInputProps()} />
-                <motion.div
-                  animate={isDragActive ? { scale: 1.1 } : { scale: 1 }}
-                  className="mb-4"
-                >
-                  <Icon name="folder" size="xl" className="mx-auto text-gray-400" />
-                </motion.div>
+                <Icon name="upload" size="lg" className="mx-auto mb-3 text-theme-secondary" />
                 {isDragActive ? (
-                  <p className="text-xl font-semibold text-red-600">Déposez les fichiers ici...</p>
+                  <p className="text-sm font-medium text-red-600">Déposez les fichiers ici...</p>
                 ) : (
                   <>
-                    <p className="text-xl font-semibold text-gray-700 mb-2">
-                      Glissez-déposez vos fichiers ici
-                    </p>
-                    <p className="text-gray-500 mb-4">ou cliquez pour parcourir</p>
-                    <p className="text-sm text-gray-400">
-                      PDF, Word, Excel, Images (Max 10 MB par fichier)
-                    </p>
+                    <p className="text-sm font-medium text-theme-primary mb-1">Glissez-déposez vos fichiers</p>
+                    <p className="text-xs text-theme-secondary">ou cliquez pour parcourir</p>
+                    <p className="text-xs text-theme-secondary mt-2">PDF, Word, Excel, Images (Max 10 MB)</p>
                   </>
                 )}
               </div>
 
               {fichiers.length > 0 && (
-                <div className="mt-8">
-                  <h3 className="font-bold text-gray-900 mb-4">Fichiers sélectionnés ({fichiers.length})</h3>
-                  <div className="space-y-3">
+                <div className="mt-6">
+                  <h3 className="text-xs font-medium text-theme-secondary uppercase tracking-wider mb-3">
+                    {fichiers.length} fichier{fichiers.length > 1 ? 's' : ''} sélectionné{fichiers.length > 1 ? 's' : ''}
+                  </h3>
+                  <div className="space-y-2">
                     {fichiers.map((fichier, index) => (
-                      <motion.div
+                      <div
                         key={index}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border-2 border-gray-200 hover:border-red-300 transition-all"
+                        className="flex items-center justify-between p-3 bg-theme-muted/50 rounded-lg"
                       >
-                        <div className="flex items-center gap-4 flex-1">
-                          <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center text-white">
-                            <Icon name="document" size="md" />
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-9 h-9 bg-theme-muted rounded-lg flex items-center justify-center flex-shrink-0">
+                            <Icon name="document" size="sm" className="text-theme-secondary" />
                           </div>
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-900">{fichier.name}</p>
-                            <p className="text-sm text-gray-500">{formatTaille(fichier.size)}</p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-theme-primary truncate">{fichier.name}</p>
+                            <p className="text-xs text-theme-secondary">{formatTaille(fichier.size)}</p>
                           </div>
                         </div>
-                        <motion.button
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
+                        <button
                           type="button"
                           onClick={() => retirerFichier(index)}
-                          className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                          className="p-2 text-theme-secondary hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                         >
-                          <Icon name="trash" size="sm" className="text-red-600" />
-                        </motion.button>
-                      </motion.div>
+                          <Icon name="trash" size="sm" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              <div className="flex justify-end mt-8">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+              <div className="flex justify-end mt-6 pt-4 border-t border-theme">
+                <button
                   type="button"
                   onClick={() => setEtape(2)}
                   disabled={fichiers.length === 0}
-                  className="px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
                 >
                   Suivant
                   <Icon name="arrow-right" size="sm" />
-                </motion.button>
+                </button>
               </div>
             </motion.div>
           )}
 
           {etape === 2 && (
             <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="bg-white rounded-2xl shadow-lg p-8"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-theme-card border border-theme rounded-xl p-6"
             >
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Informations du document</h2>
+              <h2 className="text-sm font-semibold text-theme-primary mb-4">Informations du document</h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Titre du document *
-                  </label>
+                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Titre *</label>
                   <input
                     type="text"
                     value={titre}
                     onChange={(e) => setTitre(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
                     placeholder="Ex: Police Automobile 2025"
                     required
                   />
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Description</label>
+                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Description</label>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    rows={4}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    placeholder="Ajoutez une description (facultatif)"
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none resize-none"
+                    placeholder="Description optionnelle"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Client *</label>
+                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Client *</label>
                   <select
                     value={clientId}
                     onChange={(e) => setClientId(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
                     required
                     disabled={chargementClients}
                   >
-                    <option value="">Sélectionner un client</option>
+                    <option value="">Sélectionner</option>
                     {clients.map((client) => (
                       <option key={client.id} value={client.id}>{client.nom}</option>
                     ))}
                   </select>
                   {clients.length === 0 && !chargementClients && (
-                    <p className="text-xs text-amber-600 mt-1">
-                      Aucun client disponible. Vérifiez la base avant de téléverser un document.
-                    </p>
+                    <p className="text-xs text-amber-600 mt-1">Aucun client disponible</p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Exercice *</label>
+                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Exercice *</label>
                   <select
                     value={exerciceId}
                     onChange={(e) => setExerciceId(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
                     required
                     disabled={!clientId || chargementClients}
                   >
-                    <option value="">Sélectionner un exercice</option>
+                    <option value="">Sélectionner</option>
                     {exercicesDisponibles.map((exercice) => (
                       <option key={exercice.id} value={exercice.id}>{exercice.annee}</option>
                     ))}
                   </select>
                   {clientId && exercicesDisponibles.length === 0 && (
-                    <p className="text-xs text-amber-600 mt-1">
-                      Ce client ne possède aucun exercice. Créez-en un avant de poursuivre.
-                    </p>
+                    <p className="text-xs text-amber-600 mt-1">Aucun exercice disponible</p>
                   )}
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Type de courrier *</label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Type de courrier *</label>
+                  <div className="flex flex-wrap gap-2">
                     {courriers.map((option) => {
                       const actif = typeCourrier === option.value
                       return (
@@ -479,31 +474,29 @@ export default function PageNouveauDocument() {
                           key={option.value}
                           type="button"
                           onClick={() => setTypeCourrier(option.value)}
-                          className={`p-4 border-2 rounded-xl transition-all flex items-center gap-3 ${
-                            actif ? 'border-red-500 bg-red-50 text-red-600 shadow-md' : 'border-gray-200 hover:border-red-300'
+                          className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                            actif 
+                              ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 font-medium' 
+                              : 'border-theme hover:bg-theme-muted text-theme-primary'
                           }`}
                         >
-                          <Icon name={option.icon} size="sm" />
-                          <span className="font-semibold">{option.label}</span>
+                          {option.label}
                         </button>
                       )
                     })}
                   </div>
-                  {!typeCourrier && (
-                    <p className="text-xs text-gray-500 mt-1">Sélectionnez un type pour continuer.</p>
-                  )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Risque *</label>
+                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Risque *</label>
                   <select
                     value={risqueId}
                     onChange={(e) => setRisqueId(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
                     required
                     disabled={!exerciceId || chargementClients}
                   >
-                    <option value="">Sélectionner un risque</option>
+                    <option value="">Sélectionner</option>
                     {risquesDisponibles.map((risque) => (
                       <option key={risque.id} value={risque.id}>
                         {risque.type} {risque.numeroPolice ? `- ${risque.numeroPolice}` : ''}
@@ -511,145 +504,130 @@ export default function PageNouveauDocument() {
                     ))}
                   </select>
                   {exerciceId && risquesDisponibles.length === 0 && (
-                    <p className="text-xs text-amber-600 mt-1">
-                      Aucun risque trouvé pour cet exercice.
-                    </p>
+                    <p className="text-xs text-amber-600 mt-1">Aucun risque disponible</p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Référence</label>
+                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Référence</label>
                   <input
                     type="text"
                     value={reference}
                     onChange={(e) => setReference(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    placeholder="Ex: DOC-2025-001 (facultatif)"
+                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
+                    placeholder="Ex: DOC-2025-001"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-between mt-8">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+              <div className="flex justify-between mt-6 pt-4 border-t border-theme">
+                <button
                   type="button"
                   onClick={() => setEtape(1)}
-                  className="px-8 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors flex items-center gap-2"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm text-theme-secondary hover:bg-theme-muted rounded-lg transition-colors"
                 >
                   <Icon name="arrow-left" size="sm" />
                   Retour
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                </button>
+                <button
                   type="button"
                   onClick={() => setEtape(3)}
-                  disabled={
-                    !titre.trim() || !clientId || !exerciceId || !risqueId || !typeCourrier || chargementClients
-                  }
-                  className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-40 flex items-center gap-2"
+                  disabled={!titre.trim() || !clientId || !exerciceId || !risqueId || !typeCourrier || chargementClients}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
                 >
                   Continuer
                   <Icon name="arrow-right" size="sm" />
-                </motion.button>
+                </button>
               </div>
             </motion.div>
           )}
 
           {etape === 3 && (
             <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="bg-white rounded-2xl shadow-lg p-8"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-theme-card border border-theme rounded-xl p-6"
             >
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Validation finale</h2>
+              <h2 className="text-sm font-semibold text-theme-primary mb-4">Validation finale</h2>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100 rounded-xl p-6 mb-6 bg-gray-50">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 bg-theme-muted/50 rounded-lg mb-4">
                 <div>
-                  <p className="text-gray-500 text-sm">Titre</p>
-                  <p className="font-semibold text-gray-900">{titre || '-'}</p>
+                  <p className="text-xs text-theme-secondary">Titre</p>
+                  <p className="text-sm font-medium text-theme-primary">{titre || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-sm">Client</p>
-                  <p className="font-semibold text-gray-900">{clientSelectionne?.nom ?? '-'}</p>
+                  <p className="text-xs text-theme-secondary">Client</p>
+                  <p className="text-sm font-medium text-theme-primary">{clientSelectionne?.nom ?? '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-sm">Exercice</p>
-                  <p className="font-semibold text-gray-900">{exerciceSelectionne?.annee ?? '-'}</p>
+                  <p className="text-xs text-theme-secondary">Exercice</p>
+                  <p className="text-sm font-medium text-theme-primary">{exerciceSelectionne?.annee ?? '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-sm">Risque</p>
-                  <p className="font-semibold text-gray-900">{risqueSelectionne ? `${risqueSelectionne.type}${risqueSelectionne.numeroPolice ? ` - ${risqueSelectionne.numeroPolice}` : ''}` : '-'}</p>
+                  <p className="text-xs text-theme-secondary">Risque</p>
+                  <p className="text-sm font-medium text-theme-primary">{risqueSelectionne ? `${risqueSelectionne.type}${risqueSelectionne.numeroPolice ? ` - ${risqueSelectionne.numeroPolice}` : ''}` : '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-sm">Type de courrier</p>
-                  <p className="font-semibold text-gray-900">{typeCourrierSelectionne?.label ?? '-'}</p>
+                  <p className="text-xs text-theme-secondary">Type</p>
+                  <p className="text-sm font-medium text-theme-primary">{typeCourrierSelectionne?.label ?? '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-sm">Référence</p>
-                  <p className="font-semibold text-gray-900">{reference || '-'}</p>
+                  <p className="text-xs text-theme-secondary">Référence</p>
+                  <p className="text-sm font-medium text-theme-primary">{reference || '-'}</p>
                 </div>
               </div>
 
               {description && (
-                <div className="mb-6">
-                  <p className="text-gray-500 text-sm">Description</p>
-                  <p className="text-gray-900 whitespace-pre-wrap">{description}</p>
+                <div className="mb-4 p-3 bg-theme-muted/50 rounded-lg">
+                  <p className="text-xs text-theme-secondary mb-1">Description</p>
+                  <p className="text-sm text-theme-primary">{description}</p>
                 </div>
               )}
 
-              <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-6 mb-8">
-                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <Icon name="folder" size="sm" />
-                  Fichiers ({fichiers.length})
-                </h3>
+              <div className="mb-6">
+                <p className="text-xs font-medium text-theme-secondary uppercase tracking-wider mb-2">
+                  {fichiers.length} fichier{fichiers.length > 1 ? 's' : ''}
+                </p>
                 <div className="space-y-2">
                   {fichiers.map((fichier, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <Icon name="document" size="sm" className="text-red-600" />
-                        <div>
-                          <p className="font-medium text-gray-900">{fichier.name}</p>
-                          <p className="text-sm text-gray-500">{formatTaille(fichier.size)}</p>
-                        </div>
+                    <div key={index} className="flex items-center gap-3 p-3 bg-theme-muted/50 rounded-lg">
+                      <Icon name="document" size="sm" className="text-theme-secondary" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-theme-primary truncate">{fichier.name}</p>
+                        <p className="text-xs text-theme-secondary">{formatTaille(fichier.size)}</p>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="flex justify-between">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+              <div className="flex justify-between pt-4 border-t border-theme">
+                <button
                   type="button"
                   onClick={() => setEtape(2)}
                   disabled={chargement}
-                  className="px-8 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors flex items-center gap-2"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm text-theme-secondary hover:bg-theme-muted rounded-lg transition-colors"
                 >
                   <Icon name="arrow-left" size="sm" />
                   Retour
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                </button>
+                <button
                   type="submit"
                   disabled={chargement}
-                  className="px-8 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-40 flex items-center gap-2"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
                 >
                   {chargement ? (
                     <>
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Envoi en cours...
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Envoi...
                     </>
                   ) : (
                     <>
                       <Icon name="check" size="sm" />
-                      Valider et enregistrer
+                      Enregistrer
                     </>
                   )}
-                </motion.button>
+                </button>
               </div>
             </motion.div>
           )}

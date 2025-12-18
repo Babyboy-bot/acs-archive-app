@@ -2,10 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Navigation } from '@/components/Navigation'
+import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { apiFetchJson } from '@/lib/api'
 import { useEnforceNonConsultant } from '@/hooks/useEnforceNonConsultant'
+import { useRequireAuth } from '@/hooks/useRequireAuth'
+import { useTheme } from '@/hooks/useTheme'
+import { ConfirmModal } from '@/components/ui/ConfirmModal'
+import { FormModal } from '@/components/ui/FormModal'
 
 type ClientType = 'ENTREPRISE' | 'PARTICULIER'
 
@@ -109,15 +113,7 @@ const SUGGESTIONS_RISQUES = [
   'Transport facultés',
   'Voyage',
   'Caution',
-  'Tous risques chantier',
-  'Assistance frais funéraires',
-  'Frais funéraires',
-  'Globale banque',
-  'Assurance des stocks',
-  'Prévoyance collective',
-  'Prévoyance entreprise',
-  'Multirisque bureau',
-  'Vol et détournements'
+  'Tous risques chantier'
 ]
 
 const CLIENTS_PAR_PAGE = 50
@@ -151,10 +147,13 @@ function mapClient(client: ClientDRF): ClientAPI {
 }
 
 export default function PageClients() {
+  // Tous les hooks doivent être appelés AVANT tout return conditionnel
+  const { estAuthentifie, chargement: authChargement } = useRequireAuth()
   useEnforceNonConsultant()
+  const { isDark } = useTheme()
+
   const [clients, setClients] = useState<ClientAPI[]>([])
   const [entreprises, setEntreprises] = useState<{ id: string; nom: string }[]>([])
-  const [rechercheEntrepriseRattachee, setRechercheEntrepriseRattachee] = useState('')
   const [chargement, setChargement] = useState(true)
   const [erreur, setErreur] = useState('')
   const [messageSucces, setMessageSucces] = useState('')
@@ -183,25 +182,43 @@ export default function PageClients() {
   const [risquesSelectionnes, setRisquesSelectionnes] = useState<NouveauRisqueSelection[]>([])
   const [chargementRisque, setChargementRisque] = useState(false)
 
-  const chargerEntreprises = async () => {
-    try {
-      const { response, data } = await apiFetchJson('/clients/?type=ENTREPRISE&simple=1&ordering=nom')
-      if (!response.ok) {
-        return
-      }
-      const bruts = Array.isArray(data)
-        ? data
-        : Array.isArray((data as any)?.results)
-          ? (data as any).results
-          : []
-      const normalises = bruts.map((client: any) => ({ id: client.id as string, nom: client.nom as string }))
-      setEntreprises(normalises)
-    } catch (error) {
-      console.error('Erreur chargement entreprises:', error)
-    }
-  }
+  // États pour les modales de confirmation
+  const [modaleSuppressionClient, setModaleSuppressionClient] = useState<{ open: boolean; client: ClientAPI | null }>({
+    open: false,
+    client: null
+  })
+  const [modaleSuppressionExercice, setModaleSuppressionExercice] = useState<{ open: boolean; client: ClientAPI | null; exercice: ExerciceResume | null }>({
+    open: false,
+    client: null,
+    exercice: null
+  })
+
+  // État pour la modale détail exercice
+  const [modaleDetailExercice, setModaleDetailExercice] = useState<{ open: boolean; client: ClientAPI | null; exercice: ExerciceResume | null }>({
+    open: false,
+    client: null,
+    exercice: null
+  })
 
   useEffect(() => {
+    const chargerEntreprises = async () => {
+      try {
+        const { response, data } = await apiFetchJson('/clients/?type=ENTREPRISE')
+        if (!response.ok) {
+          return
+        }
+        const bruts = Array.isArray(data)
+          ? data
+          : Array.isArray((data as any)?.results)
+            ? (data as any).results
+            : []
+        const normalises = bruts.map((client: any) => ({ id: client.id as string, nom: client.nom as string }))
+        setEntreprises(normalises)
+      } catch (error) {
+        console.error('Erreur chargement entreprises:', error)
+      }
+    }
+
     chargerEntreprises()
   }, [])
 
@@ -399,9 +416,20 @@ export default function PageClients() {
     }
   }
 
-  const supprimerExercice = async (client: ClientAPI, exercice: ExerciceResume) => {
-    const confirmation = window.confirm(`Supprimer l'exercice ${exercice.annee} pour ${client.nom} ?`)
-    if (!confirmation) return
+  const ouvrirModaleSuppressionExercice = (client: ClientAPI, exercice: ExerciceResume) => {
+    // Fermer d'abord la modale de détail d'exercice
+    setModaleDetailExercice({ open: false, client: null, exercice: null })
+    // Puis ouvrir la modale de confirmation
+    setModaleSuppressionExercice({ open: true, client, exercice })
+  }
+
+  const fermerModaleSuppressionExercice = () => {
+    setModaleSuppressionExercice({ open: false, client: null, exercice: null })
+  }
+
+  const confirmerSuppressionExercice = async () => {
+    const { client, exercice } = modaleSuppressionExercice
+    if (!client || !exercice) return
 
     setSuppressionExerciceEnCours(exercice.id)
     setErreur('')
@@ -430,6 +458,7 @@ export default function PageClients() {
       setErreur(error?.message || "Impossible de supprimer l'exercice.")
     } finally {
       setSuppressionExerciceEnCours(null)
+      fermerModaleSuppressionExercice()
     }
   }
 
@@ -444,21 +473,12 @@ export default function PageClients() {
       if (typeParam) params.append('type', typeParam)
       params.append('simple', '1')
       params.append('ordering', 'nom')
-      
+
       const url = `/clients/?${params.toString()}`
-      
+
       const { response, data } = await apiFetchJson(url)
       if (!response.ok) {
-        const message = (data as any)?.detail as string | undefined
-
-        // Cas courant : utilisateur non authentifié
-        if (response.status === 401) {
-          console.warn('Chargement des clients non autorisé (401):', message || 'Unauthorized')
-          setErreur(message || 'Vous devez être connecté pour voir les clients.')
-          return
-        }
-
-        throw new Error(message || 'Impossible de charger les clients')
+        throw new Error((data as any)?.detail || 'Impossible de charger les clients')
       }
       const bruts: ClientDRF[] = Array.isArray(data)
         ? data
@@ -485,15 +505,7 @@ export default function PageClients() {
     try {
       const { response, data } = await apiFetchJson(`/exercices/?client=${clientId}`)
       if (!response.ok) {
-        const message = (data as any)?.detail as string | undefined
-
-        if (response.status === 401) {
-          console.warn('Chargement des exercices non autorisé (401):', message || 'Unauthorized')
-          setErreur(message || 'Vous devez être connecté pour voir les exercices du client.')
-          return
-        }
-
-        throw new Error(message || 'Impossible de charger les exercices du client')
+        throw new Error((data as any)?.detail || 'Impossible de charger les exercices du client')
       }
 
       const bruts: any[] = Array.isArray(data)
@@ -508,13 +520,13 @@ export default function PageClients() {
         statut: (exercice.statut as string) ?? 'ACTIF',
         risques: Array.isArray(exercice.risques)
           ? exercice.risques.map((risque: any) => ({
-              id: risque.id as string,
-              type: (risque.type as string) ?? '',
-              numeroPolice:
-                (risque.numeroPolice as string | null) ??
-                (risque.numero_police as string | null) ??
-                null,
-            }))
+            id: risque.id as string,
+            type: (risque.type as string) ?? '',
+            numeroPolice:
+              (risque.numeroPolice as string | null) ??
+              (risque.numero_police as string | null) ??
+              null,
+          }))
           : [],
       }))
 
@@ -522,9 +534,9 @@ export default function PageClients() {
         precedent.map((client) =>
           client.id === clientId
             ? {
-                ...client,
-                exercices,
-              }
+              ...client,
+              exercices,
+            }
             : client,
         ),
       )
@@ -572,14 +584,6 @@ export default function PageClients() {
     return clients
   }, [clients])
 
-  const entreprisesFiltrees = useMemo(
-    () =>
-      entreprises.filter((entreprise) =>
-        entreprise.nom.toLowerCase().includes(rechercheEntrepriseRattachee.toLowerCase()),
-      ),
-    [entreprises, rechercheEntrepriseRattachee],
-  )
-
   const clientsPagination = useMemo(() => {
     const total = clientsFiltres.length
     const totalPages = Math.max(1, Math.ceil(total / CLIENTS_PAR_PAGE))
@@ -605,8 +609,6 @@ export default function PageClients() {
     }
 
     setSoumissionEnCours(true)
-
-    const typeClient = formulaire.type
 
     const payload = {
       nom: formulaire.nom.trim(),
@@ -637,9 +639,6 @@ export default function PageClients() {
       }
 
       await chargerClients(recherche, typeFiltre)
-      if (typeClient === 'ENTREPRISE') {
-        await chargerEntreprises()
-      }
       const clientReponse = (data as any).client as ClientDRF | undefined
       const nomClient = clientReponse?.nom ?? formulaire.nom.trim()
       setMessageSucces(`Client ${nomClient} ${estEdition ? 'mis à jour' : 'créé'} avec succès.`)
@@ -776,19 +775,24 @@ export default function PageClients() {
     }
   }
 
-  const supprimerClient = async (id: string) => {
-    const client = clients.find((c) => c.id === id)
+  const ouvrirModaleSuppressionClient = (client: ClientAPI) => {
+    setModaleSuppressionClient({ open: true, client })
+  }
+
+  const fermerModaleSuppressionClient = () => {
+    setModaleSuppressionClient({ open: false, client: null })
+  }
+
+  const confirmerSuppressionClient = async () => {
+    const { client } = modaleSuppressionClient
     if (!client) return
 
-    const confirmation = window.confirm(`Supprimer le client "${client.nom}" ?`)
-    if (!confirmation) return
-
-    setSuppressionEnCours(id)
+    setSuppressionEnCours(client.id)
     setErreur('')
     setMessageSucces('')
 
     try {
-      const { response, data } = await apiFetchJson(`/clients/${id}/`, {
+      const { response, data } = await apiFetchJson(`/clients/${client.id}/`, {
         method: 'DELETE'
       })
 
@@ -798,7 +802,7 @@ export default function PageClients() {
 
       await chargerClients(recherche, typeFiltre)
       setMessageSucces((data as any)?.message || 'Client supprimé avec succès.')
-      if (clientEdite?.id === id) {
+      if (clientEdite?.id === client.id) {
         fermerFormulaire()
       }
     } catch (error: any) {
@@ -806,35 +810,58 @@ export default function PageClients() {
       setErreur(error?.message || 'Impossible de supprimer le client.')
     } finally {
       setSuppressionEnCours(null)
+      fermerModaleSuppressionClient()
     }
   }
 
-  return (
-    <div className="min-h-screen bg-theme-base text-theme-primary">
-      <Navigation />
+  // Attendre la vérification d'authentification (après tous les hooks)
+  if (authChargement || !estAuthentifie) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-theme-base">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-theme-secondary text-sm">Vérification de l'authentification...</p>
+        </div>
+      </div>
+    )
+  }
 
-      <main className="container mx-auto px-4 py-8">
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
+  return (
+    <div className="min-h-screen bg-theme-base text-theme-primary flex">
+      <Sidebar />
+
+      <main className="flex-1 ml-64 p-10 overflow-auto">
+        {/* En-tête minimaliste */}
+        <motion.header
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           className="mb-8"
         >
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-blue-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
-                <Icon name="building" size="xl" className="text-red-600" />
-                Clients
-              </h1>
-              <p className="text-gray-600">Gérez les clients et préparez vos téléversements de documents.</p>
+              <p className="text-sm font-medium text-theme-secondary uppercase tracking-wider mb-1">Gestion</p>
+              <h1 className="text-3xl font-semibold text-theme-primary">Clients</h1>
+              <p className="text-sm text-theme-secondary mt-1">{clientsFiltres.length} client{clientsFiltres.length > 1 ? 's' : ''}</p>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                reinitialiserFormulaire()
+                setAfficherFormulaire(true)
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+            >
+              <Icon name="plus" size="sm" />
+              Nouveau client
+            </button>
           </div>
-        </motion.div>
+        </motion.header>
 
         {erreur && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm"
           >
             {erreur}
           </motion.div>
@@ -842,658 +869,621 @@ export default function PageClients() {
 
         {messageSucces && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 text-green-700 dark:text-green-400 text-sm"
           >
             {messageSucces}
           </motion.div>
         )}
 
+        {/* Barre de filtres */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-2xl shadow-lg p-6 mb-6"
+          transition={{ delay: 0.05 }}
+          className="mb-6 flex flex-col md:flex-row gap-3"
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="relative">
-              <input
-                type="text"
-                value={recherche}
-                onChange={(e) => setRecherche(e.target.value)}
-                placeholder="Rechercher un client..."
-                className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-              />
-              <div className="absolute left-4 top-1/2 -translate-y-1/2">
-                <Icon name="search" className="text-gray-400" />
-              </div>
-            </div>
-
-            <select
-              value={typeFiltre}
-              onChange={(e) => setTypeFiltre(e.target.value as ClientType | '')}
-              className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none"
-            >
-              <option value="">Tous les types</option>
-              {TYPES_CLIENT.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-
-            <div className="md:col-span-1 flex justify-end">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                type="button"
-                onClick={() => {
-                  if (afficherFormulaire) {
-                    fermerFormulaire()
-                  } else {
-                    reinitialiserFormulaire()
-                    setAfficherFormulaire(true)
-                  }
-                }}
-                className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-              >
-                <Icon name="plus" size="sm" />
-                {afficherFormulaire ? 'Fermer le formulaire' : 'Nouveau client'}
-              </motion.button>
-            </div>
+          <div className="flex-1 relative">
+            <Icon name="search" size="sm" className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary" />
+            <input
+              type="text"
+              value={recherche}
+              onChange={(e) => setRecherche(e.target.value)}
+              placeholder="Rechercher..."
+              className="w-full pl-10 pr-4 py-2.5 text-sm bg-theme-card border border-theme rounded-lg focus:border-red-400 focus:ring-1 focus:ring-red-200 transition-all outline-none"
+            />
           </div>
+
+          <select
+            value={typeFiltre}
+            onChange={(e) => setTypeFiltre(e.target.value as ClientType | '')}
+            className="px-4 py-2.5 text-sm bg-theme-card border border-theme rounded-lg focus:border-blue-400 outline-none min-w-[160px]"
+          >
+            <option value="">Tous les types</option>
+            {TYPES_CLIENT.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
         </motion.div>
 
         <div className="flex flex-col lg:flex-row gap-6 items-start">
-          {afficherFormulaire && (
-            <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="w-full lg:w-96 bg-white rounded-2xl shadow-lg p-6"
-            >
-              <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <Icon name={clientEdite ? 'edit' : 'plus'} size="sm" />
-                {clientEdite ? 'Modifier le client' : 'Nouveau client'}
-              </h2>
-
-              <form className="space-y-4" onSubmit={soumettreFormulaire}>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Nom *</label>
-                  <input
-                    type="text"
-                    value={formulaire.nom}
-                    onChange={(e) => setFormulaire((prev) => ({ ...prev, nom: e.target.value }))}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    placeholder="Nom du client"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Numéro client</label>
-                  <input
-                    type="text"
-                    value={formulaire.numeroClient}
-                    onChange={(e) => setFormulaire((prev) => ({ ...prev, numeroClient: e.target.value }))}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    placeholder="Référence interne (facultatif)"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Type *</label>
-                  <select
-                    value={formulaire.type}
-                    onChange={(e) => setFormulaire((prev) => ({ ...prev, type: e.target.value as ClientType }))}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    required
-                  >
-                    {TYPES_CLIENT.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {formulaire.type === 'PARTICULIER' && (
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Entreprise rattachée</label>
-                    <select
-                      value={formulaire.entrepriseId ?? ''}
-                      onChange={(e) => setFormulaire((prev) => ({ ...prev, entrepriseId: e.target.value }))}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    >
-                      <option value="">Aucune (particulier indépendant)</option>
-                      {entreprises.map((entreprise) => (
-                        <option key={entreprise.id} value={entreprise.id}>
-                          {entreprise.nom}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
-                  <input
-                    type="email"
-                    value={formulaire.email}
-                    onChange={(e) => setFormulaire((prev) => ({ ...prev, email: e.target.value }))}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    placeholder="contact@exemple.com"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Téléphone</label>
-                  <input
-                    type="text"
-                    value={formulaire.telephone}
-                    onChange={(e) => setFormulaire((prev) => ({ ...prev, telephone: e.target.value }))}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    placeholder="(+225) 00 00 00 00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Adresse</label>
-                  <textarea
-                    value={formulaire.adresse}
-                    onChange={(e) => setFormulaire((prev) => ({ ...prev, adresse: e.target.value }))}
-                    rows={3}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                    placeholder="Adresse complète"
-                  />
-                </div>
-
-                <div className="flex gap-3">
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    type="submit"
-                    disabled={soumissionEnCours}
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-60"
-                  >
-                    {soumissionEnCours ? 'Enregistrement...' : clientEdite ? 'Mettre à jour' : 'Créer'}
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    type="button"
-                    onClick={fermerFormulaire}
-                    className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
-                  >
-                    Annuler
-                  </motion.button>
-                </div>
-              </form>
-            </motion.div>
-          )}
-
-          <motion.div
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex-1 w-full"
-          >
+          <div className="flex-1 w-full">
             {chargement ? (
-              <div className="bg-white rounded-2xl shadow-lg p-10 text-center text-gray-500">
+              <div className="bg-theme-card border border-theme rounded-xl p-12 text-center text-theme-secondary text-sm">
                 Chargement des clients...
               </div>
             ) : clientsFiltres.length === 0 ? (
-              <div className="bg-white rounded-2xl shadow-lg p-10 text-center text-gray-500">
+              <div className="bg-theme-card border border-theme rounded-xl p-12 text-center text-theme-secondary text-sm">
                 Aucun client ne correspond à votre recherche.
               </div>
             ) : (
               <div>
-                {/* Afficher le nombre de résultats */}
-                <div className="mb-4 flex items-center justify-between text-sm text-gray-600">
-                  <span>
-                    {clientsPagination.total} client
-                    {clientsPagination.total > 1 ? 's' : ''} trouvé
-                    {clientsPagination.total > 1 ? 's' : ''}
-                  </span>
-                  {clientsPagination.totalPages > 1 && (
-                    <span>
-                      Page {clientsPagination.page} / {clientsPagination.totalPages}
-                    </span>
-                  )}
-                </div>
-
+                {/* Pagination */}
                 {clientsPagination.totalPages > 1 && (
-                  <div className="mb-4 flex items-center justify-end gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setPageClients((prev) => Math.max(1, prev - 1))}
-                      disabled={clientsPagination.page <= 1}
-                      className="px-3 py-1 rounded-lg border border-gray-200 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                    >
-                      Précédent
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPageClients((prev) =>
-                          Math.min(clientsPagination.totalPages, prev + 1)
-                        )
-                      }
-                      disabled={clientsPagination.page >= clientsPagination.totalPages}
-                      className="px-3 py-1 rounded-lg border border-gray-200 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                    >
-                      Suivant
-                    </button>
+                  <div className="mb-4 flex items-center justify-between text-xs text-theme-secondary">
+                    <span>Page {clientsPagination.page}/{clientsPagination.totalPages}</span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPageClients((prev) => Math.max(1, prev - 1))}
+                        disabled={clientsPagination.page <= 1}
+                        className="px-2 py-1 rounded border border-theme hover:bg-theme-muted disabled:opacity-40"
+                      >
+                        ←
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPageClients((prev) => Math.min(clientsPagination.totalPages, prev + 1))}
+                        disabled={clientsPagination.page >= clientsPagination.totalPages}
+                        className="px-2 py-1 rounded border border-theme hover:bg-theme-muted disabled:opacity-40"
+                      >
+                        →
+                      </button>
+                    </div>
                   </div>
                 )}
 
-                <div className="flex flex-wrap gap-6 items-start">
-                  {clientsPagination.items.map((client) => (
-                  <motion.div
-                    key={client.id}
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="w-full md:w-1/2 xl:w-1/3 bg-white rounded-2xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-shadow"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-                          <Icon name="building" size="sm" className="text-red-500" />
-                          {client.nom}
-                        </h3>
-                        <p className="text-sm text-gray-500 mt-1">
-                          {client.numeroClient ? `Réf. ${client.numeroClient}` : 'Aucune référence'}
-                        </p>
-                        <p className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-50 text-red-600 text-sm font-medium">
-                          <Icon name={client.type === 'ENTREPRISE' ? 'building' : 'user'} size="xs" />
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {clientsPagination.items.map((client, index) => (
+                    <motion.div
+                      key={client.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: index * 0.02 }}
+                      className="bg-theme-card border border-theme rounded-xl p-5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-medium text-theme-primary text-sm truncate">{client.nom}</h3>
+                          <p className="text-xs text-theme-secondary mt-0.5">
+                            {client.numeroClient || '—'}
+                          </p>
+                        </div>
+                        <span className={`text-xs px-2 py-1 rounded ${client.type === 'ENTREPRISE' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600' : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600'}`}>
                           {client.type === 'ENTREPRISE' ? 'Entreprise' : 'Particulier'}
-                        </p>
-                        {client.type === 'PARTICULIER' && client.entrepriseNom && (
-                          <p className="mt-2 text-xs text-gray-600 flex items-center gap-2">
-                            <Icon name="building" size="xs" />
-                            <span>Entreprise : {client.entrepriseNom}</span>
-                          </p>
-                        )}
-                        {client.type === 'ENTREPRISE' && client.nombrePersonnesRattachees > 0 && (
-                          <p className="mt-2 text-xs text-gray-600 flex items-center gap-2">
-                            <Icon name="users" size="xs" />
-                            <span>
-                              {client.nombrePersonnesRattachees} personne
-                              {client.nombrePersonnesRattachees > 1 ? 's' : ''} rattachée
-                              {client.nombrePersonnesRattachees > 1 ? 's' : ''}
-                            </span>
-                          </p>
-                        )}
+                        </span>
                       </div>
 
-                      <div className="flex flex-col items-end gap-2">
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
+                      {client.type === 'PARTICULIER' && client.entrepriseNom && (
+                        <p className="text-xs text-theme-secondary mb-2">→ {client.entrepriseNom}</p>
+                      )}
+                      {client.type === 'ENTREPRISE' && client.nombrePersonnesRattachees > 0 && (
+                        <p className="text-xs text-theme-secondary mb-2">{client.nombrePersonnesRattachees} personne{client.nombrePersonnesRattachees > 1 ? 's' : ''}</p>
+                      )}
+
+                      <div className="flex items-center gap-1 pt-3 border-t border-theme">
+                        <button
                           type="button"
                           onClick={() => ouvrirFormulaireExercice(client)}
-                          className={`px-3 py-2 rounded-lg font-semibold transition-colors flex items-center gap-1 ${
-                            clientExerciceId === client.id
-                              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              : 'bg-green-50 text-green-600 hover:bg-green-100'
-                          }`}
+                          className={`p-2 rounded-lg transition-colors ${clientExerciceId === client.id ? 'bg-theme-muted text-theme-primary' : 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'}`}
+                          title="Nouvel exercice"
                         >
-                          <Icon name="calendar" size="xs" />
-                          {clientExerciceId === client.id ? 'Annuler' : 'Nouvel exercice'}
-                        </motion.button>
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
+                          <Icon name="calendar" size="sm" />
+                        </button>
+                        <button
                           type="button"
                           onClick={() => editerClient(client)}
-                          className="px-3 py-2 rounded-lg bg-blue-50 text-blue-600 font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1"
+                          className="p-2 text-theme-secondary hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                          title="Modifier"
                         >
-                          <Icon name="edit" size="xs" />
-                          Modifier
-                        </motion.button>
-
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
+                          <Icon name="edit" size="sm" />
+                        </button>
+                        <button
                           type="button"
-                          onClick={() => supprimerClient(client.id)}
+                          onClick={() => ouvrirModaleSuppressionClient(client)}
                           disabled={suppressionEnCours === client.id}
-                          className="px-3 py-2 rounded-lg bg-red-50 text-red-600 font-semibold hover:bg-red-100 transition-colors flex items-center gap-1 disabled:opacity-60"
+                          className="p-2 text-theme-secondary hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-40 ml-auto"
+                          title="Supprimer"
                         >
-                          <Icon name="trash" size="xs" />
-                          {suppressionEnCours === client.id ? 'Suppression...' : 'Supprimer'}
-                        </motion.button>
+                          <Icon name="trash" size="sm" />
+                        </button>
                       </div>
-                    </div>
 
-                    {clientExerciceId === client.id && (
-                      <motion.form
-                        initial={{ opacity: 0, y: -8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mt-4 border border-green-100 rounded-2xl bg-green-50 p-4"
-                        onSubmit={soumettreNouvelExercice}
-                      >
-                        <p className="text-sm text-green-800 mb-3 flex items-start gap-2">
-                          <Icon name="info" size="xs" className="mt-0.5" />
-                          {exerciceEdite ? (
-                            <span>
-                              Mettre à jour le statut de l’exercice <strong>{exerciceEdite.annee}</strong>. Sélectionnez le nouveau statut puis validez.
-                            </span>
-                          ) : (
-                            <span>
-                              Saisissez l’année fiscale (à partir de {ANNEE_MIN_EXERCICE}) et le statut souhaité. Les archivistes peuvent créer plusieurs années à l’avance.
-                            </span>
-                          )}
-                        </p>
+                      {clientExerciceId === client.id && (
+                        <motion.form
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="mt-4 border border-green-100 rounded-2xl bg-green-50 p-4"
+                          onSubmit={soumettreNouvelExercice}
+                        >
+                          <p className="text-sm text-green-800 mb-3 flex items-start gap-2">
+                            <Icon name="info" size="xs" className="mt-0.5" />
+                            {exerciceEdite ? (
+                              <span>
+                                Mettre à jour le statut de l’exercice <strong>{exerciceEdite.annee}</strong>. Sélectionnez le nouveau statut puis validez.
+                              </span>
+                            ) : (
+                              <span>
+                                Saisissez l’année fiscale (à partir de {ANNEE_MIN_EXERCICE}) et le statut souhaité. Les archivistes peuvent créer plusieurs années à l’avance.
+                              </span>
+                            )}
+                          </p>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-green-900 mb-1">Année *</label>
-                            <input
-                              type="number"
-                              min={ANNEE_MIN_EXERCICE}
-                              value={anneeExercice}
-                              readOnly={Boolean(exerciceEdite)}
-                              disabled={Boolean(exerciceEdite)}
-                              onChange={(e) => setAnneeExercice(e.target.value)}
-                              className={`w-full px-4 py-2 border-2 rounded-xl text-sm ${
-                                exerciceEdite
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-green-900 mb-1">Année *</label>
+                              <input
+                                type="number"
+                                min={ANNEE_MIN_EXERCICE}
+                                value={anneeExercice}
+                                readOnly={Boolean(exerciceEdite)}
+                                disabled={Boolean(exerciceEdite)}
+                                onChange={(e) => setAnneeExercice(e.target.value)}
+                                className={`w-full px-4 py-2 border-2 rounded-xl text-sm ${exerciceEdite
                                   ? 'border-green-200 bg-green-100 text-green-900 cursor-not-allowed'
                                   : 'border-green-200 focus:border-green-500 focus:ring-2 focus:ring-green-200'
-                              }`}
-                              placeholder="2025"
-                            />
+                                  }`}
+                                placeholder="2025"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-green-900 mb-1">Statut *</label>
+                              <select
+                                value={statutExercice}
+                                onChange={(e) => setStatutExercice(e.target.value as StatutExercice)}
+                                className="w-full px-4 py-2 border-2 border-green-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-200 text-sm"
+                              >
+                                {STATUTS_EXERCICE.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
 
-                          <div>
-                            <label className="block text-xs font-semibold text-green-900 mb-1">Statut *</label>
-                            <select
-                              value={statutExercice}
-                              onChange={(e) => setStatutExercice(e.target.value as StatutExercice)}
-                              className="w-full px-4 py-2 border-2 border-green-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-200 text-sm"
+                          <div className="flex justify-end gap-3 mt-4">
+                            <motion.button
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              type="button"
+                              onClick={fermerFormulaireExercice}
+                              className="px-4 py-2 bg-white text-gray-600 rounded-xl font-semibold hover:bg-gray-100"
                             >
-                              {STATUTS_EXERCICE.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                              Annuler
+                            </motion.button>
+                            <motion.button
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              type="submit"
+                              disabled={chargementExercice}
+                              className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50"
+                            >
+                              {chargementExercice
+                                ? exerciceEdite
+                                  ? 'Mise à jour...'
+                                  : 'Création...'
+                                : exerciceEdite
+                                  ? 'Mettre à jour le statut'
+                                  : 'Ajouter cet exercice'}
+                            </motion.button>
                           </div>
-                        </div>
+                        </motion.form>
+                      )}
 
-                        <div className="flex justify-end gap-3 mt-4">
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            type="button"
-                            onClick={fermerFormulaireExercice}
-                            className="px-4 py-2 bg-white text-gray-600 rounded-xl font-semibold hover:bg-gray-100"
-                          >
-                            Annuler
-                          </motion.button>
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            type="submit"
-                            disabled={chargementExercice}
-                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-semibold shadow-lg disabled:opacity-50"
-                          >
-                            {chargementExercice
-                              ? exerciceEdite
-                                ? 'Mise à jour...'
-                                : 'Création...'
-                              : exerciceEdite
-                                ? 'Mettre à jour le statut'
-                                : 'Ajouter cet exercice'}
-                          </motion.button>
-                        </div>
-                      </motion.form>
-                    )}
+                      {client.email && (
+                        <p className="mt-3 text-sm text-gray-600 flex items-center gap-2">
+                          <Icon name="email" size="xs" />
+                          {client.email}
+                        </p>
+                      )}
 
-                    {client.email && (
-                      <p className="mt-3 text-sm text-gray-600 flex items-center gap-2">
-                        <Icon name="email" size="xs" />
-                        {client.email}
-                      </p>
-                    )}
+                      {client.telephone && (
+                        <p className="mt-1 text-sm text-gray-600 flex items-center gap-2">
+                          <Icon name="phone" size="xs" />
+                          {client.telephone}
+                        </p>
+                      )}
 
-                    {client.telephone && (
-                      <p className="mt-1 text-sm text-gray-600 flex items-center gap-2">
-                        <Icon name="phone" size="xs" />
-                        {client.telephone}
-                      </p>
-                    )}
+                      {client.adresse && (
+                        <p className="mt-1 text-sm text-gray-600 flex items-start gap-2">
+                          <Icon name="home" size="xs" className="mt-0.5" />
+                          {client.adresse}
+                        </p>
+                      )}
 
-                    {client.adresse && (
-                      <p className="mt-1 text-sm text-gray-600 flex items-start gap-2">
-                        <Icon name="home" size="xs" className="mt-0.5" />
-                        {client.adresse}
-                      </p>
-                    )}
+                      <div className="border-t border-gray-100 pt-4 mt-4">
+                        <h4 className="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-2">
+                          <Icon name="calendar" size="xs" />
+                          Exercices ({client.exercices.length})
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const prochain = clientOuvertId === client.id ? null : client.id
+                            setClientOuvertId(prochain)
+                            if (prochain && !clientsExercicesCharges[client.id]) {
+                              await chargerExercicesClient(client.id)
+                            }
+                          }}
+                          className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700"
+                        >
+                          <Icon
+                            name="chevron-right"
+                            size="xs"
+                            className={`transform transition-transform ${clientOuvertId === client.id ? 'rotate-90' : ''
+                              }`}
+                          />
+                          <span>
+                            {clientOuvertId === client.id
+                              ? 'Masquer les exercices'
+                              : 'Afficher les exercices'}
+                          </span>
+                        </button>
 
-                    <div className="border-t border-gray-100 pt-4 mt-4">
-                      <h4 className="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-2">
-                        <Icon name="calendar" size="xs" />
-                        Exercices ({client.exercices.length})
-                      </h4>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const prochain = clientOuvertId === client.id ? null : client.id
-                          setClientOuvertId(prochain)
-                          if (prochain && !clientsExercicesCharges[client.id]) {
-                            await chargerExercicesClient(client.id)
-                          }
-                        }}
-                        className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700"
-                      >
-                        <Icon
-                          name="chevron-right"
-                          size="xs"
-                          className={`transform transition-transform ${
-                            clientOuvertId === client.id ? 'rotate-90' : ''
-                          }`}
-                        />
-                        <span>
-                          {clientOuvertId === client.id
-                            ? 'Masquer les exercices'
-                            : 'Afficher les exercices'}
-                        </span>
-                      </button>
-
-                      {clientOuvertId === client.id && (
-                        <>
-                          {clientsExercicesChargement[client.id] && (
-                            <p className="text-sm text-gray-500">Chargement des exercices...</p>
-                          )}
-
-                          {!clientsExercicesChargement[client.id] &&
-                            clientsExercicesCharges[client.id] &&
-                            client.exercices.length === 0 && (
-                              <p className="text-sm text-gray-500">Aucun exercice pour le moment.</p>
+                        {clientOuvertId === client.id && (
+                          <>
+                            {clientsExercicesChargement[client.id] && (
+                              <p className="text-sm text-gray-500">Chargement des exercices...</p>
                             )}
 
-                          {!clientsExercicesChargement[client.id] && client.exercices.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {client.exercices.map((exercice) => (
-                                <div key={exercice.id} className="bg-gray-50 rounded-xl p-3 text-sm">
-                                  <p className="font-semibold text-gray-800 flex items-center justify-between">
-                                    <span>{exercice.annee}</span>
-                                    <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-600">
-                                      {exercice.statut}
-                                    </span>
-                                  </p>
-                                  {exercice.risques.length > 0 ? (
-                                    <ul className="mt-2 space-y-1 text-gray-600 text-xs">
-                                      {exercice.risques.map((risque) => (
-                                        <li key={risque.id} className="flex items-center gap-2">
-                                          <Icon name="shield" size="xs" />
-                                          <span>{risque.type}</span>
-                                          {risque.numeroPolice && (
-                                            <span className="text-gray-400">({risque.numeroPolice})</span>
-                                          )}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <p className="mt-2 text-xs text-gray-400">Aucun risque associé</p>
-                                  )}
+                            {!clientsExercicesChargement[client.id] &&
+                              clientsExercicesCharges[client.id] &&
+                              client.exercices.length === 0 && (
+                                <p className="text-sm text-gray-500">Aucun exercice pour le moment.</p>
+                              )}
 
-                                  <div className="mt-3 space-y-3">
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => ouvrirFormulaireRisque(client, exercice)}
-                                        className={`w-full text-xs font-semibold px-3 py-2 rounded-lg border transition-colors flex items-center justify-center gap-2 ${
-                                          clientRisqueId === client.id && exerciceRisqueId === exercice.id
-                                            ? 'border-green-400 bg-green-50 text-green-700'
-                                            : 'border-green-200 text-green-600 hover:bg-green-50'
-                                        }`}
-                                      >
-                                        <Icon name="plus" size="xs" />
-                                        {clientRisqueId === client.id && exerciceRisqueId === exercice.id
-                                          ? 'Annuler'
-                                          : 'Nouveau risque'}
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        onClick={() => ouvrirEditionExercice(client, exercice)}
-                                        className={`w-full text-xs font-semibold px-3 py-2 rounded-lg border transition-colors flex items-center justify-center gap-2 ${
-                                          exerciceEdite?.id === exercice.id && clientExerciceId === client.id
-                                            ? 'border-blue-400 bg-blue-50 text-blue-700'
-                                            : 'border-blue-200 text-blue-600 hover:bg-blue-50'
-                                        }`}
-                                      >
-                                        <Icon name="edit" size="xs" />
-                                        {exerciceEdite?.id === exercice.id && clientExerciceId === client.id
-                                          ? 'Annuler l’édition'
-                                          : 'Modifier le statut'}
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        onClick={() => supprimerExercice(client, exercice)}
-                                        disabled={suppressionExerciceEnCours === exercice.id}
-                                        className="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
-                                      >
-                                        <Icon name="trash" size="xs" />
-                                        {suppressionExerciceEnCours === exercice.id ? 'Suppression...' : 'Supprimer exercice'}
-                                      </button>
-                                    </div>
-
-                                    {clientRisqueId === client.id && exerciceRisqueId === exercice.id && (
-                                      <form
-                                        className="bg-white border border-green-100 rounded-xl p-3 space-y-3"
-                                        onSubmit={soumettreNouveauRisque}
-                                      >
-                                        <div>
-                                          <label className="block text-xs font-semibold text-green-900 mb-1">Type de risque *</label>
-                                          <input
-                                            type="text"
-                                            value={risqueType}
-                                            onChange={(e) => setRisqueType(e.target.value)}
-                                            className="w-full px-3 py-2 border border-green-200 rounded-lg focus:border-green-500 focus:ring-2 focus:ring-green-100 text-xs"
-                                            placeholder="Ex: Automobile"
-                                          />
-                                        </div>
-
-                                        <div>
-                                          <label className="block text-xs font-semibold text-green-900 mb-1">Numéro de police</label>
-                                          <input
-                                            type="text"
-                                            value={risqueNumero}
-                                            onChange={(e) => setRisqueNumero(e.target.value)}
-                                            className="w-full px-3 py-2 border border-green-200 rounded-lg focus:border-green-500 focus:ring-2 focus:ring-green-100 text-xs"
-                                            placeholder="Facultatif"
-                                          />
-                                        </div>
-
-                                        <div className="flex flex-wrap gap-2">
-                                          {SUGGESTIONS_RISQUES.map((suggestion) => (
-                                            <button
-                                              key={suggestion}
-                                              type="button"
-                                              onClick={() => toggleSuggestionRisque(suggestion)}
-                                              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                                                estDejaDansSelection(risquesSelectionnes, suggestion)
-                                                  ? 'bg-green-600 text-white'
-                                                  : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                              }`}
-                                            >
-                                              {suggestion}
-                                            </button>
-                                          ))}
-                                        </div>
-
-                                        {risquesSelectionnes.length > 0 && (
-                                          <div className="border border-green-100 rounded-lg p-3 bg-green-50">
-                                            <p className="text-xs font-semibold text-green-900 mb-2">Sélection en attente ({risquesSelectionnes.length})</p>
-                                            <div className="flex flex-wrap gap-2">
-                                              {risquesSelectionnes.map((risque) => (
-                                                <span
-                                                  key={`${risque.type}-${risque.numeroPolice ?? 'sans-numero'}`}
-                                                  className="inline-flex items-center gap-2 bg-white text-green-700 border border-green-200 px-3 py-1 rounded-full text-xs"
-                                                >
-                                                  <span>{risque.type}</span>
-                                                  {risque.numeroPolice && <span className="text-green-500">({risque.numeroPolice})</span>}
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => retirerRisqueSelection(risque.type)}
-                                                    className="text-green-500 hover:text-green-700"
-                                                    aria-label={`Retirer ${risque.type}`}
-                                                  >
-                                                    ×
-                                                  </button>
-                                                </span>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        )}
-
-                                        <div className="flex justify-between items-center gap-2 pt-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => ajouterRisqueSelection()}
-                                            className="text-xs font-semibold text-green-600 hover:text-green-700"
-                                          >
-                                            Ajouter à la sélection
-                                          </button>
-                                          <span className="text-[10px] text-gray-500">
-                                            Vous pouvez sélectionner plusieurs risques avant de valider.
-                                          </span>
-                                        </div>
-
-                                        <div className="flex justify-end gap-2 pt-2">
-                                          <button
-                                            type="button"
-                                            onClick={fermerFormulaireRisque}
-                                            className="px-3 py-2 text-xs font-semibold text-gray-500 hover:text-gray-700"
-                                          >
-                                            Annuler
-                                          </button>
-                                          <button
-                                            type="submit"
-                                            disabled={chargementRisque}
-                                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white text-xs font-semibold rounded-lg shadow disabled:opacity-50"
-                                          >
-                                            {chargementRisque ? 'Enregistrement...' : 'Valider'}
-                                          </button>
-                                        </div>
-                                      </form>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
+                            {!clientsExercicesChargement[client.id] && client.exercices.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {client.exercices.map((exercice) => (
+                                  <button
+                                    key={exercice.id}
+                                    type="button"
+                                    onClick={() => setModaleDetailExercice({ open: true, client, exercice })}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all hover:shadow-md hover:scale-105 ${exercice.statut === 'ACTIF'
+                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-400'
+                                      : exercice.statut === 'CLOTURE'
+                                        ? 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
+                                        : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400'
+                                      }`}
+                                  >
+                                    <span className="font-bold">{exercice.annee}</span>
+                                    <span className="text-[10px] opacity-70">({exercice.risques.length})</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </div>
             )}
-          </motion.div>
+          </div>
         </div>
       </main>
+
+      {/* Modale de création/modification client */}
+      <FormModal
+        isOpen={afficherFormulaire}
+        onClose={fermerFormulaire}
+        title={clientEdite ? 'Modifier le client' : 'Nouveau client'}
+        isDark={isDark}
+        size="md"
+      >
+        <form className="space-y-4" onSubmit={soumettreFormulaire}>
+          <div>
+            <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Nom *</label>
+            <input
+              type="text"
+              value={formulaire.nom}
+              onChange={(e) => setFormulaire((prev) => ({ ...prev, nom: e.target.value }))}
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                }`}
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Numéro client</label>
+              <input
+                type="text"
+                value={formulaire.numeroClient}
+                onChange={(e) => setFormulaire((prev) => ({ ...prev, numeroClient: e.target.value }))}
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+              />
+            </div>
+
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Type *</label>
+              <select
+                value={formulaire.type}
+                onChange={(e) => setFormulaire((prev) => ({ ...prev, type: e.target.value as ClientType }))}
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                required
+              >
+                {TYPES_CLIENT.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {formulaire.type === 'PARTICULIER' && (
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Entreprise rattachée</label>
+              <select
+                value={formulaire.entrepriseId ?? ''}
+                onChange={(e) => setFormulaire((prev) => ({ ...prev, entrepriseId: e.target.value }))}
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+              >
+                <option value="">Aucune</option>
+                {entreprises.map((entreprise) => (
+                  <option key={entreprise.id} value={entreprise.id}>{entreprise.nom}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Email</label>
+              <input
+                type="email"
+                value={formulaire.email}
+                onChange={(e) => setFormulaire((prev) => ({ ...prev, email: e.target.value }))}
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+              />
+            </div>
+
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Téléphone</label>
+              <input
+                type="text"
+                value={formulaire.telephone}
+                onChange={(e) => setFormulaire((prev) => ({ ...prev, telephone: e.target.value }))}
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Adresse</label>
+            <textarea
+              value={formulaire.adresse}
+              onChange={(e) => setFormulaire((prev) => ({ ...prev, adresse: e.target.value }))}
+              rows={2}
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                }`}
+            />
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={fermerFormulaire}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${isDark ? 'text-slate-300 bg-slate-700 hover:bg-slate-600' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+                }`}
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              disabled={soumissionEnCours}
+              className="flex-1 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {soumissionEnCours ? 'Enregistrement...' : clientEdite ? 'Mettre à jour' : 'Créer'}
+            </button>
+          </div>
+        </form>
+      </FormModal>
+
+      {/* Modale de confirmation suppression client */}
+      <ConfirmModal
+        isOpen={modaleSuppressionClient.open}
+        onClose={fermerModaleSuppressionClient}
+        onConfirm={confirmerSuppressionClient}
+        title="Supprimer le client"
+        message={`Êtes-vous sûr de vouloir supprimer le client "${modaleSuppressionClient.client?.nom}" ? Cette action est irréversible.`}
+        confirmText="Supprimer"
+        cancelText="Annuler"
+        variant="danger"
+        isLoading={suppressionEnCours === modaleSuppressionClient.client?.id}
+        isDark={isDark}
+      />
+
+      {/* Modale de confirmation suppression exercice */}
+      <ConfirmModal
+        isOpen={modaleSuppressionExercice.open}
+        onClose={fermerModaleSuppressionExercice}
+        onConfirm={confirmerSuppressionExercice}
+        title="Supprimer l'exercice"
+        message={`Êtes-vous sûr de vouloir supprimer l'exercice ${modaleSuppressionExercice.exercice?.annee} pour ${modaleSuppressionExercice.client?.nom} ? Cette action est irréversible.`}
+        confirmText="Supprimer"
+        cancelText="Annuler"
+        variant="danger"
+        isLoading={suppressionExerciceEnCours === modaleSuppressionExercice.exercice?.id}
+        isDark={isDark}
+      />
+
+      {/* Modale détail exercice */}
+      <FormModal
+        isOpen={modaleDetailExercice.open}
+        onClose={() => {
+          setModaleDetailExercice({ open: false, client: null, exercice: null })
+          fermerFormulaireRisque()
+          fermerFormulaireExercice()
+        }}
+        title={`Exercice ${modaleDetailExercice.exercice?.annee ?? ''}`}
+        isDark={isDark}
+        size="5xl"
+      >
+
+        {modaleDetailExercice.client && modaleDetailExercice.exercice && (
+          <div className="flex">
+            <div className="w-2/5 space-y-4 pr-4 border-r border-theme">
+              {/* En-tête avec statut et actions */}
+              <div className="flex items-center justify-between pb-3 border-b border-theme">
+                <div className="flex items-center gap-3">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${modaleDetailExercice.exercice.statut === 'ACTIF'
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                    : modaleDetailExercice.exercice.statut === 'CLOTURE'
+                      ? 'bg-theme-muted text-theme-secondary'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                    }`}>
+                    {modaleDetailExercice.exercice.statut}
+                  </span>
+                  <span className="text-sm text-theme-secondary">
+                    {modaleDetailExercice.exercice.risques.length} risque{modaleDetailExercice.exercice.risques.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => ouvrirModaleSuppressionExercice(modaleDetailExercice.client!, modaleDetailExercice.exercice!)}
+                  className="p-2 rounded-lg text-theme-secondary hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  title="Supprimer l'exercice"
+                >
+                  <Icon name="trash" size="sm" />
+                </button>
+              </div>
+
+              {/* Liste des risques */}
+              <div>
+                <h4 className="text-sm font-semibold mb-3 text-theme-primary">Risques</h4>
+                {modaleDetailExercice.exercice.risques.length > 0 ? (
+                  <div className="space-y-2 max-h-92 overflow-y-auto">
+                    {modaleDetailExercice.exercice.risques.map((risque) => (
+                      <div
+                        key={risque.id}
+                        className="flex items-center justify-between p-3 rounded-lg bg-theme-muted"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                          <span className="text-xs font-medium text-theme-primary">{risque.type}</span>
+                          {risque.numeroPolice && (
+                            <span className="text-xs text-theme-secondary">N° {risque.numeroPolice}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-theme-secondary text-center py-4">Aucun risque pour cet exercice</p>
+                )}
+              </div>
+            </div>
+
+            <div className="w-3/5 pl-4 space-y-4">
+              {/* Formulaire modification statut - Toujours affiché */}
+              <form onSubmit={soumettreNouvelExercice} className="p-4 bg-theme-muted rounded-lg border border-theme">
+                <label className="block text-sm font-semibold text-theme-primary mb-3">Modifier le statut</label>
+                <div className="flex gap-2">
+                  <select
+                    value={statutExercice}
+                    onChange={(e) => setStatutExercice(e.target.value as StatutExercice)}
+                    className="flex-1 px-3 py-2 text-sm border rounded-lg bg-theme-card border-theme text-theme-primary"
+                  >
+                    {STATUTS_EXERCICE.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <button type="submit" disabled={chargementExercice} className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors">
+                    {chargementExercice ? '...' : 'Valider'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Formulaire ajout risque - Toujours affiché */}
+              <form onSubmit={soumettreNouveauRisque} className="p-4 bg-theme-muted rounded-lg border border-theme space-y-3">
+                <label className="block text-sm font-semibold text-theme-primary">Ajouter un risque</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-theme-secondary mb-1">Type de risque *</label>
+                    <input
+                      type="text"
+                      value={risqueType}
+                      onChange={(e) => setRisqueType(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border rounded-lg bg-theme-card border-theme text-theme-primary"
+                      placeholder="Ex: Automobile"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-theme-secondary mb-1">N° Police</label>
+                    <input
+                      type="text"
+                      value={risqueNumero}
+                      onChange={(e) => setRisqueNumero(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border rounded-lg bg-theme-card border-theme text-theme-primary"
+                      placeholder="Facultatif"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-theme-secondary mb-2">Suggestions rapides</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SUGGESTIONS_RISQUES.slice(0, 12).map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => toggleSuggestionRisque(suggestion)}
+                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${estDejaDansSelection(risquesSelectionnes, suggestion)
+                          ? 'bg-red-600 text-white'
+                          : 'bg-theme-card text-theme-primary hover:bg-red-50 dark:hover:bg-red-900/20 border border-theme'
+                          }`}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {risquesSelectionnes.length > 0 && (
+                  <div className="flex flex-wrap gap-2 p-2 bg-theme-card rounded border border-theme">
+                    {risquesSelectionnes.map((r) => (
+                      <span key={r.type} className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs">
+                        {r.type}
+                        <button type="button" onClick={() => retirerRisqueSelection(r.type)} className="hover:text-red-900 dark:hover:text-red-200">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={chargementRisque}
+                    className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+                  >
+                    {chargementRisque ? 'Ajout...' : 'Ajouter le risque'}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+          </div>
+        )}
+      </FormModal>
     </div>
   )
 }

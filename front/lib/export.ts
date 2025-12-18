@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
 export interface Document {
   id: string | number
@@ -73,58 +73,58 @@ export function exporterPDF(documents: Document[], titre: string = 'Liste des do
 }
 
 // Export Excel
-export function exporterExcel(documents: Document[], nomFichier: string = 'documents') {
-  // Préparer les données
-  const donnees = documents.map(d => ({
-    'Référence': d.reference,
-    'Titre': d.titre,
-    'Client': d.client,
-    'Risque': d.risque,
-    'Type de courrier': d.typeCourrier === 'ACS_VERS_CLIENT' ? 'ACS → Client' : 'ACS → Compagnie',
-    'Date': d.date,
-    'Taille': d.taille
-  }))
-
+export async function exporterExcel(documents: Document[], nomFichier: string = 'documents') {
   // Créer le workbook
-  const ws = XLSX.utils.json_to_sheet(donnees)
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = 'ACS Archive System'
+  workbook.created = new Date()
+  
+  // Ajouter une feuille
+  const worksheet = workbook.addWorksheet('Documents')
 
-  // Ajuster la largeur des colonnes
-  const colWidths = [
-    { wch: 20 }, // Référence
-    { wch: 40 }, // Titre
-    { wch: 25 }, // Client
-    { wch: 15 }, // Risque
-    { wch: 20 }, // Type
-    { wch: 12 }, // Date
-    { wch: 10 }, // Taille
+  // Définir les colonnes
+  worksheet.columns = [
+    { header: 'Référence', key: 'reference', width: 20 },
+    { header: 'Titre', key: 'titre', width: 40 },
+    { header: 'Client', key: 'client', width: 25 },
+    { header: 'Risque', key: 'risque', width: 15 },
+    { header: 'Type de courrier', key: 'typeCourrier', width: 20 },
+    { header: 'Date', key: 'date', width: 12 },
+    { header: 'Taille', key: 'taille', width: 10 },
   ]
-  ws['!cols'] = colWidths
 
-  // Style de l'en-tête (première ligne)
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
-  for (let col = range.s.c; col <= range.e.c; col++) {
-    const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col })
-    if (!ws[cellAddress]) continue
-    ws[cellAddress].s = {
-      font: { bold: true, color: { rgb: 'FFFFFF' } },
-      fill: { fgColor: { rgb: 'D32027' } },
-      alignment: { horizontal: 'center', vertical: 'center' }
+  // Ajouter les données
+  documents.forEach(d => {
+    worksheet.addRow({
+      reference: d.reference,
+      titre: d.titre,
+      client: d.client,
+      risque: d.risque,
+      typeCourrier: d.typeCourrier === 'ACS_VERS_CLIENT' ? 'ACS → Client' : 'ACS → Compagnie',
+      date: d.date,
+      taille: d.taille
+    })
+  })
+
+  // Styliser l'en-tête
+  const headerRow = worksheet.getRow(1)
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFD32027' }
     }
-  }
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.alignment = { horizontal: 'center', vertical: 'middle' }
+  })
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Documents')
-
-  // Ajouter des métadonnées
-  wb.Props = {
-    Title: 'Export Documents ACS',
-    Subject: 'Liste des documents',
-    Author: 'ACS Archive System',
-    CreatedDate: new Date()
-  }
-
-  // Téléchargement
-  XLSX.writeFile(wb, `ACS_${nomFichier}_${new Date().toISOString().split('T')[0]}.xlsx`)
+  // Générer le fichier et télécharger
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `ACS_${nomFichier}_${new Date().toISOString().split('T')[0]}.xlsx`
+  link.click()
 }
 
 // Export CSV

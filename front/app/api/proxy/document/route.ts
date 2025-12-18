@@ -7,10 +7,18 @@ function resolveTargetUrl(rawUrl: string): string {
     return rawUrl
   }
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000/api'
-  const base = apiBase.replace(/\/?api\/?$/, '/')
+  // Base URL du backend (sans /api)
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+  const backendBase = apiBase.replace(/\/api\/?$/, '')
+  
+  // Si l'URL commence par /media ou /api, utiliser la base du backend
+  if (rawUrl.startsWith('/media/') || rawUrl.startsWith('/api/')) {
+    return `${backendBase}${rawUrl}`
+  }
+  
+  // Sinon, construire l'URL relative au backend
   const sanitizedPath = rawUrl.startsWith('/') ? rawUrl.slice(1) : rawUrl
-  return new URL(sanitizedPath, base).toString()
+  return `${backendBase}/${sanitizedPath}`
 }
 
 export async function GET(request: NextRequest) {
@@ -32,7 +40,7 @@ export async function GET(request: NextRequest) {
   if (cookie) {
     headers.set('Cookie', cookie)
   }
-  headers.set('Accept', 'application/pdf')
+  headers.set('Accept', 'application/pdf, image/*, application/octet-stream, */*')
 
   try {
     const backendResponse = await fetch(targetUrl, {
