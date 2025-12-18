@@ -575,6 +575,10 @@ def assistant_health(request):
     }
     """
 
+    utilisateur = request.user
+    if utilisateur.role not in ['ADMIN']:
+        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+
     provider = (getattr(settings, 'ASSISTANT_LLM_PROVIDER', 'openai') or 'openai').lower()
     llm_enabled = (str(getattr(settings, 'ASSISTANT_LLM_ENABLED', 'true')).lower() != 'false')
 
@@ -646,7 +650,7 @@ def llm_admin_stats(request):
     """
 
     utilisateur = request.user
-    if utilisateur.role not in ['ADMIN', 'ARCHIVISTE']:
+    if utilisateur.role not in ['ADMIN']:
         return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     now_dt = timezone.now()
@@ -705,7 +709,7 @@ def llm_admin_history(request):
     """
 
     utilisateur = request.user
-    if utilisateur.role not in ['ADMIN', 'ARCHIVISTE']:
+    if utilisateur.role not in ['ADMIN']:
         return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     queryset = LlmUsage.objects.select_related('utilisateur').all()
@@ -891,7 +895,7 @@ class ClientViewSet(viewsets.ModelViewSet):
         # Recherche plein texte sur le nom (paramètre ?search=)
         search = (self.request.query_params.get('search') or '').strip()
         if search:
-            queryset = queryset.filter(nom__icontains=search)
+            queryset = queryset.filter(Q(nom__icontains=search) | Q(numero_client__icontains=search))
 
         # Filtre par type de client (ENTREPRISE / PARTICULIER) via ?type=
         type_param = self.request.query_params.get('type') or None
