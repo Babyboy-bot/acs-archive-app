@@ -724,6 +724,8 @@ export default function PageRecherche() {
     )
 
     return uniques
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
   }, [documentsSource, client, exercice, typeCourrier, filtrerDocuments])
 
   const suggestionsTypeCourrier = useMemo(() => {
@@ -766,11 +768,15 @@ export default function PageRecherche() {
     const dyn = typesRisqueDisponibles.map((type) => type.toUpperCase())
     const fallback = RISQUE_FALLBACK_TYPES.map(({ value }) => value.toUpperCase())
     return fusionnerSuggestions(dyn, fallback, normalizeRisqueKey)
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
   }, [typesRisqueDisponibles, fusionnerSuggestions])
 
   const anneesOptions = useMemo(() => {
     const base = exercicesDisponibles.length > 0 ? exercicesDisponibles : anneesFallback()
     return fusionnerSuggestions(suggestionsExercices, base)
+      .slice()
+      .sort((a, b) => b - a)
   }, [exercicesDisponibles, suggestionsExercices, fusionnerSuggestions, anneeMaxDisponible])
 
   const resultatsAffiches = useMemo(() => {
@@ -873,6 +879,8 @@ export default function PageRecherche() {
 
   const typesRisque = useMemo(() => {
     const ordonnes = fusionnerSuggestions(suggestionsRisque, baseRisques, normalizeRisqueKey)
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
     return [''].concat(ordonnes)
   }, [suggestionsRisque, baseRisques, fusionnerSuggestions])
 
