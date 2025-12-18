@@ -3092,19 +3092,24 @@ export async function POST(request: Request) {
     
     const startedAt = Date.now()
     const sessionId = generateSessionId(token)
+
+    // Hydrater l'historique depuis la persistance si nécessaire (utile en dev / hot-reload)
+    // Important : on doit hydrater AVANT de traiter une réponse A/B, sinon on ne retrouve pas
+    // la dernière question de clarification et on boucle.
+    await getConversationHistoryWithPersistence(sessionId, token)
+
     const choixClarif = extraireChoixClarification(questionBrute)
     const clarif = choixClarif ? recupererDerniereClarification(sessionId) : null
 
-    // Hydrater l'historique depuis la persistance si nécessaire (utile en dev / hot-reload)
-    await getConversationHistoryWithPersistence(sessionId, token)
-
     let questionOriginale = questionBrute
     let modeAssistantForce: ModeAssistant | null = null
+    let clarificationResolue = false
     if (choixClarif && clarif) {
       questionOriginale = choixClarif.reste
         ? `${clarif.questionBase}\n\nPrécision utilisateur: ${choixClarif.reste}`
         : clarif.questionBase
       modeAssistantForce = choixClarif.choix === 'A' ? 'assurance_courtage' : 'recherche_document'
+      clarificationResolue = true
     }
     
     // Récupérer le contexte de conversation (pour les requêtes de suivi)
@@ -3228,7 +3233,9 @@ export async function POST(request: Request) {
       incrementRequest('documents')
 
       const criteresPourAmbiguite = extraireCriteresRecherche(questionOriginale)
-      const estAmbigue = estQuestionAssuranceCourtageAmbigue(questionOriginale, criteresPourAmbiguite)
+      const estAmbigue = clarificationResolue
+        ? false
+        : estQuestionAssuranceCourtageAmbigue(questionOriginale, criteresPourAmbiguite)
 
       let narration: AssistantResponse['narration'] = {
         texte:
