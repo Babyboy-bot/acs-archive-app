@@ -237,6 +237,17 @@ export default function PageClients() {
     }
   }, [messageSucces, erreur])
 
+  // Mettre à jour la modale détail exercice quand les clients changent
+  useEffect(() => {
+    if (modaleDetailExercice.open && modaleDetailExercice.client && modaleDetailExercice.exercice) {
+      const clientMisAJour = clients.find((c) => c.id === modaleDetailExercice.client!.id)
+      const exerciceMisAJour = clientMisAJour?.exercices.find((ex) => ex.id === modaleDetailExercice.exercice!.id)
+      if (clientMisAJour && exerciceMisAJour) {
+        setModaleDetailExercice({ open: true, client: clientMisAJour, exercice: exerciceMisAJour })
+      }
+    }
+  }, [clients])
+
   const fermerFormulaireRisque = () => {
     setClientRisqueId(null)
     setExerciceRisqueId(null)
@@ -316,8 +327,10 @@ export default function PageClients() {
     const dejaSelectionne = estDejaDansSelection(risquesSelectionnes, suggestion)
     if (dejaSelectionne) {
       retirerRisqueSelection(suggestion)
+      setRisqueType('')
       return
     }
+    setRisqueType(suggestion)
     ajouterRisqueSelection(suggestion, null)
   }
 
@@ -404,16 +417,35 @@ export default function PageClients() {
           ? `${selectionInitiale.length} risques ajoutés avec succès.`
           : `Risque « ${selectionInitiale[0].type} » ajouté avec succès.`
       )
-      fermerFormulaireRisque()
       setRisquesSelectionnes([])
       setRisqueType('')
       setRisqueNumero('')
+      // Fermer tout après succès
+      setModaleDetailExercice({ open: false, client: null, exercice: null })
+      setClientOuvertId(null)
+      fermerFormulaireRisque()
+      fermerFormulaireExercice()
     } catch (error: any) {
       console.error('Erreur création risque:', error)
       setErreur(error?.message || 'Impossible de créer les risques.')
     } finally {
       setChargementRisque(false)
     }
+  }
+
+  const ouvrirModaleDetailExercice = (client: ClientAPI, exercice: ExerciceResume) => {
+    setModaleDetailExercice({ open: true, client, exercice })
+    // Initialiser les variables pour les formulaires de la modale
+    setClientExerciceId(client.id)
+    setExerciceEdite(exercice)
+    setStatutExercice(exercice.statut as StatutExercice)
+    setClientRisqueId(client.id)
+    setExerciceRisqueId(exercice.id)
+    setRisqueType('')
+    setRisqueNumero('')
+    setRisquesSelectionnes([])
+    setErreur('')
+    setMessageSucces('')
   }
 
   const ouvrirModaleSuppressionExercice = (client: ClientAPI, exercice: ExerciceResume) => {
@@ -716,6 +748,10 @@ export default function PageClients() {
 
         await chargerClients(recherche, typeFiltre)
         setMessageSucces(`Exercice ${exerciceEdite.annee} mis à jour avec succès.`)
+        // Fermer tout après succès
+        setModaleDetailExercice({ open: false, client: null, exercice: null })
+        setClientOuvertId(null)
+        fermerFormulaireRisque()
         fermerFormulaireExercice()
       } catch (error: any) {
         console.error('Erreur mise à jour exercice:', error)
@@ -1151,7 +1187,7 @@ export default function PageClients() {
                                   <button
                                     key={exercice.id}
                                     type="button"
-                                    onClick={() => setModaleDetailExercice({ open: true, client, exercice })}
+                                    onClick={() => ouvrirModaleDetailExercice(client, exercice)}
                                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all hover:shadow-md hover:scale-105 ${exercice.statut === 'ACTIF'
                                       ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-400'
                                       : exercice.statut === 'CLOTURE'
