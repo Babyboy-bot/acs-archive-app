@@ -181,6 +181,7 @@ export default function PageClients() {
   const [risqueNumero, setRisqueNumero] = useState('')
   const [risquesSelectionnes, setRisquesSelectionnes] = useState<NouveauRisqueSelection[]>([])
   const [chargementRisque, setChargementRisque] = useState(false)
+  const [suggestionsRisques, setSuggestionsRisques] = useState<string[]>(SUGGESTIONS_RISQUES)
 
   // États pour les modales de confirmation
   const [modaleSuppressionClient, setModaleSuppressionClient] = useState<{ open: boolean; client: ClientAPI | null }>({
@@ -220,6 +221,73 @@ export default function PageClients() {
     }
 
     chargerEntreprises()
+  }, [])
+
+  useEffect(() => {
+    let ignore = false
+
+    const chargerSuggestionsRisques = async () => {
+      try {
+        const { response, data } = await apiFetchJson<{ results?: { type?: string }[] }>('/risques/?simple=1')
+        if (!response.ok || ignore) {
+          return
+        }
+
+        const risquesData: { type?: string }[] = Array.isArray(data)
+          ? (data as any)
+          : Array.isArray((data as any)?.results)
+            ? ((data as any).results as any)
+            : []
+
+        const types = risquesData
+          .map((r) => (r?.type ?? '').toString().trim())
+          .filter((t) => Boolean(t))
+
+        const keyOf = (value: string) =>
+          value
+            .toString()
+            .trim()
+            .normalize('NFD')
+            .replace(/[^0-9a-zA-Z\s-]/g, '')
+            .replace(/[\s-]+/g, '_')
+            .normalize('NFC')
+            .toUpperCase()
+
+        const merged: string[] = []
+        const seen = new Set<string>()
+
+        const pushUnique = (value: string) => {
+          const key = keyOf(value)
+          if (!key) return
+          if (seen.has(key)) return
+          seen.add(key)
+          merged.push(value)
+        }
+
+        for (const val of SUGGESTIONS_RISQUES) {
+          pushUnique(val)
+        }
+
+        const uniquesApi = Array.from(new Set(types)).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
+        for (const val of uniquesApi) {
+          pushUnique(val)
+        }
+
+        if (!ignore && merged.length > 0) {
+          setSuggestionsRisques(merged)
+        }
+      } catch (error) {
+        if (!ignore) {
+          console.error('Erreur chargement suggestions risques:', error)
+        }
+      }
+    }
+
+    chargerSuggestionsRisques()
+
+    return () => {
+      ignore = true
+    }
   }, [])
 
   useEffect(() => {
@@ -1442,7 +1510,7 @@ export default function PageClients() {
                 <div>
                   <label className="block text-xs font-medium text-theme-secondary mb-2">Suggestions rapides</label>
                   <div className="flex flex-wrap gap-1.5">
-                    {SUGGESTIONS_RISQUES.slice(0, 12).map((suggestion) => (
+                    {suggestionsRisques.map((suggestion) => (
                       <button
                         key={suggestion}
                         type="button"
