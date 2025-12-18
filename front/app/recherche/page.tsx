@@ -744,6 +744,12 @@ export default function PageRecherche() {
     )
 
     return uniques
+      .slice()
+      .sort((a, b) => {
+        const la = TYPE_COURRIER_LIBELLES[a] ?? a
+        const lb = TYPE_COURRIER_LIBELLES[b] ?? b
+        return la.localeCompare(lb, 'fr', { sensitivity: 'base' })
+      })
   }, [documentsSource, client, exercice, risque, filtrerDocuments])
 
   const suggestionsExercices = useMemo(() => {
@@ -887,6 +893,12 @@ export default function PageRecherche() {
   const typesCourrier = useMemo<TypeCourrierOption[]>(
     () => {
       const ordonnes = fusionnerSuggestions(suggestionsTypeCourrier, toutesTypesCourrier)
+        .slice()
+        .sort((a, b) => {
+          const la = TYPE_COURRIER_LIBELLES[a] ?? a
+          const lb = TYPE_COURRIER_LIBELLES[b] ?? b
+          return la.localeCompare(lb, 'fr', { sensitivity: 'base' })
+        })
       return [{ value: '', label: 'Tous les courriers', theme: DEFAULT_TYPE_COURRIER_THEME }].concat(
         ordonnes.map((value) => ({
           value,
