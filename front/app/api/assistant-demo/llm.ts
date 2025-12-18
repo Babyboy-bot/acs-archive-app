@@ -5,12 +5,19 @@
  */
 
 import type { DocumentPiece } from './types'
+import { setDefaultResultOrder } from 'dns'
 import { enrichPromptWithLearning } from './learning'
 import {
   getConversationHistoryPersistent,
   addMessagePersistent,
   clearLocalCache,
 } from './conversation'
+
+try {
+  setDefaultResultOrder('ipv4first')
+} catch {
+  // noop
+}
 
 const PROVIDER = 'mistral'
 
@@ -29,12 +36,19 @@ const LLM_ENABLED = (process.env.ASSISTANT_LLM_ENABLED ?? 'true').toLowerCase() 
 const LLM_TIMEOUT_MS = Number(process.env.ASSISTANT_LLM_TIMEOUT_MS ?? '20000')
 
 // Configuration pour la stratégie multi-modèles Mistral
-const MISTRAL_BASE_URL = process.env.MISTRAL_BASE_URL ?? 'https://api.mistral.ai/v1'
-const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY ?? ''
+const MISTRAL_BASE_URL = (process.env.MISTRAL_BASE_URL ?? 'https://api.mistral.ai/v1').trim()
+const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY ?? '').trim()
 // Modèle par défaut plus puissant pour de meilleures réponses
-const MISTRAL_MODEL_DEFAULT = process.env.MISTRAL_MODEL_DEFAULT ?? 'mistral-medium-latest'
-const MISTRAL_MODEL_ADVANCED = process.env.MISTRAL_MODEL_ADVANCED ?? 'mistral-large-latest'
+const MISTRAL_MODEL_DEFAULT = (process.env.MISTRAL_MODEL_DEFAULT ?? 'mistral-medium-latest').trim()
+const MISTRAL_MODEL_ADVANCED = (process.env.MISTRAL_MODEL_ADVANCED ?? 'mistral-large-latest').trim()
 const MISTRAL_ENABLED = (process.env.MISTRAL_ENABLED ?? 'false').toLowerCase() === 'true'
+
+const MISTRAL_RETRY_MAX = Number(process.env.MISTRAL_RETRY_MAX ?? '2')
+const MISTRAL_RETRY_BASE_DELAY_MS = Number(process.env.MISTRAL_RETRY_BASE_DELAY_MS ?? '400')
+const MISTRAL_CIRCUIT_FAILURE_THRESHOLD = Number(process.env.MISTRAL_CIRCUIT_FAILURE_THRESHOLD ?? '3')
+const MISTRAL_CIRCUIT_OPEN_MS = Number(process.env.MISTRAL_CIRCUIT_OPEN_MS ?? '15000')
+const MISTRAL_TOTAL_BUDGET_MS = Number(process.env.MISTRAL_TOTAL_BUDGET_MS ?? '12000')
+const MISTRAL_FORCE_CONNECTION_CLOSE = (process.env.MISTRAL_FORCE_CONNECTION_CLOSE ?? 'true').toLowerCase() === 'true'
 
 // Seuil de complexité pour utiliser le modèle avancé (abaissé pour utiliser plus souvent le modèle puissant)
 const COMPLEXITY_THRESHOLD = Number(process.env.COMPLEXITY_THRESHOLD ?? '80')
@@ -46,144 +60,33 @@ const MAX_TOKENS_DEFAULT = Number(process.env.ASSISTANT_LLM_MAX_TOKENS_DEFAULT ?
 const HISTORY_LIMIT_FACTUAL = Number(process.env.ASSISTANT_LLM_HISTORY_LIMIT_FACTUAL ?? '0')
 const HISTORY_LIMIT_DEFAULT = Number(process.env.ASSISTANT_LLM_HISTORY_LIMIT_DEFAULT ?? '8')
 
+const mistralCircuitState = {
+  consecutiveFailures: 0,
+  openUntilMs: 0,
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isRetryableMistralNetworkError(error: any): boolean {
+  const cause = error?.cause
+  const code = (cause && typeof cause === 'object' ? (cause as any).code : undefined) as string | undefined
+  const msg = String(error?.message ?? '')
+
+  if (code && ['UND_ERR_SOCKET', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ENETUNREACH', 'EAI_AGAIN'].includes(code)) {
+    return true
+  }
+
+  if (/fetch failed/i.test(msg)) return true
+  return false
+}
+
 // Mémoire de conversation (stockage en mémoire pour la session)
 type ConversationMessage = {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
-}
-
-function extractJsonObject(text: string): string | null {
-  const cleaned = (text ?? '').trim().replace(/^```[a-z]*\s*/i, '').replace(/\s*```\s*$/i, '')
-  const first = cleaned.indexOf('{')
-  const last = cleaned.lastIndexOf('}')
-  if (first === -1 || last === -1 || last <= first) return null
-  return cleaned.slice(first, last + 1)
-}
-
-function pickRoutingState(conversationState: Record<string, unknown> | undefined): Record<string, unknown> {
-  if (!conversationState) return {}
-  const allowed = ['lastMode', 'lastIntent', 'lastQuery', 'client', 'annee', 'risque', 'typeDocument', 'typeDoc', 'type', 'reference']
-  const out: Record<string, unknown> = {}
-  for (const key of allowed) {
-    if (conversationState[key] !== undefined && conversationState[key] !== null && conversationState[key] !== '') {
-      out[key] = conversationState[key]
-    }
-  }
-  return out
-}
-
-export async function generateLlmRoutingDecision(payload: {
-  question: string
-  heuristiqueMode: LlmRoutingDecision['mode']
-  criteres?: Record<string, unknown>
-  conversationSummary?: string
-  conversationState?: Record<string, unknown>
-}): Promise<{ decision: LlmRoutingDecision; telemetry: LlmTelemetry }> {
-  if (!isLlmConfigured()) {
-    throw new Error('LLM non configuré')
-  }
-
-  const state = pickRoutingState(payload.conversationState)
-  const lines: string[] = []
-  if (payload.conversationSummary) {
-    lines.push(`[MEMOIRE CONVERSATION]\n${sanitizeText(payload.conversationSummary)}`)
-  }
-  if (Object.keys(state).length > 0) {
-    lines.push(`[ETAT CONTEXTE]\n${Object.entries(state).map(([k, v]) => `${k}: ${typeof v === 'string' ? sanitizeText(v) : JSON.stringify(v)}`).join('\n')}`)
-  }
-  if (payload.criteres && Object.keys(payload.criteres).length > 0) {
-    lines.push(`[CRITERES EXTRAITS]\n${Object.entries(payload.criteres)
-      .filter(([, v]) => v !== undefined && v !== null && v !== '')
-      .map(([k, v]) => `${k}: ${typeof v === 'string' ? sanitizeText(v) : JSON.stringify(v)}`)
-      .join('\n')}`)
-  }
-  lines.push(`[HEURISTIQUE]\nmode: ${payload.heuristiqueMode}`)
-  lines.push(`[QUESTION]\n${payload.question}`)
-
-  const routerSystemPrompt = `Tu es un routeur d'intention pour l'assistant ACS, spécialisé dans les archives ACS et les questions d'assurance / courtage.
-Ta seule sortie doit être un JSON STRICT et valide, sans texte autour.
-
-Schéma attendu:
-{
-  "mode": "recherche_document" | "conversation" | "salutation" | "confirmation",
-  "confidence": number,
-  "reasons": string[]
-}
-
-Définition des types de questions:
-- "recherche_document": l'utilisateur cherche un ou plusieurs documents ACS (courriers, pièces, contrats, avenants, factures, attestations, sinistres, etc.), ou mentionne des critères de recherche (client, année, risque, type de document, exercice, référence, numéro de police...).
-- "conversation": l'utilisateur pose une question métier sur l'assurance / le courtage (contrat, garanties, exclusions, primes, commissions, procédures, gestion de sinistres, réglementations, relation client...), SANS demander un document précis.
-- "salutation": salutations simples ("bonjour", "salut", "merci", "bonne journée", etc.).
-- "confirmation": réponses très courtes qui confirment une action ou une compréhension ("ok", "c'est bon", "parfait", "merci beaucoup"...).
-
-Règles importantes:
-- Si la question est clairement une recherche de document ACS, choisis toujours "recherche_document".
-- Si la question est une demande d'explication ou de conseil en assurance / courtage sans mention explicite de documents ACS, choisis "conversation".
-- Si la question est totalement hors du domaine assurance / courtage et ACS (cuisine, politique, programmation, vie personnelle, etc.), choisis quand même "conversation" mais ajoute dans "reasons" un élément "out_of_scope".
-- N'utilise la mémoire que pour comprendre les pronoms et les suivis ("idem", "le même client", "et pour 2020 ?"), pas pour forcer une recherche documentaire si la question est purement métier.
-- "confidence" doit être entre 0 et 1.`
-
-  const prompt = lines.join('\n\n')
-
-  const result: LlmResult = await callMistral(prompt, false, [], {
-    historyLimit: 0,
-    maxTokens: 180,
-    systemPrompt: routerSystemPrompt,
-    temperature: 0,
-  })
-
-  const jsonStr = extractJsonObject(result.content)
-  if (!jsonStr) {
-    console.warn('Réponse routeur LLM invalide (JSON manquant), fallback heuristique.', {
-      provider: PROVIDER,
-      content: result.content,
-    })
-    return {
-      decision: {
-        mode: payload.heuristiqueMode,
-        confidence: 0,
-        reasons: ['fallback_invalid_router_output_json_missing'],
-      },
-      telemetry: result.telemetry,
-    }
-  }
-
-  try {
-    const parsed = JSON.parse(jsonStr) as any
-    const mode = parsed?.mode
-    const confidence = parsed?.confidence
-    if (!['recherche_document', 'conversation', 'salutation', 'confirmation'].includes(mode)) {
-      throw new Error('mode')
-    }
-    if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-      throw new Error('confidence')
-    }
-
-    const decision: LlmRoutingDecision = {
-      mode,
-      confidence,
-      reasons: Array.isArray(parsed?.reasons)
-        ? parsed.reasons.filter((r: any) => typeof r === 'string').slice(0, 5)
-        : undefined,
-    }
-
-    return { decision, telemetry: result.telemetry }
-  } catch (err) {
-    console.warn('Réponse routeur LLM invalide (parse/validation), fallback heuristique.', {
-      provider: PROVIDER,
-      content: result.content,
-      error: (err as Error)?.message,
-    })
-    return {
-      decision: {
-        mode: payload.heuristiqueMode,
-        confidence: 0,
-        reasons: ['fallback_invalid_router_output_schema'],
-      },
-      telemetry: result.telemetry,
-    }
-  }
 }
 
 export async function generateLlmConversationSummary(payload: {
@@ -374,11 +277,6 @@ async function fetchWithTimeout(
   }
 }
 
-export type LlmRoutingDecision = {
-  mode: 'recherche_document' | 'conversation' | 'salutation' | 'confirmation'
-  confidence: number
-  reasons?: string[]
-}
 
 function getExpectedDocumentCountFromStats(statistiques: Record<string, unknown> | undefined): number | null {
   if (!statistiques) return null
@@ -609,6 +507,27 @@ Exemples de MAUVAISES réponses (à éviter) :
 Réponds en français.`
 }
 
+export function buildClarificationSystemPrompt(): string {
+  return `Tu es l'assistant ACS.
+
+OBJECTIF:
+L'utilisateur a posé une question potentiellement ambiguë. Tu dois UNIQUEMENT poser une question de clarification.
+
+CHOIX À PROPOSER:
+1) Une explication/conseil lié à l'assurance et au courtage.
+2) Une recherche d'un document dans les archives ACS.
+
+CONTRAINTES CRITIQUES:
+- Ne réponds pas au fond.
+- Pose UNE SEULE question courte.
+- Pas de markdown, pas de liste, pas de préambule.
+- Réponds en français.
+- Réutilise les termes de l'utilisateur sans inventer de détails.
+
+FORMAT:
+Une question (1 à 2 phrases maximum). Termine par: "Réponds A si tu veux une explication, ou B si tu veux une recherche de document dans les archives."`
+}
+
 type OpenAiCallOptions = {
   modelOverride?: string
   maxTokens?: number
@@ -823,7 +742,13 @@ async function callMistral(
 ): Promise<LlmResult> {
   const url = `${MISTRAL_BASE_URL.replace(/\/$/, '')}/chat/completions`
   const started = Date.now()
+  const deadlineMs = started + Math.max(1000, Math.min(MISTRAL_TOTAL_BUDGET_MS, LLM_TIMEOUT_MS))
   const model = useAdvancedModel ? MISTRAL_MODEL_ADVANCED : MISTRAL_MODEL_DEFAULT
+
+  const now = Date.now()
+  if (mistralCircuitState.openUntilMs > now) {
+    throw new Error(`Mistral LLM indisponible temporairement (circuit ouvert ${mistralCircuitState.openUntilMs - now} ms) | url=${url}`)
+  }
 
   // Construire les messages avec l'historique
   const messages: Array<{role: string, content: string}> = [
@@ -841,35 +766,87 @@ async function callMistral(
 
   console.log(`=== MISTRAL: ${messages.length} messages dans la conversation ===`)
 
-  let response: Response
-  try {
-    response = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: {
+  let response: Response | undefined = undefined
+  let lastError: any = null
+  const maxAttempts = Math.max(1, MISTRAL_RETRY_MAX + 1)
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const remainingMs = deadlineMs - Date.now()
+    if (remainingMs <= 0) {
+      throw new Error(`Mistral LLM timeout (budget total dépassé) après ${Math.max(0, Date.now() - started)} ms | url=${url}`)
+    }
+    try {
+      const requestHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${MISTRAL_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: model,
-        messages,
-        temperature: options?.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? 250,
-      }),
-    })
-  } catch (error: any) {
-    const elapsedErr = Date.now() - started
-    if (error?.name === 'AbortError') {
-      throw new Error(`Mistral LLM timeout après ${LLM_TIMEOUT_MS} ms (durée réelle: ${elapsedErr} ms)`)
+      }
+      if (MISTRAL_FORCE_CONNECTION_CLOSE) {
+        requestHeaders.Connection = 'close'
+      }
+
+      response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: {
+          ...requestHeaders,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages,
+          temperature: options?.temperature ?? 0.7,
+          max_tokens: options?.maxTokens ?? 250,
+        }),
+        timeoutMs: Math.min(LLM_TIMEOUT_MS, remainingMs),
+      })
+      lastError = null
+      break
+    } catch (error: any) {
+      lastError = error
+      const elapsedErr = Date.now() - started
+      if (error?.name === 'AbortError') {
+        throw new Error(`Mistral LLM timeout après ${LLM_TIMEOUT_MS} ms (durée réelle: ${elapsedErr} ms)`)
+      }
+
+      const retryable = isRetryableMistralNetworkError(error)
+      if (!retryable || attempt >= maxAttempts) {
+        const cause = error?.cause
+        const causeDetails = cause && typeof cause === 'object'
+          ? {
+              code: (cause as any).code,
+              errno: (cause as any).errno,
+              syscall: (cause as any).syscall,
+              hostname: (cause as any).hostname,
+              message: (cause as any).message,
+            }
+          : null
+        const causeText = causeDetails ? ` | cause=${JSON.stringify(causeDetails)}` : ''
+        throw new Error(`Mistral LLM erreur réseau: ${error?.message || String(error)} | url=${url}${causeText}`)
+      }
+
+      const delay = Math.min(4000, MISTRAL_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1))
+      const remainingAfterDelay = deadlineMs - Date.now()
+      if (remainingAfterDelay <= delay) {
+        throw new Error(`Mistral LLM timeout (budget total dépassé) après ${Math.max(0, Date.now() - started)} ms | url=${url}`)
+      }
+      console.warn(`Mistral LLM erreur réseau retryable (tentative ${attempt}/${maxAttempts}). Nouvelle tentative dans ${delay} ms.`)
+      await sleep(delay)
     }
-    throw new Error(`Mistral LLM erreur réseau: ${error?.message || String(error)}`)
+  }
+
+  if (!response) {
+    throw lastError ?? new Error('Mistral LLM erreur réseau inconnue')
   }
 
   const elapsed = Date.now() - started
 
   if (!response.ok) {
     const detail = await response.text()
+    mistralCircuitState.consecutiveFailures += 1
+    if (mistralCircuitState.consecutiveFailures >= MISTRAL_CIRCUIT_FAILURE_THRESHOLD) {
+      mistralCircuitState.openUntilMs = Date.now() + MISTRAL_CIRCUIT_OPEN_MS
+    }
     throw new Error(`Mistral LLM (${response.status}) ${detail}`)
   }
+
+  mistralCircuitState.consecutiveFailures = 0
 
   const json = (await response.json()) as {
     choices: Array<{ message?: { content?: string } }>
@@ -878,6 +855,10 @@ async function callMistral(
 
   const content = json.choices?.[0]?.message?.content?.trim()
   if (!content) {
+    mistralCircuitState.consecutiveFailures += 1
+    if (mistralCircuitState.consecutiveFailures >= MISTRAL_CIRCUIT_FAILURE_THRESHOLD) {
+      mistralCircuitState.openUntilMs = Date.now() + MISTRAL_CIRCUIT_OPEN_MS
+    }
     throw new Error('Réponse Mistral LLM vide')
   }
 
