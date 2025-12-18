@@ -46,7 +46,14 @@ export type AssistantRestriction = {
 
 
 export type AssistantTrace = {
-  mode?: 'recherche_document' | 'conversation' | 'salutation' | 'confirmation'
+  mode?:
+    | 'recherche_document'
+    | 'assurance_courtage'
+    | 'hors_perimetre'
+    | 'salutation'
+    | 'confirmation'
+    | 'definition_conseil'
+    | 'statistiques'
   intent: 'documents' | 'statistiques'
   typeMessage?: string
   criteres?: {

@@ -34,6 +34,12 @@ const MENU_ITEMS: MenuItem[] = [
     action: 'voir',
     roles: [RoleUtilisateur.ADMIN, RoleUtilisateur.ARCHIVISTE],
   },
+  {
+    href: '/admin-llm',
+    label: 'Stats LLM',
+    icone: 'bolt',
+    roles: [RoleUtilisateur.ADMIN],
+  },
 ]
 
 export function Navigation() {

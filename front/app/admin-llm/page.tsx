@@ -65,7 +65,7 @@ export default function AdminLlmPage() {
 
   useEffect(() => {
     const user = getUtilisateurActif()
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'ARCHIVISTE')) {
+    if (!user || user.role !== 'ADMIN') {
       router.push('/tableau-de-bord')
       return
     }
@@ -103,6 +103,19 @@ export default function AdminLlmPage() {
     }
     return true
   })
+
+  const libellePurpose = (p: string) => {
+    if (p === 'router') return 'Routage'
+    if (p === 'answer') return 'Réponse'
+    if (p === 'summary') return 'Résumé'
+    return p
+  }
+
+  const libelleProvider = (p: string) => {
+    if (p === 'mistral') return 'Mistral'
+    if (p === 'openai') return 'OpenAI'
+    return p
+  }
 
   if (loading) {
     return (
@@ -145,7 +158,7 @@ export default function AdminLlmPage() {
               </button>
               <div>
                 <h1 className="text-2xl font-bold text-theme-primary">Statistiques LLM</h1>
-                <p className="text-sm text-theme-secondary">Gestion des quotas et usage de l'assistant IA</p>
+                <p className="text-sm text-theme-secondary">Suivi d'usage de l'assistant IA (suivi informatif, pas de blocage)</p>
               </div>
             </div>
             <div className="text-right">
@@ -196,13 +209,27 @@ export default function AdminLlmPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'overview' && (
           <div className="space-y-6">
+            <div className="bg-theme-card border border-theme rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-theme-primary mb-2">À quoi sert cette page ?</h2>
+              <div className="text-sm text-theme-secondary space-y-1">
+                <p>Cette page sert au suivi de l'usage de l'assistant IA par les utilisateurs.</p>
+                <p>Elle permet :</p>
+                <ul className="list-disc list-inside">
+                  <li>De vérifier l'état technique du LLM (configuration, erreurs).</li>
+                  <li>D'identifier les utilisateurs les plus consommateurs sur le mois.</li>
+                  <li>De consulter l'historique des appels (audit et diagnostic).</li>
+                </ul>
+                <p>Le seuil mensuel affiché est indicatif : il n'y a pas de blocage automatique.</p>
+              </div>
+            </div>
+
             {/* État technique de l'assistant */}
             <div className="bg-theme-card border border-theme rounded-lg p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-theme-primary mb-1">État technique de l'assistant</h2>
                 {health ? (
                   <p className="text-sm text-theme-secondary">
-                    Provider&nbsp;: <span className="font-medium text-theme-primary">{health.provider}</span>
+                    Fournisseur&nbsp;: <span className="font-medium text-theme-primary">{libelleProvider(health.provider)}</span>
                     {' · '}LLM activé&nbsp;: <span className="font-medium">{health.llm_enabled ? 'Oui' : 'Non'}</span>
                     {' · '}Recherche sémantique&nbsp;: <span className="font-medium">{health.semantic_search_available ? 'Disponible' : 'Désactivée'}</span>
                   </p>
@@ -247,7 +274,7 @@ export default function AdminLlmPage() {
               <div className="bg-theme-card border border-theme rounded-lg p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-theme-secondary">Total tokens (tous temps)</p>
+                    <p className="text-sm text-theme-secondary">Total de jetons (tous temps)</p>
                     <p className="text-3xl font-bold text-theme-primary mt-2">
                       {(typeof stats.total_tokens === 'number' && Number.isFinite(stats.total_tokens)
                         ? stats.total_tokens
@@ -278,7 +305,7 @@ export default function AdminLlmPage() {
               <div className="bg-theme-card border border-theme rounded-lg p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-theme-secondary">Tokens ce mois</p>
+                    <p className="text-sm text-theme-secondary">Jetons ce mois</p>
                     <p className="text-3xl font-bold text-theme-primary mt-2">
                       {safeUsageMensuel[0]?.total_tokens?.toLocaleString() || 0}
                     </p>
@@ -307,10 +334,10 @@ export default function AdminLlmPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold text-theme-primary">
-                        {user.tokens_used.toLocaleString()} tokens
+                        {user.tokens_used.toLocaleString()} jetons
                       </p>
                       <p className="text-xs text-theme-secondary">
-                        {(user.percentage * 100).toFixed(1)}% du quota
+                        {(user.percentage * 100).toFixed(1)}% du seuil indicatif
                       </p>
                     </div>
                   </div>
@@ -326,7 +353,7 @@ export default function AdminLlmPage() {
                   <div key={month.year_month} className="flex items-center justify-between py-2 border-b border-theme last:border-0">
                     <span className="text-sm font-medium text-theme-primary">{month.year_month}</span>
                     <span className="text-sm text-theme-secondary">
-                      {month.total_tokens.toLocaleString()} tokens
+                      {month.total_tokens.toLocaleString()} jetons
                     </span>
                   </div>
                 ))}
@@ -345,13 +372,13 @@ export default function AdminLlmPage() {
                       Utilisateur
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                      Tokens utilisés
+                      Jetons utilisés
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                      Limite
+                      Seuil (indicatif)
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                      Utilisation
+                      Taux (indicatif)
                     </th>
                   </tr>
                 </thead>
@@ -416,7 +443,7 @@ export default function AdminLlmPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-theme-primary mb-1">
-                    Provider
+                    Fournisseur
                   </label>
                   <select
                     value={filterProvider}
@@ -430,7 +457,7 @@ export default function AdminLlmPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-theme-primary mb-1">
-                    Purpose
+                    Type d'appel
                   </label>
                   <select
                     value={filterPurpose}
@@ -438,9 +465,9 @@ export default function AdminLlmPage() {
                     className="w-full px-3 py-2 border border-theme rounded-lg focus:outline-none focus:ring-2 focus:ring-theme-primary"
                   >
                     <option value="">Tous</option>
-                    <option value="router">Router</option>
-                    <option value="answer">Answer</option>
-                    <option value="summary">Summary</option>
+                    <option value="router">Routage</option>
+                    <option value="answer">Réponse</option>
+                    <option value="summary">Résumé</option>
                   </select>
                 </div>
               </div>
@@ -459,16 +486,16 @@ export default function AdminLlmPage() {
                         Utilisateur
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                        Provider
+                        Fournisseur
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
                         Modèle
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                        Purpose
+                        Type
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                        Tokens
+                        Jetons
                       </th>
                     </tr>
                   </thead>
@@ -488,7 +515,7 @@ export default function AdminLlmPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                            {item.provider}
+                            {libelleProvider(item.provider)}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-theme-secondary">
@@ -504,7 +531,7 @@ export default function AdminLlmPage() {
                                   : 'bg-amber-100 text-amber-800'
                             }`}
                           >
-                            {item.purpose}
+                            {libellePurpose(item.purpose)}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">

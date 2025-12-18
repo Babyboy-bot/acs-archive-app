@@ -1,4 +1,4 @@
-function extraireCleClient(request: Request): string {
+﻿function extraireCleClient(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for')
   if (forwarded) {
     return forwarded.split(',')[0].trim()
@@ -28,7 +28,7 @@ function verifierRateLimit(request: Request): { ok: boolean; remaining: number }
 import { NextResponse } from 'next/server'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, buildConversationSystemPrompt } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -43,7 +43,7 @@ import {
 // ============================================================================
 
 // Patterns qui indiquent une référence à un client précédent
-const REFERENCE_PATTERNS = [
+const REFERENCE_PATTERNS: RegExp[] = [
   /\b(il|lui|elle|le|la|ce client|son|sa|ses|leur|leurs)\b/i,
   /\b(en a-t-il|en a-t-elle|combien en a)\b/i,
   /\b(le même|la même|les mêmes|celui-ci|celle-ci)\b/i,
@@ -59,11 +59,11 @@ const TYPE_DOCUMENT_KEYWORDS: Record<string, string[]> = {
   'facture': ['facture', 'fact', 'invoice', 'facturation'],
   'règlement': ['règlement', 'reglement', 'paiement', 'payment', 'versement'],
   'divers': ['divers', 'autre', 'autres', 'miscellaneous'],
-  'sinistre': ['sinistre', 'declaration sinistre', 'déclaration sinistre', 'claim', 'accident'],
+  'sinistre': ['sinistre', 'déclaration sinistre', 'claim', 'accident'],
   // Types additionnels courants
   'contrat': ['contrat', 'police', 'contract', 'police d\'assurance'],
   'attestation': ['attestation', 'certificat', 'certificate'],
-  'quittance': ['quittance', 'recu', 'reçu', 'receipt'],
+  'quittance': ['quittance', 'reçu', 'receipt'],
   'devis': ['devis', 'proposition', 'quote', 'offre'],
 }
 
@@ -85,50 +85,52 @@ type ContexteHistorique = {
  */
 function extraireContexteHistorique(sessionId: string): ContexteHistorique {
   const history = getConversationHistory(sessionId)
-  
+
   let client: string | null = null
   let typeDocument: string | null = null
   let annee: string | null = null
   let risque: string | null = null
   let dernierResultatVide = false
-  
+
   // Parcourir l'historique de la fin vers le début
   for (let i = history.length - 1; i >= 0; i--) {
     const message = history[i]
     const content = message.content.toLowerCase()
     const contentOriginal = message.content
-    
+
     // Vérifier si la dernière réponse assistant disait "pas trouvé"
     if (message.role === 'assistant' && i === history.length - 1) {
-      if (content.includes("pas trouvé") || content.includes("aucun") || content.includes("n'ai pas")) {
+      if (content.includes('pas trouvé') || content.includes('aucun') || content.includes("n'ai pas")) {
         dernierResultatVide = true
       }
     }
-    
+
     // Chercher le type de document dans les questions user
     if (message.role === 'user' && !typeDocument) {
       for (const [type, keywords] of Object.entries(TYPE_DOCUMENT_KEYWORDS)) {
-        if (keywords.some(kw => content.includes(kw))) {
+        if (keywords.some((kw) => content.includes(kw))) {
           typeDocument = type
           break
         }
       }
     }
-    
+
     // Chercher un client mentionné
     if (!client) {
       const clientMatch = contentOriginal.match(/(?:client|pour)\s+([A-Z0-9][A-Z0-9\s\-]{1,50})/i)
       if (clientMatch) {
         client = clientMatch[1].trim().toUpperCase()
       }
-      
+
       // Chercher aussi les patterns comme "documents de X"
-      const docMatch = contentOriginal.match(/(?:documents?|archives?|factures?|dossiers?)\s+(?:de|du|pour)\s+(?:le client\s+)?([A-Z0-9][A-Z0-9\s\-]{1,50})/i)
+      const docMatch = contentOriginal.match(
+        /(?:documents?|archives?|factures?|dossiers?)\s+(?:de|du|pour)\s+(?:le client\s+)?([A-Z0-9][A-Z0-9\s\-]{1,50})/i,
+      )
       if (docMatch) {
         client = docMatch[1].trim().toUpperCase()
       }
     }
-    
+
     // Chercher une année mentionnée (2018, 2024, etc.)
     if (!annee && message.role === 'user') {
       const anneeMatch = contentOriginal.match(/\b(19\d{2}|20[0-2]\d)\b/)
@@ -136,7 +138,7 @@ function extraireContexteHistorique(sessionId: string): ContexteHistorique {
         annee = anneeMatch[1]
       }
     }
-    
+
     // Chercher un risque mentionné (santé, auto, etc.)
     if (!risque && message.role === 'user') {
       const risquesConnus = ['sante', 'santé', 'auto', 'habitation', 'vie', 'prevoyance', 'prévoyance', 'rc', 'transport', 'construction', 'flotte']
@@ -147,7 +149,7 @@ function extraireContexteHistorique(sessionId: string): ContexteHistorique {
         }
       }
     }
-    
+
     // Dernier recours: réutiliser l'extraction globale de critères (plus robuste)
     if (message.role === 'user') {
       const criteres = extraireCriteresRecherche(contentOriginal)
@@ -156,11 +158,11 @@ function extraireContexteHistorique(sessionId: string): ContexteHistorique {
       if (!annee && criteres.annee) annee = criteres.annee
       if (!risque && criteres.risque) risque = criteres.risque
     }
-    
+
     // On a trouvé tous les critères importants, on peut arrêter
     if (client && typeDocument && annee && risque) break
   }
-  
+
   return { client, typeDocument, annee, risque, dernierResultatVide }
 }
 
@@ -175,7 +177,7 @@ function extraireDernierClientContexte(sessionId: string): string | null {
  * Vérifie si la question contient une référence contextuelle (il, lui, ce client, etc.)
  */
 function contientReferenceContextuelle(question: string): boolean {
-  return REFERENCE_PATTERNS.some(pattern => pattern.test(question))
+  return REFERENCE_PATTERNS.some((pattern) => pattern.test(question))
 }
 
 /**
@@ -195,42 +197,42 @@ type ResultatEnrichissement = {
  */
 function enrichirQuestionAvecContexte(question: string, sessionId: string | null): ResultatEnrichissement {
   if (!sessionId) {
-    return { 
-      questionEnrichie: question, 
+    return {
+      questionEnrichie: question,
       clientContexte: null,
       anneeContexte: null,
       risqueContexte: null,
-      typeDocumentContexte: null
+      typeDocumentContexte: null,
     }
   }
-  
+
   // Récupérer le contexte complet de la conversation
   const contexte = extraireContexteHistorique(sessionId)
-  
+
   // Si la question contient déjà un client explicite, utiliser seulement les critères manquants
   const clientExplicite = extraireClientMentionne(question)
   const criteresQuestion = extraireCriteresRecherche(question)
-  
+
   // Utiliser les critères explicites ou ceux du contexte
   const clientFinal = clientExplicite || criteresQuestion.client || contexte.client
   const anneeFinal = criteresQuestion.annee || contexte.annee
   const risqueFinal = criteresQuestion.risque || contexte.risque
   const typeDocFinal = criteresQuestion.typeDocument || contexte.typeDocument
-  
+
   // Si la question contient une référence contextuelle ou est vague, enrichir avec le contexte
   const estReferenceContextuelle = contientReferenceContextuelle(question)
-  
+
   // Patterns de requêtes de suivi (demandes qui font référence à quelque chose mentionné avant)
   const patternsRequeteSuivi = [
     /^(montre|affiche|voir|ouvre|donne|envoie|telecharge|imprime)/i, // Verbes d'action au début
-    /\b(montre|affiche|voir)\s+(le|la|les|ce|cette|ces|moi)\b/i,     // "montre le", "affiche moi"
-    /\b(le|la|les)\s+(document|fichier|avenant|facture)s?\b/i,       // "le document", "la facture"
-    /^(oui|ok|d'accord|vas-?y|go)\b/i,                                // Confirmations
-    /^c'?est\s+(ca|ça|celui|celle)/i,                                 // "c'est ça", "c'est celui-là"
-    /\b(cherche|recherche)\s+encore\b/i,                            // "cherche encore"
+    /\b(montre|affiche|voir)\s+(le|la|les|ce|cette|ces|moi)\b/i, // "montre le", "affiche moi"
+    /\b(le|la|les)\s+(document|fichier|avenant|facture)s?\b/i, // "le document", "la facture"
+    /^(oui|ok|d'accord|vas-?y|go)\b/i, // Confirmations
+    /^c'?est\s+(ca|ça|celui|celle)/i, // "c'est ça", "c'est celui-là"
+    /\b(cherche|recherche)\s+encore\b/i, // "cherche encore"
   ]
-  const estRequeteSuivi = patternsRequeteSuivi.some(p => p.test(question.trim()))
-  
+  const estRequeteSuivi = patternsRequeteSuivi.some((p) => p.test(question.trim()))
+
   if (estReferenceContextuelle || estRequeteSuivi) {
     // Construire une question enrichie avec tous les critères du contexte
     const partiesContexte: string[] = []
@@ -238,31 +240,31 @@ function enrichirQuestionAvecContexte(question: string, sessionId: string | null
     if (typeDocFinal) partiesContexte.push(`type ${typeDocFinal}`)
     if (anneeFinal) partiesContexte.push(`exercice ${anneeFinal}`)
     if (risqueFinal) partiesContexte.push(`risque ${risqueFinal}`)
-    
+
     if (partiesContexte.length > 0) {
       const contexteStr = partiesContexte.join('\n- ')
       console.log(`=== Contexte résolu: "${question}" ===`)
       console.log(`=== Critères du contexte: ${partiesContexte.join(', ')} ===`)
       const questionEnrichie = `${question} (contexte: ${contexteStr})`
-      return { 
-        questionEnrichie, 
+      return {
+        questionEnrichie,
         clientContexte: clientFinal,
         anneeContexte: anneeFinal,
         risqueContexte: risqueFinal,
-        typeDocumentContexte: typeDocFinal
+        typeDocumentContexte: typeDocFinal,
       }
     }
   }
-  
-  return { 
-    questionEnrichie: question, 
+
+  return {
+    questionEnrichie: question,
     clientContexte: clientExplicite,
     anneeContexte: criteresQuestion.annee,
     risqueContexte: criteresQuestion.risque,
-    typeDocumentContexte: criteresQuestion.typeDocument
+    typeDocumentContexte: criteresQuestion.typeDocument,
   }
 }
- 
+
 // Génère un ID de session stable à partir du token
 function generateSessionId(token: string | null): string {
   if (!token) return 'anonymous'
@@ -270,6 +272,7 @@ function generateSessionId(token: string | null): string {
   const cleaned = token.replace(/^Bearer\s+/i, '')
   return cleaned.substring(0, 16)
 }
+
 import {
   incrementRequest,
   incrementLlmSuccess,
@@ -288,13 +291,13 @@ type QueryPayload = {
 const TONES = {
   amical: {
     intro: (nb: number) => `J'ai retrouvé ${nb === 1 ? 'un document' : `${nb} documents`} qui pourrai${nb > 1 ? 'ent' : 't'} vous être utile${nb > 1 ? 's' : ''}.`,
-    conclusion: '\n\nVous pouvez les consulter ou les télécharger à tout moment. 📥\n\nSi vous avez besoin d\'aide pour un autre document ou pour effectuer une recherche, je suis là pour ça ! 😊',
-    noResults: "Je n'ai trouvé aucun document correspondant à votre recherche. 🔍\n\nVoulez-vous reformuler votre question ou essayer avec d'autres mots-clés ? Je suis là pour vous aider !",
+    conclusion: "\n\nVous pouvez les consulter ou les télécharger à tout moment.\n\nSi vous avez besoin d'aide pour un autre document ou pour effectuer une recherche, je suis là pour ça !",
+    noResults: "Je n'ai trouvé aucun document correspondant à votre recherche.\n\nVoulez-vous reformuler votre question ou essayer avec d'autres mots-clés ? Je suis là pour vous aider !",
     useEmojis: true,
   },
   formel: {
     intro: (nb: number) => `${nb} document${nb > 1 ? 's' : ''} correspondant${nb > 1 ? 's' : ''} à votre recherche ${nb > 1 ? 'ont été identifiés' : 'a été identifié'}.`,
-    conclusion: '\n\nCes documents sont disponibles pour consultation et téléchargement. Pour toute assistance supplémentaire, n\'hésitez pas à formuler une nouvelle requête.',
+    conclusion: "\n\nCes documents sont disponibles pour consultation et téléchargement. Pour toute assistance supplémentaire, n'hésitez pas à formuler une nouvelle requête.",
     noResults: "Aucun document ne correspond aux critères de recherche spécifiés. Veuillez reformuler votre demande avec des termes différents.",
     useEmojis: false,
   },
@@ -306,8 +309,8 @@ const TONES = {
   },
   premium: {
     intro: (nb: number) => `Nous avons identifié ${nb} document${nb > 1 ? 's' : ''} pertinent${nb > 1 ? 's' : ''} pour votre demande.`,
-    conclusion: '\n\n✨ Ces documents sont à votre disposition pour consultation immédiate ou téléchargement sécurisé.\n\nNotre assistant reste à votre écoute pour toute recherche complémentaire ou assistance personnalisée.',
-    noResults: "Aucun document ne correspond actuellement à votre recherche. 🔍\n\nNous vous invitons à affiner vos critères ou à nous solliciter pour une assistance personnalisée.",
+    conclusion: "\n\nCes documents sont à votre disposition pour consultation immédiate ou téléchargement sécurisé.\n\nNotre assistant reste à votre écoute pour toute recherche complémentaire ou assistance personnalisée.",
+    noResults: "Aucun document ne correspond actuellement à votre recherche.\n\nNous vous invitons à affiner vos critères ou à nous solliciter pour une assistance personnalisée.",
     useEmojis: true,
   },
 }
@@ -374,7 +377,7 @@ function construireActionsDocuments(pieces: DocumentPiece[]): string[] {
   }
 
   if (!actions.length) {
-    actions.push('Aucune action urgente détectée sur les pièces proposées. Vérifier que leur indexation reste à jour.')
+    actions.push("Aucune action urgente détectée sur les pièces proposées. Vérifier que leur indexation reste à jour.")
   }
 
   return actions
@@ -441,6 +444,15 @@ type DocumentSearchResult = {
   creeLe?: string | null
 }
 
+type AssistantSearchResult = {
+  id: string
+  titre: string
+  content: string
+  metadata: Record<string, unknown>
+  score: number
+  highlights?: string[] | null
+}
+
 type DocumentDetail = {
   id: string
   titre: string
@@ -472,6 +484,11 @@ const USE_FAISS = process.env.NEXT_PUBLIC_ASSISTANT_USE_FAISS === 'true'
 const ASSISTANT_ENABLED = (process.env.NEXT_PUBLIC_ASSISTANT_ENABLED ?? 'true').toLowerCase() !== 'false'
 const RATE_LIMIT_WINDOW_MS = 60 * 1000
 const RATE_LIMIT_MAX_REQUESTS = Number(process.env.NEXT_PUBLIC_ASSISTANT_RATE_LIMIT ?? '12')
+
+const CLIENT_VALIDATION_TTL_MS = Number(process.env.ASSISTANT_CLIENT_VALIDATION_TTL_MS ?? '600000')
+
+type ClientValidationCacheEntry = { ok: boolean; expiresAt: number }
+const clientValidationCache = new Map<string, ClientValidationCacheEntry>()
 
 const rateLimitStore = new Map<string, number[]>()
 
@@ -505,7 +522,7 @@ function construireReponseRestreinte(
   const message =
     "Je suis désolé, mais vous ne disposez pas des droits nécessaires pour accéder à cette information. Merci de contacter un administrateur pour obtenir l'autorisation." as const
 
-  const réponse: AssistantResponse = {
+  const reponse: AssistantResponse = {
     question,
     type: intent,
     resume: message,
@@ -530,7 +547,7 @@ function construireReponseRestreinte(
     llmUsed: false,
   })
 
-  return NextResponse.json(réponse)
+  return NextResponse.json(reponse)
 }
 
 class BackendError extends Error {
@@ -753,8 +770,17 @@ function extraireCriteresRecherche(question: string): CriteresRecherche {
   if (!client) {
     const codeMatch = question.match(/\b([A-Z][A-Z0-9]{1,5}|[0-9][A-Z]{1,3}[0-9]*)\b/i)
     if (codeMatch) {
-      const candidat = codeMatch[1].toUpperCase()
-      if (!motsReserves.includes(candidat) && !/^(19|20)\d{2}$/.test(candidat)) {
+      const brut = codeMatch[1]
+      const candidat = brut.toUpperCase()
+      const commenceParChiffre = /^\d/.test(brut)
+      const lettresUniquement = /^[A-Za-z]+$/.test(brut)
+      const estToutEnMajuscules = brut === brut.toUpperCase()
+
+      if (
+        !motsReserves.includes(candidat) &&
+        !/^(19|20)\d{2}$/.test(candidat) &&
+        (commenceParChiffre || !lettresUniquement || estToutEnMajuscules)
+      ) {
         client = candidat
       }
     }
@@ -804,7 +830,139 @@ function extraireTypeDocumentDemande(question: string): string | null {
 // Détermine si la question est une recherche de document ou une conversation
 // ============================================================================
 
-type ModeAssistant = 'recherche_document' | 'conversation' | 'salutation' | 'confirmation'
+type ModeAssistant =
+  | 'recherche_document'
+  | 'assurance_courtage'
+  | 'clarification'
+  | 'hors_perimetre'
+  | 'salutation'
+  | 'confirmation'
+
+function estQuestionAssuranceCourtage(question: string): boolean {
+  const lower = question
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+
+  if (!lower) return false
+
+  const patterns = [
+    /\bassurance(s)?\b/,
+    /\bassureur(s)?\b/,
+    /\bassur(e|es|s|er|ers|ez|ent|era|eras|erez|erai|erais|erons|erez|eront|ant|ance)\b/,
+    /\bcourtage\b/,
+    /\bcourtier(s)?\b/,
+    /\bprime(s)?\b/,
+    /\bcotisation(s)?\b/,
+    /\brecouvrement(s)?\b/,
+    /\bcotation(s)?\b/,
+    /\bbordereau(x)?\b/,
+    /\bgarantie(s)?\b/,
+    /\bsinistre(s)?\b/,
+    /\bindemnisation(s)?\b/,
+    /\bfranchise(s)?\b/,
+    /\brisque(s)?\b/,
+    /\bresponsabilite civile\b/,
+    /\b(r\.?c\.?|rc)\b/,
+    /\bsouscription\b/,
+    /\bpolice d'?assurance\b/,
+    /\bavenant(s)?\b/,
+    /\bquittance(s)?\b/,
+    /\battestation(s)?\b/,
+    /\bdevis\b/,
+  ]
+
+  return patterns.some((p) => p.test(lower))
+}
+
+function estQuestionAssuranceCourtageAmbigue(question: string, criteresExtraits: CriteresRecherche): boolean {
+  if (!estQuestionAssuranceCourtage(question)) return false
+
+  const lower = question
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+
+  // Si l'utilisateur demande explicitement une recherche (liste/dernier/archives), ce n'est pas ambigu.
+  const mentionneArchives = /\b(documents?|fichiers?|archives?)\b/.test(lower)
+  const actionRechercheDocs = /\b(cherche|trouve|retrouve|montre|affiche|liste|donne|envoie|recupere|rappelle|ouvre)\b/.test(lower)
+  const demandeRecence = /\b(dernier|derniers|derniere|dernieres|recent|recents)\b/.test(lower)
+  const demandeListePieces = /\b(mes|les|tous les|la liste des)\b.*\b(avenants?|factures?|contrats?|attestations?|quittances?|devis|sinistres?)\b/.test(
+    lower
+  )
+
+  if (mentionneArchives || actionRechercheDocs || demandeRecence || demandeListePieces) return false
+
+  // Si on a des critères forts docs, c'est une recherche, pas ambigu.
+  const aCriteresForts = !!(criteresExtraits.client || criteresExtraits.annee || criteresExtraits.reference)
+  if (aCriteresForts) return false
+
+  // Si on n'a pas d'indice fort que c'est une définition/explication, ce n'est pas ambigu.
+  const isDefinitionLike =
+    estQuestionDefinitionGenerale(question) ||
+    estQuestionConseilGeneral(question) ||
+    estQuestionExplicationConcept(question)
+  if (!isDefinitionLike) return false
+
+  // Ici: assurance/courtage + question de type définition/conseil, mais sans intention explicite de recherche → ambigu
+  return true
+}
+
+function extraireChoixClarification(question: string): { choix: 'A' | 'B'; reste: string } | null {
+  const normalized = question.trim()
+  if (!normalized) return null
+
+  const m = normalized.match(/^([abAB])\b[\s\-:,.!?]*([\s\S]*)$/)
+  if (!m) return null
+
+  const choix = m[1].toUpperCase() as 'A' | 'B'
+  const reste = (m[2] ?? '').trim()
+  return { choix, reste }
+}
+
+function recupererDerniereClarification(
+  sessionId: string,
+): { questionBase: string } | null {
+  const history = getConversationHistory(sessionId)
+  if (!history.length) return null
+
+  let idxAssistant = -1
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'assistant') {
+      idxAssistant = i
+      break
+    }
+  }
+  if (idxAssistant < 0) return null
+
+  const lastAssistant = history[idxAssistant].content
+  const lastAssistantNorm = lastAssistant
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+  const isClarif =
+    /reponds\s*a/.test(lastAssistantNorm) &&
+    /\bou\s*b\b/.test(lastAssistantNorm) &&
+    /explication/.test(lastAssistantNorm) &&
+    /archives?/.test(lastAssistantNorm)
+  if (!isClarif) return null
+
+  let idxUser = -1
+  for (let i = idxAssistant - 1; i >= 0; i--) {
+    if (history[i].role === 'user') {
+      idxUser = i
+      break
+    }
+  }
+  if (idxUser < 0) return null
+
+  const questionBase = history[idxUser].content
+  if (!questionBase?.trim()) return null
+  return { questionBase }
+}
 
 function classifierSimple(question: string, criteresExtraits: CriteresRecherche): ModeAssistant {
   const lower = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
@@ -817,31 +975,52 @@ function classifierSimple(question: string, criteresExtraits: CriteresRecherche)
   
   // 2. Confirmations simples (oui, ok, etc.) - utiliser le contexte
   //    Inclut "vas y" ou "vas-y" (espace ou tiret)
-  if (/^(oui|ok|d'?accord|vas[-\s]?y|go|ouais|yep|yes|non|nan|nope)$/i.test(lower)) {
+  if (/^(oui|ok|d'?accord|vas[-\s]?y|go|ouais|yep|yes|non|nan|nope|a|b)$/i.test(lower)) {
     return 'confirmation'
   }
   
-  // 3. Si on a extrait des critères de document → c'est une recherche
-  const aCriteres = criteresExtraits.client || 
-                    criteresExtraits.annee || 
-                    criteresExtraits.typeDocument || 
-                    criteresExtraits.risque ||
-                    criteresExtraits.reference
-  if (aCriteres) {
+  // 3. Détecter une recherche de documents
+  // - Les critères "forts" (client/année/référence) sont typiquement des requêtes de recherche.
+  // - Les critères "faibles" (type de document/risque) ne suffisent PAS, car ils peuvent être utilisés
+  //   dans des questions d’assurance/courtage (définition, explication, conseils).
+  const aCriteresForts = !!(criteresExtraits.client || criteresExtraits.annee || criteresExtraits.reference)
+  const aCriteresFaibles = !!(criteresExtraits.typeDocument || criteresExtraits.risque)
+  const aCriteres = aCriteresForts || aCriteresFaibles
+
+  const mentionneArchives = /\b(documents?|fichiers?|archives?)\b/.test(lower)
+  const actionRechercheDocs = /\b(cherche|trouve|retrouve|montre|affiche|liste|donne|envoie|recupere|rappelle|ouvre)\b/.test(lower)
+  const demandeRecence = /\b(dernier|derniers|derniere|dernieres|recent|recents)\b/.test(lower)
+
+  const demandeListePieces = /\b(mes|les|tous les|la liste des)\b.*\b(avenants?|factures?|contrats?|attestations?|quittances?|devis|sinistres?)\b/.test(
+    lower
+  )
+  const demandeDernierePiece = /\b(dernier|derniers|derniere|dernieres|recent|recents)\b.*\b(avenant|facture|contrat|attestation|quittance|devis|sinistre)\b/.test(
+    lower
+  )
+
+  if (aCriteresForts) {
     return 'recherche_document'
   }
-  
-  // 4. Mots-clés de recherche de documents
-  const motsRecherche = [
-    'document', 'documents', 'fichier', 'fichiers', 'archive', 'archives',
-    'avenant', 'avenants', 'facture', 'factures', 'contrat', 'contrats',
-    'sinistre', 'sinistres', 'attestation', 'quittance', 'devis',
-    'cherche', 'trouve', 'besoin', 'veux', 'voudrais', 'peux',
-    'montre', 'affiche', 'voir', 'donne', 'envoie',
-    'dernier', 'derniers', 'derniere', 'dernieres', 'recent', 'recents',
-  ]
-  if (motsRecherche.some(m => lower.includes(m))) {
+
+  if ((demandeListePieces || demandeDernierePiece) && (aCriteres || mentionneArchives)) {
     return 'recherche_document'
+  }
+
+  if (actionRechercheDocs && (mentionneArchives || demandeListePieces || demandeDernierePiece || aCriteres)) {
+    return 'recherche_document'
+  }
+
+  if (demandeRecence && (mentionneArchives || demandeListePieces || demandeDernierePiece || aCriteres)) {
+    return 'recherche_document'
+  }
+
+  if (mentionneArchives && aCriteres) {
+    return 'recherche_document'
+  }
+
+  // 4. Assurance / courtage → LLM-only
+  if (estQuestionAssuranceCourtage(question)) {
+    return 'assurance_courtage'
   }
   
   // 5. Questions sur les statistiques → recherche aussi
@@ -849,8 +1028,25 @@ function classifierSimple(question: string, criteresExtraits: CriteresRecherche)
     return 'recherche_document'
   }
   
-  // 6. Par défaut → conversation (le LLM gère)
-  return 'conversation'
+  // 7. Par défaut → clarification (éviter les faux "hors périmètre" sur des demandes implicites)
+  return 'clarification'
+}
+
+function estReponseLlmFiller(content: string): boolean {
+  const trimmed = content.trim()
+  if (!trimmed) return true
+
+  if (trimmed.length < 120) {
+    const fillers = [
+      /je vais (t'|te |vous )?(expliquer|te dire|repondre)/i,
+      /laisse[- ]moi (t'|te |vous )?expliquer/i,
+      /voici (ce que|comment)/i,
+      /en (gros|resume|clair)/i,
+    ]
+    if (fillers.some((p) => p.test(trimmed))) return true
+  }
+
+  return false
 }
 
 // Génère une narration simple et directe pour les résultats de recherche
@@ -1072,7 +1268,7 @@ function estSalutation(question: string): boolean {
 
 type TypeMessage = 
   | 'salutation'              // Bonjour, salut...
-  | 'conversation'            // Ça va, moi aussi, merci...
+  | 'conversation'            // ça va, moi aussi, merci...
   | 'question_assistant'      // Qui es-tu, que sais-tu faire...
   | 'hors_scope'             // Quelle heure, météo, calculs...
   | 'action_impossible'      // Supprime, modifie, ajoute...
@@ -1292,15 +1488,15 @@ function classifierMessagePrincipal(normalized: string, words: string[], wordCou
   // 2. TESTS ET SPAM (messages sans intention réelle)
   // =========================================================================
   const testSpam = [
-    /^test[s]?[!.\s]*$/,                        // "test", "tests"
-    /^(1234?|123456?|0000|1111)$/,              // Séquences numériques
-    /^(azerty|qwerty|asdf|zxcv)[a-z]*$/,        // Séquences clavier
-    /^[a-z]{1,2}$/,                             // 1-2 lettres aléatoires (pas 3, car "oui" = 3 lettres)
-    /^(blabla|bla bla|truc|machin|chose|toto|tata|titi)$/, // Mots vides
-    /^(allo|oui allo|hello hello|allo allo)$/, // Tests de connexion
-    /^([a-z])\1+$/,                             // "aaaa", "bbbbb"
-    /^[^a-z]*$/,                                // Que des chiffres/symboles
-    /^(rien|vide|null|undefined|nan)$/,        // Mots informatiques vides
+    /^test[s]?[!.\s]*$/,
+    /^(1234?|123456?|0000|1111)$/,
+    /^(azerty|qwerty|asdf|zxcv)[a-z]*$/,
+    /^[a-z]{1,2}$/,
+    /^(blabla|bla bla|truc|machin|chose|toto|tata|titi)$/,
+    /^(allo|oui allo|hello hello|allo allo)$/,
+    /^([a-z])\1+$/,
+    /^[^a-z]*$/,
+    /^(rien|vide|null|undefined|nan)$/,
   ]
   if (testSpam.some(p => p.test(normalized))) {
     return 'test_spam'
@@ -1309,10 +1505,10 @@ function classifierMessagePrincipal(normalized: string, words: string[], wordCou
   // =========================================================================
   // 3. RÉFÉRENCES DE DOCUMENTS (avant incompréhensible car format spécial)
   // =========================================================================
-  // Pattern pour références de documents: 2018_3CB_Avenant_Santé_001, AV-2018-004, REF-123, etc.
+  // Pattern pour références de documents: 2018_3CB_Avenant_Sante_001, AV-2018-004, REF-123, etc.
   const estReferenceDocument = (text: string): boolean => {
     const patterns = [
-      /^\d{4}[_-][A-Z0-9]+[_-].+$/i,           // 2018_3CB_Avenant_Santé_001
+      /^\d{4}[_-][A-Z0-9]+[_-].+$/i,           // 2018_3CB_Avenant_Sante_001
       /^[A-Z]{2,4}[_-]\d{4}[_-]\d+$/i,         // AV-2018-004, REF-2018-001
       /^[A-Z]{2,4}[_-]\d+$/i,                   // AV-001, REF-123
       /^N[°o]?\s*\d+/i,                         // N° 1234, No 1234
@@ -1523,7 +1719,7 @@ function classifierMessagePrincipal(normalized: string, words: string[], wordCou
     'garantie', 'garanties', 'franchise', 'indemnisation', 'declaration',
     
     // Identifiants (codes clients typiques)
-    'acs', 'numero', 'reference', 'ref', 'code',
+    'ACS', 'numéro', 'référence', 'ref', 'code',
   ]
   
   // Vérifier si la question contient au moins un mot-clé ACS
@@ -1647,16 +1843,16 @@ function classifierMessage(question: string): TypeMessage {
 function genererReponseNonDocument(type: TypeMessage, question: string): string {
   switch (type) {
     case 'incomprehensible':
-      return "Je n'ai pas bien compris votre message. Pouvez-vous reformuler ? Par exemple :\n• \"Montre-moi les documents du client X\"\n• \"Combien de documents dans les archives ?\"\n• \"Quels sont les derniers avenants ?\""
+      return "Je n'ai pas bien compris votre message. Pouvez-vous reformuler ? Par exemple :\n- \"Montre-moi les documents du client X\"\n- \"Combien de documents dans les archives ?\"\n- \"Quels sont les derniers avenants ?\""
     
     case 'question_assistant':
-      return "Je suis l'assistant virtuel ACS, spécialisé dans la gestion des archives d'assurance. Je peux vous aider à :\n• Rechercher des documents par client, type ou date\n• Consulter les statistiques des archives\n• Répondre à vos questions sur les documents\n\nEssayez par exemple : \"Documents du client 3CB\" ou \"Statistiques des archives\""
+      return "Je suis l'assistant virtuel ACS, spécialisé dans la gestion des archives d'assurance. Je peux vous aider à :\n- Rechercher des documents par client, type ou date\n- Consulter les statistiques des archives\n- Répondre à vos questions sur les documents\n\nEssayez par exemple : \"Documents du client 3CB\" ou \"Statistiques des archives\""
     
     case 'action_impossible':
-      return "Je suis un assistant en lecture seule. Je ne peux pas modifier, supprimer ou créer des documents.\n\nPour ces actions, veuillez :\n• Utiliser l'interface principale d'ACS\n• Contacter un administrateur\n\nEn revanche, je peux vous aider à rechercher et consulter des documents !"
+      return "Je suis un assistant en lecture seule. Je ne peux pas modifier, supprimer ou créer des documents.\n\nPour ces actions, veuillez :\n- Utiliser l'interface principale d'ACS\n- Contacter un administrateur\n\nEn revanche, je peux vous aider à rechercher et consulter des documents !"
     
     case 'hors_scope':
-      return "Cette question dépasse mes compétences. Je suis spécialisé dans les archives ACS.\n\nJe peux vous aider à :\n• Rechercher des documents\n• Consulter les statistiques\n• Répondre à vos questions sur l'archivage\n\nQue souhaitez-vous savoir sur vos archives ?"
+      return "Cette question dépasse mes compétences. Je suis spécialisé dans les archives ACS.\n\nJe peux vous aider à :\n- Rechercher des documents\n- Consulter les statistiques\n- Répondre à vos questions sur l'archivage\n\nQue souhaitez-vous savoir sur vos archives ?"
     
     case 'confirmation':
       return "Parfait ! N'hésitez pas si vous avez d'autres questions sur vos archives."
@@ -1665,10 +1861,10 @@ function genererReponseNonDocument(type: TypeMessage, question: string): string 
       return "Je suis là pour vous aider ! Y a-t-il autre chose que je peux faire pour vous concernant vos archives ?"
     
     case 'demande_suivi':
-      return "Que souhaitez-vous voir de plus ? Vous pouvez me demander :\n• Plus de documents d'un client spécifique\n• Un autre type de document (factures, avenants...)\n• Les statistiques des archives"
+      return "Que souhaitez-vous voir de plus ? Vous pouvez me demander :\n- Plus de documents d'un client spécifique\n- Un autre type de document (factures, avenants...)\n- Les statistiques des archives"
     
     case 'demande_clarification':
-      return "Pas de souci, je vais clarifier ! Je suis l'assistant ACS et je peux vous aider à :\n• Rechercher des documents : \"Documents de 3CB\"\n• Voir les statistiques : \"Statistiques des archives\"\n• Filtrer par type : \"Factures du client X\"\n\nQue souhaitez-vous faire ?"
+      return "Pas de souci, je vais clarifier ! Je suis l'assistant ACS et je peux vous aider à :\n- Rechercher des documents : \"Documents de 3CB\"\n- Voir les statistiques : \"Statistiques des archives\"\n- Filtrer par type : \"Factures du client X\"\n\nQue souhaitez-vous faire ?"
     
     case 'test_spam':
       return "Je suis prêt à vous aider ! Posez-moi une vraie question sur vos archives, par exemple : \"Quels sont les derniers documents ajoutés ?\" ou \"Documents du client 3CB\""
@@ -1677,19 +1873,19 @@ function genererReponseNonDocument(type: TypeMessage, question: string): string 
       return "Je suis là pour vous aider avec vos archives de manière professionnelle. Comment puis-je vous assister ?"
     
     case 'question_vague':
-      return "Votre demande est un peu vague. Pouvez-vous préciser ?\n\nExemples de questions :\n• \"Documents du client 3CB\" (un client spécifique)\n• \"Les factures de ce mois\" (un type de document)\n• \"Derniers documents ajoutés\" (période récente)\n• \"Statistiques des archives\" (vue d'ensemble)"
+      return "Votre demande est un peu vague. Pouvez-vous préciser ?\n\nExemples de questions :\n- \"Documents du client 3CB\" (un client spécifique)\n- \"Les factures de ce mois\" (un type de document)\n- \"Derniers documents ajoutés\" (période récente)\n- \"Statistiques des archives\" (vue d'ensemble)"
     
     case 'demande_urgent':
-      return "Je comprends que c'est urgent ! Pour vous aider rapidement, précisez :\n• Quel client ?\n• Quel type de document ?\n• Quelle période ?\n\nExemple : \"Documents urgents de 3CB\" ou \"Dernières factures\""
+      return "Je comprends que c'est urgent ! Pour vous aider rapidement, précisez :\n- Quel client ?\n- Quel type de document ?\n- Quelle période ?\n\nExemple : \"Documents urgents de 3CB\" ou \"Dernières factures\""
     
     case 'demande_comparaison':
-      return "Je peux vous aider à comparer des documents ou des statistiques. Précisez ce que vous souhaitez comparer :\n• \"Documents de 3CB vs SANLAM\"\n• \"Factures 2024 vs 2023\"\n• \"Statistiques par client\""
+      return "Je peux vous aider à comparer des documents ou des statistiques. Précisez ce que vous souhaitez comparer :\n- \"Documents de 3CB vs SANLAM\"\n- \"Factures 2024 vs 2023\"\n- \"Statistiques par client\""
     
     case 'question_rappel':
       return "Je ne retrouve pas la recherche précédente dans notre conversation. Pouvez-vous reformuler votre demande ?\n\nPar exemple : \"Documents du client X\" ou \"Statistiques du mois dernier\""
     
     case 'langue_etrangere':
-      return "I detected English! I'm the ACS assistant, specialized in insurance archives. I work best in French, but I can understand basic requests.\n\n🇫🇷 Je suis l'assistant ACS. Je fonctionne mieux en français !\n\nHow can I help you with your archives?"
+      return "I detected English! I'm the ACS assistant, specialized in insurance archives. I work best in French, but I can understand basic requests.\n\nJe suis l'assistant ACS. Je fonctionne mieux en français !\n\nHow can I help you with your archives?"
     
     case 'question_negative':
       return "Je comprends que vous voulez exclure certains éléments. Je vais faire de mon mieux, mais pour l'instant, je fonctionne mieux avec des recherches positives.\n\nEssayez plutôt : \"Documents de type X\" ou \"Documents du client Y\""
@@ -1716,7 +1912,7 @@ function estQuestionDefinitionGenerale(question: string): boolean {
 
 	const normalizedQuotes = normalized
 		.replace(/['']/g, "'")
-		.replace(/[‐‑–—]/g, '-')
+		.replace(/[’‘–—]/g, '-')
 
 	// ÉTAPE 1: Détecter si c'est une question de définition (GÉNÉRIQUE)
 	// On utilise des regex pour capturer tous les patterns possibles
@@ -1769,7 +1965,7 @@ function estQuestionConseilGeneral(question: string): boolean {
 
 	const normalizedQuotes = normalized
 		.replace(/['']/g, "'")
-		.replace(/[‐‑–—]/g, '-')
+		.replace(/[’‘–—]/g, '-')
 
 	// ÉTAPE 1: Détecter les patterns de demande de conseil (GÉNÉRIQUE)
 	const conseilPatterns = [
@@ -1812,7 +2008,7 @@ function estQuestionExplicationConcept(question: string): boolean {
 
 	const normalizedQuotes = normalized
 		.replace(/['']/g, "'")
-		.replace(/[‐‑–—]/g, '-')
+		.replace(/[’‘–—]/g, '-')
 
 	// ÉTAPE 1: Détecter les patterns de demande d'explication/clarification (GÉNÉRIQUE)
 	const explicationPatterns = [
@@ -1838,7 +2034,7 @@ function estQuestionExplicationConcept(question: string): boolean {
 		/\b(client|pour) [a-z0-9]{2,4}\b/i,      
 		/\b(montre|affiche|liste|donne|trouve)\b.*\b(moi|les)\b/,
 		/\bdu [0-9]{1,2}/,                        
-		/\bn[°o] ?[0-9]+\b/i,                     
+		/\bn[°o] ?[0-9]+\b/i,
 	]
 
 	return !documentRequestIndicators.some((pattern) => pattern.test(normalizedQuotes))
@@ -2007,6 +2203,47 @@ function buildBackendUrl(path: string): URL {
   return new URL(path, API_BASE)
 }
 
+type ClientLookup = {
+  nom?: string
+  numero_client?: string | null
+}
+
+async function verifierCodeClientBackend(code: string, token: string | null): Promise<boolean | null> {
+  const normalized = code.trim().toUpperCase()
+  if (!normalized) return false
+
+  const cached = clientValidationCache.get(normalized)
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) {
+    return cached.ok
+  }
+
+  let data: unknown
+  try {
+    const url = buildBackendUrl('clients/')
+    url.searchParams.set('simple', '1')
+    url.searchParams.set('search', normalized)
+    data = await fetchJson<unknown>(url, token)
+  } catch {
+    return null
+  }
+
+  const results = Array.isArray(data)
+    ? (data as ClientLookup[])
+    : Array.isArray((data as any)?.results)
+      ? ((data as any).results as ClientLookup[])
+      : []
+
+  const ok = results.some((client) => {
+    const nom = (client?.nom ?? '').toString().trim().toUpperCase()
+    const numero = (client?.numero_client ?? '').toString().trim().toUpperCase()
+    return nom === normalized || numero === normalized
+  })
+
+  clientValidationCache.set(normalized, { ok, expiresAt: now + CLIENT_VALIDATION_TTL_MS })
+  return ok
+}
+
 /**
  * Journalise l'usage réel d'un appel LLM (télémétrie).
  * Appelé après un appel LLM réussi pour enregistrer les tokens consommés.
@@ -2064,6 +2301,8 @@ function extraireTokenDepuisCookies(request: Request): string | null {
   return null
 }
 
+const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.ASSISTANT_BACKEND_FETCH_TIMEOUT_MS ?? '12000')
+
 async function fetchJson<T>(url: URL, token: string | null): Promise<T> {
   const headers = new Headers()
   headers.set('Accept', 'application/json')
@@ -2071,10 +2310,24 @@ async function fetchJson<T>(url: URL, token: string | null): Promise<T> {
     headers.set('Authorization', token)
   }
 
-  const response = await fetch(url, {
-    headers,
-    cache: 'no-store',
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), BACKEND_FETCH_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      headers,
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new BackendError(`Timeout backend après ${BACKEND_FETCH_TIMEOUT_MS} ms`, 504)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   const text = await response.text()
   
@@ -2163,6 +2416,7 @@ function construireHighlights(metadata: Record<string, unknown>): string[] {
 
 function construireContenuDocument(doc: DocumentDetail, resultat?: DocumentSearchResult): string {
   const lignes: string[] = []
+
   if (doc.description) {
     lignes.push(doc.description.trim())
   }
@@ -2195,111 +2449,6 @@ function tokenizeText(value: string): string[] {
     .toLowerCase()
     .split(/[^a-z0-9]+/gi)
     .filter(Boolean)
-}
-
-function buildDocumentTokens(doc: DocumentDetail, metadata: Record<string, unknown>): string[] {
-  const segments: Array<{ value: string | null | undefined; weight: number }> = [
-    { value: doc.titre, weight: 3 },
-    { value: doc.description, weight: 2 },
-    { value: metadata.client as string | null, weight: 2 },
-    { value: metadata.type as string | null, weight: 2 },
-    { value: metadata.reference as string | null, weight: 2 },
-    { value: doc.risque_detail?.type, weight: 1 },
-  ]
-
-  const tokens: string[] = []
-  for (const segment of segments) {
-    if (!segment.value) continue
-    const baseTokens = tokenizeText(String(segment.value))
-    if (!baseTokens.length) continue
-    for (let i = 0; i < segment.weight; i += 1) {
-      tokens.push(...baseTokens)
-    }
-  }
-
-  return tokens.length ? tokens : tokenizeText(doc.titre ?? '')
-}
-
-function compterFrequences(tokens: string[]): Map<string, number> {
-  const frequences = new Map<string, number>()
-  for (const token of tokens) {
-    const courant = frequences.get(token) ?? 0
-    frequences.set(token, courant + 1)
-  }
-  return frequences
-}
-
-function calculerScoreBM25(
-  questionTokens: string[],
-  termFreq: Map<string, number>,
-  docLength: number,
-  avgDocLength: number,
-  df: Map<string, number>,
-  docCount: number
-): number {
-  if (!questionTokens.length) {
-    return 0
-  }
-
-  const k1 = 1.5
-  const b = 0.75
-  const longueur = docLength || 1
-  const longueurMoyenne = avgDocLength || 1
-
-  let score = 0
-  for (const token of questionTokens) {
-    const freq = termFreq.get(token) ?? 0
-    if (freq === 0) {
-      continue
-    }
-
-    const docFreq = df.get(token) ?? 0
-    const idf = Math.log(1 + (docCount - docFreq + 0.5) / (docFreq + 0.5))
-    const numerator = freq * (k1 + 1)
-    const denominator = freq + k1 * (1 - b + (b * longueur) / longueurMoyenne)
-    score += idf * (numerator / denominator)
-  }
-
-  return Number.isFinite(score) ? score : 0
-}
-
-async function recupererDocumentRecent(token: string | null): Promise<DocumentPiece | null> {
-  if (!token) {
-    return null
-  }
-
-  const url = buildBackendUrl('documents/')
-  url.searchParams.set('ordering', '-cree_le')
-  url.searchParams.set('page_size', '1')
-  const data = await fetchJson<any>(url, token)
-  const results = Array.isArray(data) ? (data as DocumentDetail[]) : ((data?.results ?? []) as DocumentDetail[])
-  const doc = results[0]
-  if (!doc) {
-    return null
-  }
-
-  const metadata = construireMetadataDocument(doc)
-  const highlights = construireHighlights(metadata)
-  return {
-    id: doc.id,
-    source: doc.titre,
-    content: construireContenuDocument(doc),
-    metadata: {
-      ...metadata,
-      highlights,
-    },
-    score: 0.1,
-    isFallback: true,
-  }
-}
-
-type AssistantSearchResult = {
-  id: string
-  titre: string
-  score: number
-  metadata: Record<string, unknown>
-  highlights?: string[]
-  content: string
 }
 
 // Type pour les filtres de recherche
@@ -2577,12 +2726,12 @@ function construireResumeDocuments(_question: string, pieces: DocumentPiece[], t
   let emoji = ''
   const type = (metadata.type as string)?.toLowerCase() || ''
   if (toneConfig.useEmojis) {
-    if (type.includes('sinistre')) emoji = '⚠️ ';
-    else if (type.includes('contrat')) emoji = '📋 ';
-    else if (type.includes('facture')) emoji = '💰 ';
-    else if (type.includes('rapport')) emoji = '📊 ';
-    else if (type.includes('courrier')) emoji = '✉️ ';
-    else emoji = '📄 ';
+    if (type.includes('sinistre')) emoji = '🚨 '
+    else if (type.includes('contrat')) emoji = '📄 '
+    else if (type.includes('facture')) emoji = '🧾 '
+    else if (type.includes('rapport')) emoji = '📊 '
+    else if (type.includes('courrier')) emoji = '✉️ '
+    else emoji = '📎 '
   }
 
   // Titre du document
@@ -2601,7 +2750,7 @@ function construireResumeDocuments(_question: string, pieces: DocumentPiece[], t
   // Résumé naturel
   const contenu = premiere.content || '';
   if (contenu.length > 50) {
-    const montantMatch = contenu.match(/\d+[\s\u00A0]?(?:\d{3}[\s\u00A0]?)*[€$£]|montant[:\s]+\d+/i);
+    const montantMatch = contenu.match(/\d+[\s\u00A0]?(?:\d{3}[\s\u00A0]?)*[€$¢]|montant[:\s]+\d+/i);
     const statutMatch = contenu.match(/(?:statut|état|status)[:\s]+([^\n.]+)|(?:en cours|traité|validé|en attente|clos)/i);
     const details: string[] = [];
     if (montantMatch) details.push(montantMatch[0]);
@@ -2669,6 +2818,38 @@ async function recupererTousLesDocuments(token: string | null): Promise<Document
   }
 
   return documents
+}
+
+async function recupererDocumentRecent(token: string | null): Promise<DocumentPiece | null> {
+  if (!token) {
+    throw new BackendError('Authentification requise pour consulter les documents.', 401)
+  }
+
+  const url = buildBackendUrl('documents/')
+  url.searchParams.set('ordering', '-cree_le')
+  url.searchParams.set('page_size', '1')
+
+  const data = await fetchJson<any>(url, token)
+  const results = Array.isArray(data) ? (data as DocumentDetail[]) : ((data?.results ?? []) as DocumentDetail[])
+  const doc = results[0]
+  if (!doc) {
+    return null
+  }
+
+  const metadata = construireMetadataDocument(doc)
+  const highlights = construireHighlights(metadata)
+
+  return {
+    id: doc.id,
+    source: doc.titre,
+    content: construireContenuDocument(doc),
+    metadata: {
+      ...metadata,
+      highlights,
+    },
+    score: 0,
+    isFallback: true,
+  }
 }
 
 function calculerStatistiques(documents: DocumentDetail[]): Statistiques {
@@ -2911,26 +3092,54 @@ export async function POST(request: Request) {
     
     const startedAt = Date.now()
     const sessionId = generateSessionId(token)
-    const questionOriginale = questionBrute
+    const choixClarif = extraireChoixClarification(questionBrute)
+    const clarif = choixClarif ? recupererDerniereClarification(sessionId) : null
+
+    // Hydrater l'historique depuis la persistance si nécessaire (utile en dev / hot-reload)
+    await getConversationHistoryWithPersistence(sessionId, token)
+
+    let questionOriginale = questionBrute
+    let modeAssistantForce: ModeAssistant | null = null
+    if (choixClarif && clarif) {
+      questionOriginale = choixClarif.reste
+        ? `${clarif.questionBase}\n\nPrécision utilisateur: ${choixClarif.reste}`
+        : clarif.questionBase
+      modeAssistantForce = choixClarif.choix === 'A' ? 'assurance_courtage' : 'recherche_document'
+    }
     
     // Récupérer le contexte de conversation (pour les requêtes de suivi)
     const contexteConv = extraireContexteHistorique(sessionId)
     
     // Extraire les critères de la question originale
     const criteresQuestion = extraireCriteresRecherche(questionOriginale)
+
+    let clientQuestion = criteresQuestion.client
+    if (clientQuestion) {
+      const validation = await verifierCodeClientBackend(clientQuestion, token)
+      if (validation === false) {
+        clientQuestion = null
+      }
+    }
     
     // Fusionner avec le contexte de conversation (critères explicites prioritaires)
     const criteresFinal: CriteresRecherche = {
       typeDocument: criteresQuestion.typeDocument || contexteConv.typeDocument,
-      client: criteresQuestion.client || contexteConv.client,
+      client: clientQuestion || contexteConv.client,
       annee: criteresQuestion.annee || contexteConv.annee,
       risque: criteresQuestion.risque || contexteConv.risque,
       typeCourrier: criteresQuestion.typeCourrier,
       reference: criteresQuestion.reference,
     }
+
+    if (criteresFinal.client) {
+      const validationFinale = await verifierCodeClientBackend(criteresFinal.client, token)
+      if (validationFinale === false) {
+        criteresFinal.client = null
+      }
+    }
     
     // Classification simplifiée
-    const modeAssistant = classifierSimple(questionOriginale, criteresFinal)
+    const modeAssistant = modeAssistantForce ?? classifierSimple(questionOriginale, criteresFinal)
     console.log(`=== Mode: ${modeAssistant} | Critères: client=${criteresFinal.client}, année=${criteresFinal.annee}, type=${criteresFinal.typeDocument}, risque=${criteresFinal.risque} ===`)
     
     // Variables de compatibilité avec le code existant
@@ -2962,44 +3171,23 @@ export async function POST(request: Request) {
         pieces: [],
         insights: [],
         actions: [],
-        narration: { texte: 'Bonjour ! Comment puis-je t\'aider ? Tu peux me demander de chercher un document, par exemple : "avenant 2018 de 3CB risque santé".', source: 'heuristique' },
+        narration: {
+          texte:
+            "Je peux faire deux choses: (1) rechercher des documents liés à ACS et (2) répondre à des questions liées à l’assurance et au courtage. Dis-moi ce que tu veux faire.",
+          source: 'heuristique',
+        },
       }
-      addToConversation(sessionId, 'user', questionOriginale)
-      addToConversation(sessionId, 'assistant', reponse.narration!.texte)
+      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+      await addToConversationWithPersistence(sessionId, 'assistant', reponse.narration!.texte, token)
       return NextResponse.json(reponse)
     }
     
     // =========================================================================
-    // MODE CONVERSATION (questions générales, hors recherche de documents)
-    // et MODE CONFIRMATION ("oui", "ok"...) : on reste dans la conversation
+    // MODE CONFIRMATION ("oui", "ok"...) : demande de précision dans le flux
     // =========================================================================
-    if (modeAssistant === 'conversation' || modeAssistant === 'confirmation') {
-      let narrationTexte =
-        modeAssistant === 'confirmation'
-          ? "D'accord. Dis-moi ce que tu souhaites que je fasse (par exemple : ouvrir un des documents trouvés, t'expliquer plus en détail, ou relancer une recherche)."
-          : 'Je suis l\'assistant ACS. Je peux t\'aider à trouver des documents. Essaie par exemple : "avenant 2018 de 3CB risque santé".'
-      let llmUsed = false
-
-      if (isLlmConfigured()) {
-        try {
-          const { content, telemetry } = await generateLlmAnswer({
-            question: questionOriginale,
-            intent: 'documents',
-            sessionId,
-            token,
-            customSystemPrompt: buildConversationSystemPrompt(),
-          })
-          narrationTexte = content
-          llmUsed = true
-          if (telemetry) {
-            await logLlmUsage(telemetry, 'answer', token)
-          }
-        } catch (llmError) {
-          console.warn('LLM indisponible (conversation), fallback heuristique.', llmError)
-        }
-      } else {
-        console.warn('LLM non configuré côté front (conversation). Vérifie MISTRAL_API_KEY dans front/.env.local')
-      }
+    if (modeAssistant === 'confirmation') {
+      const narrationTexte =
+        "D'accord. Dis-moi ce que tu souhaites que je fasse (recherche de documents ACS, ou question assurance/courtage)."
 
       const reponseConv: AssistantResponse = {
         question: questionOriginale,
@@ -3008,12 +3196,116 @@ export async function POST(request: Request) {
         pieces: [],
         insights: [],
         actions: [],
-        narration: { texte: narrationTexte, source: llmUsed ? 'llm' : 'heuristique' },
+        narration: { texte: narrationTexte, source: 'heuristique' },
       }
       
-      addToConversation(sessionId, 'user', questionOriginale)
-      addToConversation(sessionId, 'assistant', narrationTexte)
+      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+      await addToConversationWithPersistence(sessionId, 'assistant', narrationTexte, token)
       return NextResponse.json(reponseConv)
+    }
+
+    if (modeAssistant === 'clarification') {
+      const message =
+        "Je peux t'aider de deux façons. Réponds A pour une explication (assurance/courtage), ou B pour rechercher dans les archives."
+
+      const reponseClarification: AssistantResponse = {
+        question: questionOriginale,
+        type: 'documents',
+        resume: message,
+        pieces: [],
+        insights: [],
+        actions: [],
+        narration: { texte: message, source: 'heuristique' },
+      }
+
+      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+      await addToConversationWithPersistence(sessionId, 'assistant', message, token)
+      return NextResponse.json(reponseClarification)
+    }
+
+    if (modeAssistant === 'assurance_courtage') {
+      const startedAtAssurance = Date.now()
+      incrementRequest('documents')
+
+      const criteresPourAmbiguite = extraireCriteresRecherche(questionOriginale)
+      const estAmbigue = estQuestionAssuranceCourtageAmbigue(questionOriginale, criteresPourAmbiguite)
+
+      let narration: AssistantResponse['narration'] = {
+        texte:
+          "Je peux répondre aux questions d’assurance/courtage, mais le service LLM est momentanément indisponible. Réessaie dans quelques instants.",
+        source: 'heuristique',
+      }
+
+      if (isLlmConfigured()) {
+        try {
+          const { content, telemetry } = await generateLlmAnswer({
+            question: questionOriginale,
+            intent: 'documents',
+            sessionId,
+            token,
+            customSystemPrompt: estAmbigue ? buildClarificationSystemPrompt() : buildConversationSystemPrompt(),
+          })
+
+          if (estReponseLlmFiller(content)) {
+            throw new Error('Réponse LLM vide ou insuffisante')
+          }
+
+          narration = {
+            texte: content,
+            source: 'llm',
+            telemetry,
+          }
+          incrementLlmSuccess()
+          if (telemetry) {
+            await logLlmUsage(telemetry, 'answer', token)
+          }
+        } catch (llmError) {
+          console.warn('LLM indisponible (assurance/courtage).', llmError)
+          incrementLlmFallback()
+        }
+      } else {
+        console.warn('LLM non configuré côté front (assurance/courtage). Vérifie MISTRAL_API_KEY dans front/.env.local')
+      }
+
+      const reponseAssurance: AssistantResponse = {
+        question: questionOriginale,
+        type: 'documents',
+        resume: narration.texte,
+        pieces: [],
+        insights: [],
+        actions: [],
+        narration,
+      }
+
+      journaliserAssistant({
+        type: 'response',
+        intent: 'documents',
+        durationMs: Date.now() - startedAtAssurance,
+        pieces: 0,
+        llmUsed: narration.source === 'llm',
+      })
+
+      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+      await addToConversationWithPersistence(sessionId, 'assistant', narration.texte, token)
+      return NextResponse.json(reponseAssurance)
+    }
+
+    if (modeAssistant === 'hors_perimetre') {
+      const message =
+        "Je peux uniquement (1) rechercher des documents liés à ACS et (2) répondre aux questions liées à l’assurance et au courtage. Reformule ta demande dans ce cadre."
+      const reponseHorsPerimetre: AssistantResponse = {
+        question: questionOriginale,
+        type: 'documents',
+        resume: message,
+        pieces: [],
+        insights: [],
+        actions: [],
+        narration: { texte: message, source: 'heuristique' },
+      }
+
+      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+      await addToConversationWithPersistence(sessionId, 'assistant', message, token)
+      return NextResponse.json(reponseHorsPerimetre)
     }
 
     const intent = detectIntent(question)
@@ -3022,9 +3314,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ erreur: 'Rôle utilisateur manquant ou invalide.' }, { status: 401 })
     }
 
-    // Les salutations et certaines questions conversationnelles passent par le LLM
-    // (les confirmations simples sont gérées plus haut comme une continuation de conversation)
-    if (estSalutation(question) || typeMessage === 'conversation' || typeMessage === 'expression_emotion') {
+    // Les salutations et certaines questions conversationnelles passaient historiquement par le LLM.
+    // Avec le mode strict (docs vs assurance/courtage), on évite que ces heuristiques ne court-circuitent
+    // une recherche de documents déjà identifiée.
+    if (modeAssistant !== 'recherche_document' && (estSalutation(question) || typeMessage === 'conversation' || typeMessage === 'expression_emotion')) {
       const salutationStartedAt = Date.now()
       incrementRequest('documents')
       journaliserAssistant({
@@ -3083,7 +3376,7 @@ export async function POST(request: Request) {
         insights: [],
         actions: [],
                 narration,
-        interactionId: interactionIdSalutation, // Pour le feedback 👍/👎
+        interactionId: interactionIdSalutation, // Pour le feedback ­ƒæì/­ƒæÄ
       }
 
       journaliserAssistant({
@@ -3308,7 +3601,7 @@ export async function POST(request: Request) {
           }
         }
         
-        const réponseClientSpécifique: AssistantResponse = {
+        const reponseClientSpecifique: AssistantResponse = {
           question,
           type: 'documents',
           resume,
@@ -3326,7 +3619,7 @@ export async function POST(request: Request) {
           llmUsed: narration.source === 'llm',
         })
         
-        return NextResponse.json(réponseClientSpécifique)
+        return NextResponse.json(reponseClientSpecifique)
       }
       
       // Traitement standard pour les questions sur les statistiques générales de clients
@@ -3344,7 +3637,7 @@ export async function POST(request: Request) {
             message = `Actuellement, l'application ACS compte ${total} client${total > 1 ? 's' : ''} au total, dont ${particuliers} particulier${particuliers > 1 ? 's' : ''} et ${entreprises} entreprise${entreprises > 1 ? 's' : ''}.`
         }
 
-        const réponseClients: AssistantResponse = {
+        const reponseClients: AssistantResponse = {
           question,
           type: 'statistiques',
           resume: message,
@@ -3364,7 +3657,7 @@ export async function POST(request: Request) {
           durationMs: Date.now() - startedAt,
           llmUsed: false,
         })
-        return NextResponse.json(réponseClients)
+        return NextResponse.json(reponseClients)
       }
 
       const narration: AssistantResponse['narration'] = {
@@ -3372,7 +3665,7 @@ export async function POST(request: Request) {
         source: 'heuristique',
       }
 
-      const réponse: AssistantResponse = {
+      const reponse: AssistantResponse = {
         question,
         type: 'statistiques',
         resume: resumeParDefaut,
@@ -3389,7 +3682,7 @@ export async function POST(request: Request) {
         durationMs: Date.now() - startedAt,
         llmUsed: false,
       })
-      return NextResponse.json(réponse)
+      return NextResponse.json(reponse)
     }
 
     if (!ROLES_AUTORISES_DOCUMENTS.has(role)) {
@@ -3399,22 +3692,8 @@ export async function POST(request: Request) {
     // Questions sur les capacités / limites de l'assistant :
     // on répond honnêtement sur ce qu'on peut ou ne peut pas faire, sans recherche de documents.
     if (estQuestionCapacitesAssistant(question)) {
-      const messageCapacites = `Je suis un assistant de recherche et de consultation d'archives. Voici ce que je peux faire pour toi :
-
-✅ **Ce que je peux faire :**
-- Rechercher et afficher des documents dans les archives ACS
-- Te donner des statistiques sur tes archives (nombre de documents, clients, taux de conformité…)
-- T'expliquer des concepts liés à l'archivage ou à l'assurance
-- Te conseiller sur l'organisation de tes documents
-
-❌ **Ce que je ne peux PAS faire :**
-- Modifier, supprimer ou créer des documents dans ACS
-- Accéder à des données en dehors de ton périmètre de droits
-- Effectuer des actions qui nécessitent une intervention humaine (validation, signature…)
-
-Si je ne suis pas sûr d'une information, je te le dirai clairement plutôt que d'inventer une réponse.
-
-Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
+      const messageCapacites =
+        "Je peux uniquement (1) rechercher des documents liés à ACS et (2) répondre aux questions liées à l’assurance et au courtage."
 
       const reponseCapacites: AssistantResponse = {
         question,
@@ -3452,10 +3731,17 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
     // Questions de définition générale, de conseil général ou de demande d'explication de concept :
     // on ne lance PAS de recherche documentaire et on ne renvoie AUCUNE pièce justificative.
     // On laisse uniquement le LLM (Mistral) expliquer le concept ou donner des conseils.
-    if (estQuestionDefinitionGenerale(question) || estQuestionConseilGeneral(question) || estQuestionExplicationConcept(question)) {
+    if (
+      modeAssistant !== 'recherche_document' &&
+      estQuestionAssuranceCourtage(questionOriginale) &&
+      (estQuestionDefinitionGenerale(question) || estQuestionConseilGeneral(question) || estQuestionExplicationConcept(question))
+    ) {
+      const startedAtDefinition = Date.now()
+      incrementRequest('documents')
+
       let narration: AssistantResponse['narration'] = {
         texte:
-          "Je vais t'expliquer simplement ce que c'est, sans m'appuyer sur un document précis de tes archives.",
+          "Je peux répondre aux questions d’assurance/courtage, mais le service LLM est momentanément indisponible. Réessaie dans quelques instants.",
         source: 'heuristique',
       }
 
@@ -3468,6 +3754,11 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
             token,
             customSystemPrompt: buildConversationSystemPrompt(),
           })
+
+          if (estReponseLlmFiller(content)) {
+            throw new Error('Réponse LLM vide ou insuffisante')
+          }
+
           narration = {
             texte: content,
             source: 'llm',
@@ -3478,16 +3769,14 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
             await logLlmUsage(telemetry, 'answer', token)
           }
         } catch (llmError) {
-          console.warn('Assistant LLM (définition générale) indisponible, fallback heuristique.', llmError)
+          console.warn('Assistant LLM (définition générale) indisponible.', llmError)
           incrementLlmFallback()
         }
       }
       const reponseDefinition: AssistantResponse = {
         question,
         type: 'documents',
-        // Pour une définition, le résumé est simplement le texte principal de la réponse
         resume: narration.texte,
-        // Aucune pièce justificative pour une simple définition
         pieces: undefined,
         statistiques: undefined,
         insights: [],
@@ -3506,7 +3795,7 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
       journaliserAssistant({
         type: 'response',
         intent: 'documents',
-        durationMs: Date.now() - startedAt,
+        durationMs: Date.now() - startedAtDefinition,
         pieces: 0,
         llmUsed: narration.source === 'llm',
       })
@@ -3757,7 +4046,7 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
       },
     }
 
-    const réponse: AssistantResponse = {
+    const reponse: AssistantResponse = {
       question,
       type: 'documents',
       resume,
@@ -3765,16 +4054,16 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
       insights,
       actions,
       narration,
-      interactionId, // Pour permettre le feedback 👍/👎
+      interactionId, // Pour permettre le feedback ­ƒæì/­ƒæÄ
       trace,
     }
 
     // =========================================================================
     // STOCKAGE DANS L'HISTORIQUE DE CONVERSATION
-    // Permet de conserver le contexte pour les requêtes de suivi
+    // Permet de conserver le contexte pour les requetes de suivi
     // =========================================================================
-    addToConversation(sessionId, 'user', questionOriginale)
-    addToConversation(sessionId, 'assistant', narration.texte)
+    await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+    await addToConversationWithPersistence(sessionId, 'assistant', narration.texte, token)
 
     console.info('assistant-demo', {
       intent,
@@ -3793,7 +4082,7 @@ Y a-t-il autre chose que tu voudrais savoir sur mes capacités ?`
       llmUsed: narration.source === 'llm',
     })
 
-    return NextResponse.json(réponse)
+    return NextResponse.json(reponse)
   } catch (error) {
     incrementErrors()
     console.error('Erreur assistant-demo', error)

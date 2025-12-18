@@ -23,6 +23,8 @@ front/.next/
 # misc
 .DS_Store
 *.pem
+HEAD_route.ts
+HEAD_route_clean.ts
 
 # debug
 npm-debug.log*
