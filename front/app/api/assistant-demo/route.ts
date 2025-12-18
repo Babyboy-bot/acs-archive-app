@@ -485,6 +485,11 @@ const ASSISTANT_ENABLED = (process.env.NEXT_PUBLIC_ASSISTANT_ENABLED ?? 'true').
 const RATE_LIMIT_WINDOW_MS = 60 * 1000
 const RATE_LIMIT_MAX_REQUESTS = Number(process.env.NEXT_PUBLIC_ASSISTANT_RATE_LIMIT ?? '12')
 
+const CLIENT_VALIDATION_TTL_MS = Number(process.env.ASSISTANT_CLIENT_VALIDATION_TTL_MS ?? '600000')
+
+type ClientValidationCacheEntry = { ok: boolean; expiresAt: number }
+const clientValidationCache = new Map<string, ClientValidationCacheEntry>()
+
 const rateLimitStore = new Map<string, number[]>()
 
 const ROLES_AUTORISES_DOCUMENTS = new Set<RoleUtilisateur>([
@@ -765,8 +770,17 @@ function extraireCriteresRecherche(question: string): CriteresRecherche {
   if (!client) {
     const codeMatch = question.match(/\b([A-Z][A-Z0-9]{1,5}|[0-9][A-Z]{1,3}[0-9]*)\b/i)
     if (codeMatch) {
-      const candidat = codeMatch[1].toUpperCase()
-      if (!motsReserves.includes(candidat) && !/^(19|20)\d{2}$/.test(candidat)) {
+      const brut = codeMatch[1]
+      const candidat = brut.toUpperCase()
+      const commenceParChiffre = /^\d/.test(brut)
+      const lettresUniquement = /^[A-Za-z]+$/.test(brut)
+      const estToutEnMajuscules = brut === brut.toUpperCase()
+
+      if (
+        !motsReserves.includes(candidat) &&
+        !/^(19|20)\d{2}$/.test(candidat) &&
+        (commenceParChiffre || !lettresUniquement || estToutEnMajuscules)
+      ) {
         client = candidat
       }
     }
@@ -819,6 +833,7 @@ function extraireTypeDocumentDemande(question: string): string | null {
 type ModeAssistant =
   | 'recherche_document'
   | 'assurance_courtage'
+  | 'clarification'
   | 'hors_perimetre'
   | 'salutation'
   | 'confirmation'
@@ -835,7 +850,7 @@ function estQuestionAssuranceCourtage(question: string): boolean {
   const patterns = [
     /\bassurance(s)?\b/,
     /\bassureur(s)?\b/,
-    /\bassure(e|es|s)?\b/,
+    /\bassur(e|es|s|er|ers|ez|ent|era|eras|erez|erai|erais|erons|erez|eront|ant|ance)\b/,
     /\bcourtage\b/,
     /\bcourtier(s)?\b/,
     /\bprime(s)?\b/,
@@ -1013,8 +1028,8 @@ function classifierSimple(question: string, criteresExtraits: CriteresRecherche)
     return 'recherche_document'
   }
   
-  // 7. Par défaut → hors périmètre
-  return 'hors_perimetre'
+  // 7. Par défaut → clarification (éviter les faux "hors périmètre" sur des demandes implicites)
+  return 'clarification'
 }
 
 function estReponseLlmFiller(content: string): boolean {
@@ -2188,6 +2203,47 @@ function buildBackendUrl(path: string): URL {
   return new URL(path, API_BASE)
 }
 
+type ClientLookup = {
+  nom?: string
+  numero_client?: string | null
+}
+
+async function verifierCodeClientBackend(code: string, token: string | null): Promise<boolean | null> {
+  const normalized = code.trim().toUpperCase()
+  if (!normalized) return false
+
+  const cached = clientValidationCache.get(normalized)
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) {
+    return cached.ok
+  }
+
+  let data: unknown
+  try {
+    const url = buildBackendUrl('clients/')
+    url.searchParams.set('simple', '1')
+    url.searchParams.set('search', normalized)
+    data = await fetchJson<unknown>(url, token)
+  } catch {
+    return null
+  }
+
+  const results = Array.isArray(data)
+    ? (data as ClientLookup[])
+    : Array.isArray((data as any)?.results)
+      ? ((data as any).results as ClientLookup[])
+      : []
+
+  const ok = results.some((client) => {
+    const nom = (client?.nom ?? '').toString().trim().toUpperCase()
+    const numero = (client?.numero_client ?? '').toString().trim().toUpperCase()
+    return nom === normalized || numero === normalized
+  })
+
+  clientValidationCache.set(normalized, { ok, expiresAt: now + CLIENT_VALIDATION_TTL_MS })
+  return ok
+}
+
 /**
  * Journalise l'usage réel d'un appel LLM (télémétrie).
  * Appelé après un appel LLM réussi pour enregistrer les tokens consommés.
@@ -3056,15 +3112,30 @@ export async function POST(request: Request) {
     
     // Extraire les critères de la question originale
     const criteresQuestion = extraireCriteresRecherche(questionOriginale)
+
+    let clientQuestion = criteresQuestion.client
+    if (clientQuestion) {
+      const validation = await verifierCodeClientBackend(clientQuestion, token)
+      if (validation === false) {
+        clientQuestion = null
+      }
+    }
     
     // Fusionner avec le contexte de conversation (critères explicites prioritaires)
     const criteresFinal: CriteresRecherche = {
       typeDocument: criteresQuestion.typeDocument || contexteConv.typeDocument,
-      client: criteresQuestion.client || contexteConv.client,
+      client: clientQuestion || contexteConv.client,
       annee: criteresQuestion.annee || contexteConv.annee,
       risque: criteresQuestion.risque || contexteConv.risque,
       typeCourrier: criteresQuestion.typeCourrier,
       reference: criteresQuestion.reference,
+    }
+
+    if (criteresFinal.client) {
+      const validationFinale = await verifierCodeClientBackend(criteresFinal.client, token)
+      if (validationFinale === false) {
+        criteresFinal.client = null
+      }
     }
     
     // Classification simplifiée
@@ -3131,6 +3202,25 @@ export async function POST(request: Request) {
       await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
       await addToConversationWithPersistence(sessionId, 'assistant', narrationTexte, token)
       return NextResponse.json(reponseConv)
+    }
+
+    if (modeAssistant === 'clarification') {
+      const message =
+        "Je peux t'aider de deux façons. Réponds A pour une explication (assurance/courtage), ou B pour rechercher dans les archives."
+
+      const reponseClarification: AssistantResponse = {
+        question: questionOriginale,
+        type: 'documents',
+        resume: message,
+        pieces: [],
+        insights: [],
+        actions: [],
+        narration: { texte: message, source: 'heuristique' },
+      }
+
+      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+      await addToConversationWithPersistence(sessionId, 'assistant', message, token)
+      return NextResponse.json(reponseClarification)
     }
 
     if (modeAssistant === 'assurance_courtage') {

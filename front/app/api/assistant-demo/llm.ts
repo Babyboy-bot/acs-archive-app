@@ -47,7 +47,8 @@ const MISTRAL_RETRY_MAX = Number(process.env.MISTRAL_RETRY_MAX ?? '2')
 const MISTRAL_RETRY_BASE_DELAY_MS = Number(process.env.MISTRAL_RETRY_BASE_DELAY_MS ?? '400')
 const MISTRAL_CIRCUIT_FAILURE_THRESHOLD = Number(process.env.MISTRAL_CIRCUIT_FAILURE_THRESHOLD ?? '3')
 const MISTRAL_CIRCUIT_OPEN_MS = Number(process.env.MISTRAL_CIRCUIT_OPEN_MS ?? '15000')
-const MISTRAL_TOTAL_BUDGET_MS = Number(process.env.MISTRAL_TOTAL_BUDGET_MS ?? '12000')
+const MISTRAL_TOTAL_BUDGET_MS = Number(process.env.MISTRAL_TOTAL_BUDGET_MS ?? String(LLM_TIMEOUT_MS))
+const MISTRAL_ATTEMPT_TIMEOUT_MS = Number(process.env.MISTRAL_ATTEMPT_TIMEOUT_MS ?? '8000')
 const MISTRAL_FORCE_CONNECTION_CLOSE = (process.env.MISTRAL_FORCE_CONNECTION_CLOSE ?? 'true').toLowerCase() === 'true'
 
 // Seuil de complexité pour utiliser le modèle avancé (abaissé pour utiliser plus souvent le modèle puissant)
@@ -774,6 +775,9 @@ async function callMistral(
     if (remainingMs <= 0) {
       throw new Error(`Mistral LLM timeout (budget total dépassé) après ${Math.max(0, Date.now() - started)} ms | url=${url}`)
     }
+
+    const attemptTimeoutMs = Math.min(LLM_TIMEOUT_MS, Math.max(1, remainingMs), Math.max(250, MISTRAL_ATTEMPT_TIMEOUT_MS))
+
     try {
       const requestHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -794,19 +798,18 @@ async function callMistral(
           temperature: options?.temperature ?? 0.7,
           max_tokens: options?.maxTokens ?? 250,
         }),
-        timeoutMs: Math.min(LLM_TIMEOUT_MS, remainingMs),
+        timeoutMs: attemptTimeoutMs,
       })
       lastError = null
       break
     } catch (error: any) {
       lastError = error
       const elapsedErr = Date.now() - started
-      if (error?.name === 'AbortError') {
-        throw new Error(`Mistral LLM timeout après ${LLM_TIMEOUT_MS} ms (durée réelle: ${elapsedErr} ms)`)
-      }
-
-      const retryable = isRetryableMistralNetworkError(error)
+      const retryable = error?.name === 'AbortError' ? true : isRetryableMistralNetworkError(error)
       if (!retryable || attempt >= maxAttempts) {
+        if (error?.name === 'AbortError') {
+          throw new Error(`Mistral LLM timeout après ${attemptTimeoutMs} ms (durée réelle: ${elapsedErr} ms)`)
+        }
         const cause = error?.cause
         const causeDetails = cause && typeof cause === 'object'
           ? {
