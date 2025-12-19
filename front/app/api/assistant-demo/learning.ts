@@ -50,7 +50,7 @@ export interface LearningStats {
 }
 
 // ============================================================================
-// STOCKAGE EN MÉMOIRE (peut être remplacé par une base de données)
+// STOCKAGE EN MÉMOIRE (cache local + persistance backend)
 // ============================================================================
 
 const interactions: Map<string, Interaction> = new Map()
@@ -62,6 +62,106 @@ const MAX_INTERACTIONS = 10000
 const MAX_PATTERNS = 500
 const MIN_FREQUENCY_FOR_PATTERN = 3
 const PATTERN_SIMILARITY_THRESHOLD = 0.7
+
+// Configuration API Backend
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
+
+// ============================================================================
+// PERSISTANCE BACKEND (async, non-bloquant)
+// ============================================================================
+
+/**
+ * Persiste une interaction vers le backend (fire-and-forget)
+ */
+async function persistInteractionToBackend(
+  interaction: Interaction,
+  cookie: string | null
+): Promise<void> {
+  if (!cookie) return
+  
+  try {
+    await fetch(`${API_BASE}assistant/learning/record/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify({
+        id: interaction.id,
+        question: interaction.question,
+        question_normalized: interaction.questionNormalized,
+        response: interaction.response,
+        intent: interaction.intent,
+        type_message: interaction.typeMessage,
+        client_mentionne: interaction.clientMentionne,
+        type_doc_mentionne: interaction.typeDocMentionne,
+        response_time_ms: interaction.responseTimeMs,
+        llm_used: interaction.llmUsed,
+      }),
+    })
+  } catch (error) {
+    console.warn('[Learning] Échec persistance interaction:', error)
+  }
+}
+
+/**
+ * Persiste un pattern vers le backend (fire-and-forget)
+ */
+async function persistPatternToBackend(
+  pattern: string,
+  example: string,
+  response: string,
+  feedbackScore: number,
+  cookie: string | null
+): Promise<void> {
+  if (!cookie) return
+  
+  try {
+    await fetch(`${API_BASE}assistant/learning/patterns/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify({
+        pattern,
+        example,
+        response,
+        feedback_score: feedbackScore,
+      }),
+    })
+  } catch (error) {
+    console.warn('[Learning] Échec persistance pattern:', error)
+  }
+}
+
+/**
+ * Récupère les interactions similaires depuis le backend
+ */
+export async function getSimilarFromBackend(
+  questionNormalized: string,
+  cookie: string | null
+): Promise<{ question: string; response: string }[]> {
+  if (!cookie) return []
+  
+  try {
+    const response = await fetch(
+      `${API_BASE}assistant/learning/similar/?q=${encodeURIComponent(questionNormalized)}&limit=3`,
+      {
+        headers: { cookie },
+      }
+    )
+    
+    if (!response.ok) return []
+    
+    const data = await response.json()
+    return data.results || []
+  } catch (error) {
+    console.warn('[Learning] Échec récupération similaires:', error)
+    return []
+  }
+}
 
 // ============================================================================
 // FONCTIONS UTILITAIRES

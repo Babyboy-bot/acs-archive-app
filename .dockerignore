@@ -1,0 +1,71 @@
+# ============================================================================
+# .dockerignore - Fichiers à exclure des builds Docker
+# ============================================================================
+
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environnement
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Node.js
+node_modules/
+.npm
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+test-results/
+playwright-report/
+
+# Logs
+*.log
+logs/
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker/

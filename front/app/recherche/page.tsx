@@ -10,6 +10,7 @@ import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { formatDistanceToNow } from 'date-fns'
 import { useRequireAuth } from '@/hooks/useRequireAuth'
+import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
 
 type ClientApi = {
   id: string
@@ -327,6 +328,8 @@ type DocumentApi = {
 export default function PageRecherche() {
   // Tous les hooks doivent être appelés AVANT tout return conditionnel
   const { estAuthentifie, chargement: authChargement } = useRequireAuth()
+  const utilisateur = useUtilisateurCourant()
+  const peutTelecharger = utilisateur?.role !== 'CONSULTANT' // 🔒 PDG: Consultants ne peuvent pas télécharger
 
   const [client, setClient] = useState('')
   const [exercice, setExercice] = useState('')
@@ -1197,13 +1200,15 @@ export default function PageRecherche() {
                         >
                           <Icon name="eye" size="sm" />
                         </button>
-                        <button 
-                          className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors" 
-                          title="Télécharger"
-                          onClick={(event) => { event.stopPropagation(); telechargerResultat(doc) }}
-                        >
-                          <Icon name="download" size="sm" />
-                        </button>
+                        {peutTelecharger && (
+                          <button 
+                            className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors" 
+                            title="Télécharger"
+                            onClick={(event) => { event.stopPropagation(); telechargerResultat(doc) }}
+                          >
+                            <Icon name="download" size="sm" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </motion.div>

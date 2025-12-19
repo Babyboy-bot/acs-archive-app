@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'drf_spectacular',
     
     # Local apps
     'api',
@@ -141,6 +142,27 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
     ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# DRF Spectacular (OpenAPI/Swagger)
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'ACS Archive API',
+    'DESCRIPTION': 'API de gestion des archives pour ACS - Application de gestion documentaire pour courtiers en assurance.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'TAGS': [
+        {'name': 'Authentification', 'description': 'Endpoints de connexion/déconnexion'},
+        {'name': 'Utilisateurs', 'description': 'Gestion des utilisateurs'},
+        {'name': 'Clients', 'description': 'Gestion des clients'},
+        {'name': 'Documents', 'description': 'Gestion des documents'},
+        {'name': 'Exercices', 'description': 'Gestion des exercices comptables'},
+        {'name': 'Risques', 'description': 'Gestion des risques'},
+        {'name': 'Assistant IA', 'description': 'Endpoints de l\'assistant intelligent'},
+        {'name': 'Audit', 'description': 'Journal d\'audit'},
+        {'name': 'Statistiques', 'description': 'Statistiques et KPI'},
+    ],
 }
 
 # JWT Configuration
@@ -237,3 +259,20 @@ MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
 MISTRAL_BASE_URL = os.getenv('MISTRAL_BASE_URL', 'https://api.mistral.ai/v1')
 MISTRAL_MODEL_DEFAULT = os.getenv('MISTRAL_MODEL_DEFAULT', 'mistral-medium-latest')
 MISTRAL_MODEL_ADVANCED = os.getenv('MISTRAL_MODEL_ADVANCED', 'mistral-large-latest')
+
+# ============================================================================
+# Sentry (Monitoring d'erreurs)
+# ============================================================================
+
+SENTRY_DSN = os.getenv('SENTRY_DSN')
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+    
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        environment=os.getenv('SENTRY_ENVIRONMENT', 'development'),
+        traces_sample_rate=float(os.getenv('SENTRY_TRACES_SAMPLE_RATE', '0.1')),
+        send_default_pii=False,  # Ne pas envoyer d'infos personnelles
+    )

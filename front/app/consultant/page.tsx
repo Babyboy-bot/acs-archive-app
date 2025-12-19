@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState, useRef } from "react";
+import { FormEvent, useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import {
@@ -15,6 +15,15 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import Blob3D from "@/components/ui/Blob3D";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
+import { NotificationsDocuments } from "@/components/NotificationsDocuments";
+
+// 🚀 PRO: Type pour les suggestions de clients
+type ClientSuggestion = {
+  id: string;
+  nom: string;
+  numero_client?: string;
+  type?: string;
+};
 
 interface PieceJustificativeMetadata extends Record<string, unknown> {
   url?: string;
@@ -59,9 +68,45 @@ interface AssistantConversationSummary {
   nombre_messages?: number;
 }
 
-const SUGGESTIONS = [
-  "Quels sont les derniers avenants de 2025 ?",
-  "Montre-moi les documents du client SANLAM",
+// 💡 Générer des suggestions intelligentes basées sur le contexte (conversation en cours)
+function genererSuggestionsIntelligentes(messages: Message[]): string[] {
+  const suggestions: string[] = [];
+  const now = new Date();
+  const moisActuel = now.toLocaleDateString("fr-FR", { month: "long" });
+  const anneeActuelle = now.getFullYear();
+
+  suggestions.push(`Documents ajoutés en ${moisActuel} ${anneeActuelle}`);
+
+  // Extraire des clients potentiels depuis les messages utilisateur
+  const clientsMentionnes = new Set<string>();
+  messages
+    .filter((m) => m.role === "user")
+    .slice(-20)
+    .forEach((m) => {
+      const matches = m.content.match(/\b([A-Z0-9]{2,6})\b/gi);
+      if (!matches) return;
+      matches.forEach((candidate) => {
+        const value = candidate.toUpperCase();
+        if (value.length >= 2 && value.length <= 6 && /[A-Z]/i.test(value)) {
+          clientsMentionnes.add(value);
+        }
+      });
+    });
+
+  const topClients = [...clientsMentionnes].slice(0, 2);
+  topClients.forEach((client) => {
+    suggestions.push(`Derniers documents de ${client}`);
+  });
+
+  suggestions.push(`Factures de ${anneeActuelle}`);
+  suggestions.push("Avenants récents");
+
+  return suggestions.slice(0, 4);
+}
+
+const SUGGESTIONS_DEFAUT = [
+  "Quels sont les derniers avenants ?",
+  "Montre-moi les documents récents",
   "Quels contrats arrivent à échéance ce mois ?",
 ];
 
@@ -80,6 +125,12 @@ export default function ConsultantChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  
+  // 🚀 PRO: Autocomplétion clients
+  const [clientSuggestions, setClientSuggestions] = useState<ClientSuggestion[]>([]);
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+  const clientSearchDebounce = useRef<NodeJS.Timeout | null>(null);
   const [utilisateur, setUtilisateur] = useState<SessionUtilisateur | null>(
     null
   );
@@ -453,7 +504,8 @@ export default function ConsultantChatPage() {
           ...(token && { Authorization: `Bearer ${token}` }),
           ...(utilisateur?.role && { "x-user-role": utilisateur.role }),
         },
-        body: JSON.stringify({ question }),
+        // 🔴 FIX: Envoyer le conversationId pour isoler le contexte par discussion
+        body: JSON.stringify({ question, conversationId: currentConversationId }),
       });
 
       if (!response.ok) {
@@ -583,6 +635,94 @@ export default function ConsultantChatPage() {
 
   const handleSuggestionClick = (suggestion: string) => {
     setInput(suggestion);
+  };
+
+  // 🚀 PRO: Recherche de clients pour autocomplétion
+  const rechercherClients = useCallback(async (query: string) => {
+    if (query.length < 2) {
+      setClientSuggestions([]);
+      setShowClientSuggestions(false);
+      return;
+    }
+    try {
+      const { data } = await apiFetchJson<ClientSuggestion[]>(
+        `/clients/?search=${encodeURIComponent(query)}&simple=1`
+      );
+      const clients = Array.isArray(data) ? data.slice(0, 6) : [];
+      setClientSuggestions(clients);
+      setShowClientSuggestions(clients.length > 0);
+      setSelectedSuggestionIndex(-1);
+    } catch (error) {
+      console.error("Erreur autocomplétion clients:", error);
+      setClientSuggestions([]);
+      setShowClientSuggestions(false);
+    }
+  }, []);
+
+  // 🚀 PRO: Gérer le changement d'input avec détection de client
+  // L'autocomplétion ne se déclenche QUE après des mots-clés spécifiques
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInput(value);
+    
+    // Détecter UNIQUEMENT après des mots-clés précis:
+    // - "de X", "du X", "pour X" (après documents, factures, etc.)
+    // - "client X"
+    // - "@X" (raccourci explicite)
+    const clientPatterns = [
+      /(?:de|du|pour)\s+([A-Z0-9]{2,})$/i,  // "de 3CB", "du 3CB", "pour 3CB"
+      /client\s+([A-Z0-9]{2,})$/i,           // "client 3CB"
+      /@([A-Z0-9]{2,})$/i,                   // "@3CB" (raccourci)
+    ];
+    
+    let clientQuery: string | null = null;
+    for (const pattern of clientPatterns) {
+      const match = value.match(pattern);
+      if (match && match[1]) {
+        clientQuery = match[1];
+        break;
+      }
+    }
+    
+    if (clientQuery && clientQuery.length >= 2) {
+      if (clientSearchDebounce.current) clearTimeout(clientSearchDebounce.current);
+      clientSearchDebounce.current = setTimeout(() => rechercherClients(clientQuery!), 200);
+    } else {
+      setShowClientSuggestions(false);
+      setClientSuggestions([]);
+    }
+  };
+
+  // 🚀 PRO: Sélectionner un client suggéré
+  const handleSelectClient = (client: ClientSuggestion) => {
+    // Remplacer le dernier mot par le nom du client
+    const words = input.split(/\s+/);
+    words[words.length - 1] = client.nom;
+    setInput(words.join(" ") + " ");
+    setShowClientSuggestions(false);
+    setClientSuggestions([]);
+  };
+
+  // 🚀 PRO: Navigation clavier dans les suggestions
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showClientSuggestions || clientSuggestions.length === 0) return;
+    
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => 
+        prev < clientSuggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => 
+        prev > 0 ? prev - 1 : clientSuggestions.length - 1
+      );
+    } else if (e.key === "Enter" && selectedSuggestionIndex >= 0) {
+      e.preventDefault();
+      handleSelectClient(clientSuggestions[selectedSuggestionIndex]);
+    } else if (e.key === "Escape") {
+      setShowClientSuggestions(false);
+    }
   };
 
   const chargerConversation = async (id: string) => {
@@ -917,6 +1057,15 @@ export default function ConsultantChatPage() {
           </button>
 
           <div className="flex items-center gap-4">
+            {/* 🔔 Notifications nouveaux documents */}
+            <NotificationsDocuments 
+              isDark={isDark} 
+              onDocumentClick={(doc) => {
+                // Insérer une recherche pour ce document
+                setInput(`document ${doc.titre || doc.id}`);
+              }}
+            />
+            
             <button
               onClick={() => setTheme(isDark ? "light" : "dark")}
               aria-label={isDark ? "Mode clair" : "Mode sombre"}
@@ -971,9 +1120,12 @@ export default function ConsultantChatPage() {
                 documents, contrats ou pièces justificatives.
               </p>
 
-              {/* Suggestions modernes */}
+              {/* 💡 Suggestions intelligentes */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl w-full px-4">
-                {SUGGESTIONS.map((suggestion, i) => (
+                {(messages.length > 0
+                  ? genererSuggestionsIntelligentes(messages)
+                  : SUGGESTIONS_DEFAUT
+                ).map((suggestion: string, i: number) => (
                   <button
                     key={i}
                     onClick={() => handleSuggestionClick(suggestion)}
@@ -1386,25 +1538,64 @@ export default function ConsultantChatPage() {
           className={`p-2 mb-2`}
         >
           <form onSubmit={envoyerMessage} className="max-w-3xl mx-auto">
-            <div
-              className={`relative flex items-center rounded-xl transition-all duration-300 ${
-                isDark
-                  ? "bg-white/5 border border-white/10 focus-within:border-cyan-500/50 focus-within:bg-white/10"
-                  : "bg-white border border-slate-200 shadow-lg shadow-slate-200/50 focus-within:border-cyan-400 focus-within:shadow-cyan-500/10"
-              }`}
-            >
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Posez votre question..."
-                disabled={isLoading}
-                className={`flex-1 bg-transparent py-4 px-5 outline-none text-[15px] disabled:opacity-50 ${
+            <div className="relative">
+              {/* 🚀 PRO: Suggestions de clients */}
+              {showClientSuggestions && clientSuggestions.length > 0 && (
+                <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-xl overflow-hidden shadow-xl z-50 ${
+                  isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"
+                }`}>
+                  <div className={`px-3 py-2 text-xs font-medium ${isDark ? "text-slate-400 bg-slate-700/50" : "text-slate-500 bg-slate-50"}`}>
+                    Clients suggérés
+                  </div>
+                  {clientSuggestions.map((client, index) => (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => handleSelectClient(client)}
+                      className={`w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors ${
+                        index === selectedSuggestionIndex
+                          ? isDark ? "bg-cyan-500/20" : "bg-cyan-50"
+                          : isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
+                        {client.nom.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className={`font-medium truncate ${isDark ? "text-white" : "text-slate-800"}`}>
+                          {client.nom}
+                        </div>
+                        {client.numero_client && (
+                          <div className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            Code: {client.numero_client}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              <div
+                className={`flex items-center rounded-xl transition-all duration-300 ${
                   isDark
-                    ? "text-white placeholder-slate-500"
-                    : "text-slate-800 placeholder-slate-400"
+                    ? "bg-white/5 border border-white/10 focus-within:border-cyan-500/50 focus-within:bg-white/10"
+                    : "bg-white border border-slate-200 shadow-lg shadow-slate-200/50 focus-within:border-cyan-400 focus-within:shadow-cyan-500/10"
                 }`}
-              />
+              >
+                <input
+                  type="text"
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleInputKeyDown}
+                  placeholder="Posez votre question..."
+                  disabled={isLoading}
+                  className={`flex-1 bg-transparent py-4 px-5 outline-none text-[15px] disabled:opacity-50 ${
+                    isDark
+                      ? "text-white placeholder-slate-500"
+                      : "text-slate-800 placeholder-slate-400"
+                  }`}
+                />
               <button
                 type="submit"
                 disabled={!input.trim() || isLoading}
@@ -1418,6 +1609,7 @@ export default function ConsultantChatPage() {
               >
                 <Icon name="arrow-right" size="sm" />
               </button>
+              </div>
             </div>
             <p
               className={`text-[11px] text-center mt-2 ${

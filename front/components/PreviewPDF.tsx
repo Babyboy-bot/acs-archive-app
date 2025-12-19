@@ -6,6 +6,7 @@ import { buildApiUrl } from '@/lib/api'
 import { getToken } from '@/lib/session'
 import { printBlob } from '@/lib/print'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
 
 interface PreviewPDFProps {
   ouvert: boolean
@@ -15,6 +16,9 @@ interface PreviewPDFProps {
 }
 
 export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFProps) {
+  const utilisateur = useUtilisateurCourant()
+  const canDownload = utilisateur?.role !== 'CONSULTANT' // 🔒 PDG: Consultants ne peuvent pas télécharger
+  
   const [zoom, setZoom] = useState(40)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -273,16 +277,18 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
                     <Icon name="print" size="sm" />
                     Imprimer
                   </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleDownload}
-                    disabled={!hasDocument}
-                    className="px-4 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center gap-2 disabled:opacity-60"
-                  >
-                    <Icon name="download" size="sm" />
-                    Télécharger
-                  </motion.button>
+                  {canDownload && (
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={handleDownload}
+                      disabled={!hasDocument}
+                      className="px-4 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center gap-2 disabled:opacity-60"
+                    >
+                      <Icon name="download" size="sm" />
+                      Télécharger
+                    </motion.button>
+                  )}
                 </div>
               </div>
 

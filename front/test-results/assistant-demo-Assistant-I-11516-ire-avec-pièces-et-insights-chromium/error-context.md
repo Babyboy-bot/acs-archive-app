@@ -1,0 +1,45 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]:
+    - generic [ref=e10]:
+      - text: Compiling
+      - generic [ref=e11]:
+        - generic [ref=e12]: .
+        - generic [ref=e13]: .
+        - generic [ref=e14]: .
+  - alert [ref=e15]
+  - generic [ref=e16]:
+    - generic [ref=e36]:
+      - img "ACS Logo" [ref=e37]
+      - heading "Future of Archiving" [level=2] [ref=e38]:
+        - text: Future of
+        - text: Archiving
+      - paragraph [ref=e39]: Expérimentez la puissance d'une gestion documentaire sécurisée, rapide et intuitive.
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - heading "Bienvenue" [level=1] [ref=e43]
+        - paragraph [ref=e44]: Veuillez entrer vos identifiants.
+      - generic [ref=e45]:
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]: Nom d'utilisateur
+            - textbox "Entrez votre identifiant" [ref=e50]
+          - generic [ref=e51]:
+            - generic [ref=e52]: Mot de passe
+            - textbox "••••••••" [ref=e54]
+        - generic [ref=e55]:
+          - generic [ref=e56] [cursor=pointer]:
+            - checkbox "Se souvenir" [ref=e58]
+            - generic [ref=e60]: Se souvenir
+          - link "Mot de passe oublié ?" [ref=e61] [cursor=pointer]:
+            - /url: /mot-de-passe-oublie
+        - button "Accéder à mon espace" [ref=e62] [cursor=pointer]:
+          - generic [ref=e63]:
+            - text: Accéder à mon espace
+            - img [ref=e64]
+      - generic [ref=e67]:
+        - paragraph [ref=e68]: 2025 ACS Archive . Tous droits réservés.
+        - paragraph [ref=e69]: Made by KASSI & RODRIGUE
+```

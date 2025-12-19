@@ -29,6 +29,16 @@ from .views import (
     llm_admin_history,
     assistant_health,
     assistant_feedback,
+    assistant_learning_record,
+    assistant_learning_similar,
+    assistant_learning_stats,
+    assistant_learning_pattern_update,
+    audit_log_list,
+    audit_log_detail,
+    audit_log_stats,
+    health_check,
+    ready_check,
+    version_info,
 )
 
 # Router pour les ViewSets
@@ -61,6 +71,22 @@ urlpatterns = [
     path('assistant/llm/admin/stats/', llm_admin_stats, name='assistant-llm-admin-stats'),
     path('assistant/llm/admin/history/', llm_admin_history, name='assistant-llm-admin-history'),
     
+    # Apprentissage assistant
+    path('assistant/learning/record/', assistant_learning_record, name='assistant-learning-record'),
+    path('assistant/learning/similar/', assistant_learning_similar, name='assistant-learning-similar'),
+    path('assistant/learning/stats/', assistant_learning_stats, name='assistant-learning-stats'),
+    path('assistant/learning/patterns/', assistant_learning_pattern_update, name='assistant-learning-patterns'),
+    
+    # Journal d'audit
+    path('audit/logs/', audit_log_list, name='audit-log-list'),
+    path('audit/logs/<int:log_id>/', audit_log_detail, name='audit-log-detail'),
+    path('audit/stats/', audit_log_stats, name='audit-log-stats'),
+    
+    # Healthcheck (monitoring/Kubernetes)
+    path('health/', health_check, name='health-check'),
+    path('ready/', ready_check, name='ready-check'),
+    path('version/', version_info, name='version-info'),
+        
     # Routes des ViewSets
     path('', include(router.urls)),
 ]

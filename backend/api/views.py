@@ -1,4 +1,4 @@
-"""
+﻿"""
 Vues pour l'API Django REST Framework
 """
 from rest_framework import viewsets, status, permissions
@@ -29,24 +29,24 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
 try:
-    # Embeddings sémantiques avec sentence-transformers
+    # Embeddings s├®mantiques avec sentence-transformers
     from sentence_transformers import SentenceTransformer
 
     _SEMANTIC_MODEL = None
-    _SEMANTIC_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'  # Multilingue, rapide, bon pour le français
+    _SEMANTIC_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'  # Multilingue, rapide, bon pour le fran├ºais
 
     def get_semantic_model():
         global _SEMANTIC_MODEL
         if _SEMANTIC_MODEL is None:
-            logging.info(f"Chargement du modèle sémantique: {_SEMANTIC_MODEL_NAME}")
+            logging.info(f"Chargement du mod├¿le s├®mantique: {_SEMANTIC_MODEL_NAME}")
             _SEMANTIC_MODEL = SentenceTransformer(_SEMANTIC_MODEL_NAME)
-            logging.info("Modèle sémantique chargé avec succès")
+            logging.info("Mod├¿le s├®mantique charg├® avec succ├¿s")
         return _SEMANTIC_MODEL
 
     SEMANTIC_SEARCH_AVAILABLE = True
 except Exception as exc:
     logging.warning(
-        "sentence-transformers non disponible ou échec d'initialisation (%s), recherche sémantique désactivée",
+        "sentence-transformers non disponible ou ├®chec d'initialisation (%s), recherche s├®mantique d├®sactiv├®e",
         exc,
     )
     SEMANTIC_SEARCH_AVAILABLE = False
@@ -58,7 +58,7 @@ try:
     import PyPDF2
     PDF_EXTRACTION_AVAILABLE = True
 except ImportError:
-    logging.warning("PyPDF2 non disponible, extraction avancée des PDF désactivée")
+    logging.warning("PyPDF2 non disponible, extraction avanc├®e des PDF d├®sactiv├®e")
     PyPDF2 = None  # type: ignore[assignment]
     PDF_EXTRACTION_AVAILABLE = False
 
@@ -100,15 +100,15 @@ QUOTA_DISABLED = str(getattr(settings, 'ASSISTANT_LLM_QUOTA_DISABLED', 'false'))
 
 
 def _llm_year_month(dt: timezone.datetime) -> str:
-    """Retourne une clé AAAA-MM pour le mois courant."""
+    """Retourne une cl├® AAAA-MM pour le mois courant."""
 
     return dt.strftime('%Y-%m')
 
 
 def consume_quota(utilisateur: Utilisateur, estimated_tokens: int, purpose: str, ts=None) -> dict:
-    """Vérifie et décrémente le quota mensuel LLM pour un utilisateur.
+    """V├®rifie et d├®cr├®mente le quota mensuel LLM pour un utilisateur.
 
-    Retourne un dict {allowed, remaining, percentage} conformément au contrat
+    Retourne un dict {allowed, remaining, percentage} conform├®ment au contrat
     attendu par le front.
     """
 
@@ -178,10 +178,10 @@ def log_llm_usage(
     tokens_output: int | None,
     ts=None,
 ) -> None:
-    """Journalise un appel LLM détaillé et met à jour le compteur mensuel.
+    """Journalise un appel LLM d├®taill├® et met ├á jour le compteur mensuel.
 
-    Cette fonction est appelée en asynchrone logique côté front, après l'appel
-    LLM, pour enregistrer les tokens réellement consommés.
+    Cette fonction est appel├®e en asynchrone logique c├┤t├® front, apr├¿s l'appel
+    LLM, pour enregistrer les tokens r├®ellement consomm├®s.
     """
 
     ts = ts or timezone.now()
@@ -257,15 +257,15 @@ def login_view(request):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # Mettre à jour la dernière connexion
+        # Mettre ├á jour la derni├¿re connexion
         utilisateur.derniere_connexion = timezone.now()
         utilisateur.save(update_fields=['derniere_connexion'])
 
-        # Générer les tokens JWT
+        # G├®n├®rer les tokens JWT
         refresh = RefreshToken.for_user(utilisateur)
         access_token = refresh.access_token
 
-        # Données de session
+        # Donn├®es de session
         session_data = {
             'id': str(utilisateur.id),
             'nomUtilisateur': utilisateur.nom_utilisateur,
@@ -275,8 +275,8 @@ def login_view(request):
             'role': utilisateur.role,
         }
 
-        # Construire la réponse JSON sans exposer les tokens côté client :
-        # l'authentification repose désormais uniquement sur les cookies httpOnly.
+        # Construire la r├®ponse JSON sans exposer les tokens c├┤t├® client :
+        # l'authentification repose d├®sormais uniquement sur les cookies httpOnly.
         response = Response(
             {
                 'success': True,
@@ -285,7 +285,7 @@ def login_view(request):
             status=status.HTTP_200_OK,
         )
 
-        # Déterminer les paramètres des cookies
+        # D├®terminer les param├¿tres des cookies
         secure_cookie = not settings.DEBUG
         access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
         refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
@@ -325,9 +325,9 @@ def login_view(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def logout_view(request):
-    """Déconnexion : efface les cookies JWT côté client."""
+    """D├®connexion : efface les cookies JWT c├┤t├® client."""
     response = Response(
-        {'success': True, 'message': 'Déconnecté avec succès.'},
+        {'success': True, 'message': 'D├®connect├® avec succ├¿s.'},
         status=status.HTTP_200_OK,
     )
     response.delete_cookie('access_token')
@@ -340,8 +340,8 @@ def logout_view(request):
 def documents_search_view(request):
     """Recherche rapide de documents pour la barre globale.
 
-    Permet de taper un mélange de client / exercice / risque / type de courrier /
-    référence / titre, avec une normalisation robuste (suppression des accents,
+    Permet de taper un m├®lange de client / exercice / risque / type de courrier /
+    r├®f├®rence / titre, avec une normalisation robuste (suppression des accents,
     casse, ponctuation) pour que les combinaisons comme
     "2FZ 2022 responsabilite civile avenant" retrouvent les bons documents.
     """
@@ -429,7 +429,7 @@ def documents_search_view(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def llm_quota_consume(request):
-    """Vérifie et consomme une partie du quota LLM mensuel de l'utilisateur.
+    """V├®rifie et consomme une partie du quota LLM mensuel de l'utilisateur.
 
     Body attendu:
     {
@@ -450,7 +450,7 @@ def llm_quota_consume(request):
 
     if estimated <= 0:
         logging.warning("LLM_QUOTA_CONSUME non_positive_estimated user=%s value=%s", utilisateur.id, estimated)
-        return Response({'detail': 'estimated_tokens doit être > 0'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'estimated_tokens doit ├¬tre > 0'}, status=status.HTTP_400_BAD_REQUEST)
 
     purpose = data.get('purpose') or 'answer'
     ts_str = data.get('timestamp')
@@ -463,7 +463,7 @@ def llm_quota_consume(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def llm_usage_log(request):
-    """Journalise un appel LLM (usage réel en tokens).
+    """Journalise un appel LLM (usage r├®el en tokens).
 
     Body attendu:
     {
@@ -508,9 +508,9 @@ def llm_usage_log(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def llm_quota_status(request):
-    """Retourne l'état du quota LLM courant pour l'utilisateur.
+    """Retourne l'├®tat du quota LLM courant pour l'utilisateur.
 
-    Réponse:
+    R├®ponse:
     {
       "limit": 30000,
       "tokens_used": 12345,
@@ -560,12 +560,12 @@ def llm_quota_status(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def assistant_health(request):
-    """Retourne un état de santé technique de l'assistant LLM.
+    """Retourne un ├®tat de sant├® technique de l'assistant LLM.
 
-    Vérifie la configuration de base du provider LLM (provider, clés, URLs) et
-    expose aussi l'état de la recherche sémantique.
+    V├®rifie la configuration de base du provider LLM (provider, cl├®s, URLs) et
+    expose aussi l'├®tat de la recherche s├®mantique.
 
-    Réponse JSON minimale:
+    R├®ponse JSON minimale:
     {
       "provider": "claude" | "mistral" | "openai" | ...,
       "llm_enabled": true/false,
@@ -577,43 +577,43 @@ def assistant_health(request):
 
     utilisateur = request.user
     if utilisateur.role not in ['ADMIN']:
-        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'detail': 'Acc├¿s r├®serv├® aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     provider = (getattr(settings, 'ASSISTANT_LLM_PROVIDER', 'openai') or 'openai').lower()
     llm_enabled = (str(getattr(settings, 'ASSISTANT_LLM_ENABLED', 'true')).lower() != 'false')
 
     errors: list[str] = []
 
-    # Vérifier la configuration selon le provider déclaré
+    # V├®rifier la configuration selon le provider d├®clar├®
     if not llm_enabled:
-        errors.append('LLM désactivé via ASSISTANT_LLM_ENABLED=false')
+        errors.append('LLM d├®sactiv├® via ASSISTANT_LLM_ENABLED=false')
     else:
         if provider in ('openai',):
             api_key = getattr(settings, 'ASSISTANT_LLM_API_KEY', None) or getattr(settings, 'OPENAI_API_KEY', None)
             base_url = getattr(settings, 'ASSISTANT_LLM_BASE_URL', 'https://api.openai.com/v1')
             if not api_key:
-                errors.append('Clé API OpenAI manquante (ASSISTANT_LLM_API_KEY ou OPENAI_API_KEY)')
+                errors.append('Cl├® API OpenAI manquante (ASSISTANT_LLM_API_KEY ou OPENAI_API_KEY)')
             if not isinstance(base_url, str) or not base_url:
                 errors.append('ASSISTANT_LLM_BASE_URL invalide ou vide')
         elif provider in ('claude', 'anthropic'):
             claude_key = getattr(settings, 'CLAUDE_API_KEY', None) or getattr(settings, 'ANTHROPIC_API_KEY', None)
             claude_url = getattr(settings, 'CLAUDE_BASE_URL', 'https://api.anthropic.com/v1')
             if not claude_key:
-                errors.append('Clé API Claude/Anthropic manquante (CLAUDE_API_KEY ou ANTHROPIC_API_KEY)')
+                errors.append('Cl├® API Claude/Anthropic manquante (CLAUDE_API_KEY ou ANTHROPIC_API_KEY)')
             if not isinstance(claude_url, str) or not claude_url:
                 errors.append('CLAUDE_BASE_URL invalide ou vide')
         elif provider == 'mistral':
             mistral_key = getattr(settings, 'MISTRAL_API_KEY', None)
             mistral_url = getattr(settings, 'MISTRAL_BASE_URL', 'https://api.mistral.ai/v1')
             if not mistral_key:
-                errors.append('Clé API Mistral manquante (MISTRAL_API_KEY)')
+                errors.append('Cl├® API Mistral manquante (MISTRAL_API_KEY)')
             if not isinstance(mistral_url, str) or not mistral_url:
                 errors.append('MISTRAL_BASE_URL invalide ou vide')
         else:
             # Providers compatibles OpenAI custom ou locaux
             base_url = getattr(settings, 'ASSISTANT_LLM_BASE_URL', None)
             if not base_url:
-                errors.append(f'Provider LLM "{provider}" non reconnu et ASSISTANT_LLM_BASE_URL non défini')
+                errors.append(f'Provider LLM "{provider}" non reconnu et ASSISTANT_LLM_BASE_URL non d├®fini')
 
     config_ok = llm_enabled and not errors
 
@@ -651,7 +651,7 @@ def llm_admin_stats(request):
 
     utilisateur = request.user
     if utilisateur.role not in ['ADMIN']:
-        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'detail': 'Acc├¿s r├®serv├® aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     now_dt = timezone.now()
     current_month = _llm_year_month(now_dt)
@@ -699,18 +699,18 @@ def llm_admin_stats(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def llm_admin_history(request):
-    """Historique détaillé des requêtes LLM (admin uniquement).
+    """Historique d├®taill├® des requ├¬tes LLM (admin uniquement).
 
     Query params:
     - utilisateur_id: filtrer par utilisateur
     - provider: filtrer par provider (mistral, openai)
     - purpose: filtrer par purpose (router, answer, summary)
-    - limit: nombre de résultats (défaut 100, max 500)
+    - limit: nombre de r├®sultats (d├®faut 100, max 500)
     """
 
     utilisateur = request.user
     if utilisateur.role not in ['ADMIN']:
-        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'detail': 'Acc├¿s r├®serv├® aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     queryset = LlmUsage.objects.select_related('utilisateur').all()
 
@@ -763,23 +763,23 @@ setattr(documents_search_view, 'ressource', 'documents')
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     """
-    ViewSet pour gérer les utilisateurs
+    ViewSet pour g├®rer les utilisateurs
     """
     queryset = Utilisateur.objects.all()
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'utilisateurs'
     
     def get_serializer_class(self):
-        """Utiliser un serializer différent pour la liste"""
+        """Utiliser un serializer diff├®rent pour la liste"""
         if self.action == 'list':
             return UtilisateurListSerializer
         return UtilisateurSerializer
     
     def get_queryset(self):
-        """Filtrer les utilisateurs selon les paramètres"""
+        """Filtrer les utilisateurs selon les param├¿tres"""
         queryset = Utilisateur.objects.all().order_by('prenom', 'nom')
         
-        # Filtrer par rôle
+        # Filtrer par r├┤le
         role = self.request.query_params.get('role', None)
         if role:
             queryset = queryset.filter(role=role)
@@ -802,19 +802,19 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
-        """Créer un utilisateur et logger l'activité"""
+        """Cr├®er un utilisateur et logger l'activit├®"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         utilisateur = serializer.save()
 
         return Response({
             'success': True,
-            'message': 'Utilisateur créé avec succès',
+            'message': 'Utilisateur cr├®├® avec succ├¿s',
             'utilisateur': UtilisateurListSerializer(utilisateur).data
         }, status=status.HTTP_201_CREATED)
     
     def update(self, request, *args, **kwargs):
-        """Mettre à jour un utilisateur et logger l'activité"""
+        """Mettre ├á jour un utilisateur et logger l'activit├®"""
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
@@ -823,21 +823,21 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
 
         return Response({
             'success': True,
-            'message': 'Profil mis à jour avec succès',
+            'message': 'Profil mis ├á jour avec succ├¿s',
             'utilisateur': UtilisateurListSerializer(utilisateur).data
         })
     
     def destroy(self, request, *args, **kwargs):
-        """Supprimer un utilisateur (soft delete recommandé)"""
+        """Supprimer un utilisateur (soft delete recommand├®)"""
         instance = self.get_object()
         
-        # Plutôt que de supprimer, on désactive
+        # Plut├┤t que de supprimer, on d├®sactive
         instance.est_actif = False
         instance.save()
 
         return Response({
             'success': True,
-            'message': 'Utilisateur désactivé avec succès'
+            'message': 'Utilisateur d├®sactiv├® avec succ├¿s'
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='change-password')
@@ -855,9 +855,9 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
             return Response({'erreur': 'Le nouveau mot de passe est requis.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if len(nouveau_mdp) < 8:
-            return Response({'erreur': 'Le nouveau mot de passe doit contenir au moins 8 caractères.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'erreur': 'Le nouveau mot de passe doit contenir au moins 8 caract├¿res.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Si l'administrateur modifie son propre mot de passe, l'ancien est requis par sécurité
+        # Si l'administrateur modifie son propre mot de passe, l'ancien est requis par s├®curit├®
         if str(request.user.id) == str(utilisateur.id):
             if not ancien_mdp:
                 return Response({'erreur': "Merci d'indiquer votre mot de passe actuel."}, status=status.HTTP_400_BAD_REQUEST)
@@ -867,21 +867,21 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         utilisateur.set_password(nouveau_mdp)
         utilisateur.save(update_fields=['password'])
 
-        return Response({'success': True, 'message': 'Mot de passe modifié avec succès.'}, status=status.HTTP_200_OK)
+        return Response({'success': True, 'message': 'Mot de passe modifi├® avec succ├¿s.'}, status=status.HTTP_200_OK)
 
 
 class ClientViewSet(viewsets.ModelViewSet):
-    """ViewSet pour gérer les clients"""
+    """ViewSet pour g├®rer les clients"""
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'  # Les clients font partie de la gestion documentaire
 
-    # Pas de pagination côté API pour permettre à l’interface de gérer sa propre pagination
+    # Pas de pagination c├┤t├® API pour permettre ├á lÔÇÖinterface de g├®rer sa propre pagination
     pagination_class = None
 
     def get_serializer_class(self):
-        """Retourner une version légère si ?simple=1 est demandé pour la liste."""
+        """Retourner une version l├®g├¿re si ?simple=1 est demand├® pour la liste."""
         request = getattr(self, 'request', None)
         if self.action == 'list' and request is not None:
             simple = (request.query_params.get('simple') or '').lower()
@@ -892,7 +892,7 @@ class ClientViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Client.objects.all()
 
-        # Recherche plein texte sur le nom (paramètre ?search=)
+        # Recherche plein texte sur le nom (param├¿tre ?search=)
         search = (self.request.query_params.get('search') or '').strip()
         if search:
             queryset = queryset.filter(Q(nom__icontains=search) | Q(numero_client__icontains=search))
@@ -902,7 +902,7 @@ class ClientViewSet(viewsets.ModelViewSet):
         if type_param:
             queryset = queryset.filter(type=type_param)
 
-        # Respecter le paramètre d’ordering si fourni, sinon trier par nom
+        # Respecter le param├¿tre dÔÇÖordering si fourni, sinon trier par nom
         ordering = self.request.query_params.get('ordering') or None
         if ordering:
             queryset = queryset.order_by(ordering)
@@ -913,7 +913,7 @@ class ClientViewSet(viewsets.ModelViewSet):
 
 
 class ExerciceViewSet(viewsets.ModelViewSet):
-    """ViewSet pour gérer les exercices"""
+    """ViewSet pour g├®rer les exercices"""
     queryset = Exercice.objects.all()
     serializer_class = ExerciceSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
@@ -921,7 +921,7 @@ class ExerciceViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_serializer_class(self):
-        """Version légère pour les listes avec ?simple=1 (sans risques imbriqués)."""
+        """Version l├®g├¿re pour les listes avec ?simple=1 (sans risques imbriqu├®s)."""
         request = getattr(self, 'request', None)
         if self.action == 'list' and request is not None:
             simple = (request.query_params.get('simple') or '').lower()
@@ -939,8 +939,8 @@ class ExerciceViewSet(viewsets.ModelViewSet):
             except Client.DoesNotExist:
                 queryset = Exercice.objects.none()
             else:
-                # Cas spécial flotte/groupe : pour une ENTREPRISE, inclure à la fois
-                # ses exercices propres et ceux de ses membres (particuliers rattachés).
+                # Cas sp├®cial flotte/groupe : pour une ENTREPRISE, inclure ├á la fois
+                # ses exercices propres et ceux de ses membres (particuliers rattach├®s).
                 if client.type == 'ENTREPRISE':
                     queryset = queryset.filter(
                         Q(client=client) | Q(client__entreprise_parente=client)
@@ -948,8 +948,8 @@ class ExerciceViewSet(viewsets.ModelViewSet):
                 else:
                     queryset = queryset.filter(client=client)
 
-        # Pour les usages "simples" (recherche avancée), permettre de limiter
-        # le nombre de résultats via ?page_size=...
+        # Pour les usages "simples" (recherche avanc├®e), permettre de limiter
+        # le nombre de r├®sultats via ?page_size=...
         simple = (self.request.query_params.get('simple') or '').lower()
         page_size_param = self.request.query_params.get('page_size')
         if simple in ('1', 'true', 'yes') and page_size_param:
@@ -964,14 +964,14 @@ class ExerciceViewSet(viewsets.ModelViewSet):
 
 
 class RisqueViewSet(viewsets.ModelViewSet):
-    """ViewSet pour gérer les risques"""
+    """ViewSet pour g├®rer les risques"""
     queryset = Risque.objects.all()
     serializer_class = RisqueSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'
 
     def get_serializer_class(self):
-        """Version légère pour les listes avec ?simple=1 (type uniquement)."""
+        """Version l├®g├¿re pour les listes avec ?simple=1 (type uniquement)."""
         request = getattr(self, 'request', None)
         if self.action == 'list' and request is not None:
             simple = (request.query_params.get('simple') or '').lower()
@@ -997,14 +997,14 @@ class RisqueViewSet(viewsets.ModelViewSet):
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
-    """ViewSet pour gérer les documents"""
+    """ViewSet pour g├®rer les documents"""
     queryset = Document.objects.all()
     serializer_class = DocumentSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'
     
     def get_queryset(self):
-        """Filtrer les documents selon les paramètres"""
+        """Filtrer les documents selon les param├¿tres"""
         queryset = Document.objects.all().order_by('-cree_le')
         
         # Filtrer par risque
@@ -1017,7 +1017,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         if auteur_id:
             queryset = queryset.filter(auteur_id=auteur_id)
         
-        # Filtrer par statut archivé
+        # Filtrer par statut archiv├®
         est_archive = self.request.query_params.get('est_archive', None)
         if est_archive is not None:
             queryset = queryset.filter(est_archive=est_archive.lower() == 'true')
@@ -1025,20 +1025,20 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return queryset
     
     def create(self, request, *args, **kwargs):
-        """Créer un document et logger l'activité"""
+        """Cr├®er un document et logger l'activit├®"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = serializer.save()
         try:
             chunker_document(document)
         except Exception:
-            logging.exception("Erreur lors de la génération des chunks de document")
+            logging.exception("Erreur lors de la g├®n├®ration des chunks de document")
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class DocumentUploadView(APIView):
-    """Téléverser un document avec fichier"""
+    """T├®l├®verser un document avec fichier"""
 
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     parser_classes = (MultiPartParser, FormParser)
@@ -1079,25 +1079,25 @@ class DocumentUploadView(APIView):
                 date_document=date_document
             )
         except Exception:
-            logging.exception("Erreur lors de la création du document")
+            logging.exception("Erreur lors de la cr├®ation du document")
             default_storage.delete(chemin)
             raise
 
         try:
             chunker_document(document)
         except Exception:
-            logging.exception("Erreur lors de la génération des chunks de document (upload)")
+            logging.exception("Erreur lors de la g├®n├®ration des chunks de document (upload)")
 
         serializer = DocumentSerializer(document, context={'request': request})
         return Response({
             'success': True,
-            'message': 'Document téléversé avec succès',
+            'message': 'Document t├®l├®vers├® avec succ├¿s',
             'document': serializer.data
         }, status=status.HTTP_201_CREATED)
 
 
 class AssistantConversationViewSet(viewsets.ModelViewSet):
-    """ViewSet pour gérer les conversations de l'assistant IA"""
+    """ViewSet pour g├®rer les conversations de l'assistant IA"""
 
     serializer_class = AssistantConversationSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
@@ -1115,7 +1115,7 @@ class AssistantConversationViewSet(viewsets.ModelViewSet):
 
 
 class AssistantMessageViewSet(viewsets.ModelViewSet):
-    """ViewSet pour gérer les messages de l'assistant IA"""
+    """ViewSet pour g├®rer les messages de l'assistant IA"""
 
     serializer_class = AssistantMessageSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
@@ -1135,7 +1135,7 @@ class AssistantMessageViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         conversation = serializer.validated_data.get('conversation')
         if conversation.utilisateur != self.request.user:
-            raise PermissionDenied("Vous ne pouvez pas écrire dans une conversation qui ne vous appartient pas.")
+            raise PermissionDenied("Vous ne pouvez pas ├®crire dans une conversation qui ne vous appartient pas.")
 
         message = serializer.save()
 
@@ -1161,7 +1161,7 @@ def assistant_feedback(request):
     )
 
     if not qs.exists():
-        return Response({'detail': 'Aucun message correspondant à cet interactionId'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': 'Aucun message correspondant ├á cet interactionId'}, status=status.HTTP_404_NOT_FOUND)
 
     updated = 0
     for msg in qs:
@@ -1193,7 +1193,7 @@ def assistant_feedback(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def stats_view(request):
-    """Statistiques synthétiques pour le tableau de bord"""
+    """Statistiques synth├®tiques pour le tableau de bord"""
     total_documents = Document.objects.count()
     uploads_today = Document.objects.filter(cree_le__date=timezone.now().date()).count()
     total_clients = Client.objects.count()
@@ -1213,7 +1213,7 @@ setattr(stats_view, 'ressource', 'stats')
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def assistant_stats_view(request):
-    """Statistiques agrégées optimisées pour l'assistant IA"""
+    """Statistiques agr├®g├®es optimis├®es pour l'assistant IA"""
 
     base_queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
 
@@ -1273,9 +1273,9 @@ def assistant_stats_view(request):
     if total_documents:
         taux_conformite = max(0, min(1, (total_documents - documents_en_retard) / total_documents))
 
-    # Totaux de clients pour permettre à l'assistant de répondre de manière
-    # fiable aux questions de type "combien de clients" sans deviner à
-    # partir d'un échantillon de documents.
+    # Totaux de clients pour permettre ├á l'assistant de r├®pondre de mani├¿re
+    # fiable aux questions de type "combien de clients" sans deviner ├á
+    # partir d'un ├®chantillon de documents.
     total_clients = Client.objects.count()
     total_clients_particuliers = Client.objects.filter(type='PARTICULIER').count()
     total_clients_entreprises = Client.objects.filter(type='ENTREPRISE').count()
@@ -1315,7 +1315,7 @@ def _build_document_payload(document: Document, request=None) -> dict:
     categorie_nom = document.categorie.nom if document.categorie else None
     type_label = document.get_type_courrier_display() if document.type_courrier else None
 
-    # Essayer de récupérer l'URL de fichier de la même façon que sur les autres écrans
+    # Essayer de r├®cup├®rer l'URL de fichier de la m├¬me fa├ºon que sur les autres ├®crans
     fichier_url = None
     if request is not None:
         try:
@@ -1343,12 +1343,12 @@ def _build_document_payload(document: Document, request=None) -> dict:
 
 
 def _normalize_text(value: str) -> str:
-    """Normaliser une chaîne pour les recherches plein texte (accents, casse, espaces).
+    """Normaliser une cha├«ne pour les recherches plein texte (accents, casse, espaces).
 
-    Cette fonction est utilisée pour la recherche rapide afin de rendre robustes les
-    correspondances sur les noms de clients, années d'exercice, types de risques et
+    Cette fonction est utilis├®e pour la recherche rapide afin de rendre robustes les
+    correspondances sur les noms de clients, ann├®es d'exercice, types de risques et
     types de courrier, y compris lorsque l'utilisateur tape sans accents ou avec des
-    séparateurs différents.
+    s├®parateurs diff├®rents.
     """
     if value is None:
         return ""
@@ -1401,7 +1401,7 @@ def chunker_document(document: Document) -> None:
 
     chunks_crees = 0
 
-    # Extraction avancée pour les PDF si possible
+    # Extraction avanc├®e pour les PDF si possible
     type_fichier = (document.type_fichier or "").lower()
     if 'pdf' in type_fichier:
         pages = _extract_text_from_pdf(document)
@@ -1438,7 +1438,7 @@ def chunker_document(document: Document) -> None:
 
                     if end >= length:
                         break
-                    # overlap pour éviter de couper brutalement le contexte
+                    # overlap pour ├®viter de couper brutalement le contexte
                     start = max(0, end - overlap)
 
     # Fallback simple si aucune extraction PDF n'est possible ou n'a rien produit
@@ -1492,8 +1492,8 @@ def _build_document_metadata(payload: dict) -> dict:
         'client': payload.get('client'),
         'exercice': payload.get('exercice'),
         'risque': payload.get('risque'),
-        # Ne pas utiliser cree_le comme date_document : seule la date réelle (si renseignée)
-        # est conservée, et l'année d'exercice sert de référence principale pour les recherches.
+        # Ne pas utiliser cree_le comme date_document : seule la date r├®elle (si renseign├®e)
+        # est conserv├®e, et l'ann├®e d'exercice sert de r├®f├®rence principale pour les recherches.
         'date_document': payload.get('date_document'),
         'statut_archive': payload.get('est_archive'),
         'fichier_url': payload.get('fichier_url'),
@@ -1507,11 +1507,11 @@ def _build_document_highlights(metadata: dict) -> list[str]:
     if metadata.get('client'):
         highlights.append(f"Client : {metadata['client']}")
     if metadata.get('categorie'):
-        highlights.append(f"Catégorie : {metadata['categorie']}")
+        highlights.append(f"Cat├®gorie : {metadata['categorie']}")
     if metadata.get('type'):
         highlights.append(f"Type : {metadata['type']}")
     if metadata.get('reference'):
-        highlights.append(f"Référence : {metadata['reference']}")
+        highlights.append(f"R├®f├®rence : {metadata['reference']}")
     if metadata.get('date_document'):
         highlights.append(f"Date : {metadata['date_document'][:10]}")
     return highlights
@@ -1524,14 +1524,14 @@ def _build_document_content(payload: dict, metadata: dict) -> str:
     if metadata.get('client'):
         lignes.append(f"Client : {metadata['client']}")
     if metadata.get('reference'):
-        lignes.append(f"Référence : {metadata['reference']}")
+        lignes.append(f"R├®f├®rence : {metadata['reference']}")
     if metadata.get('type'):
         lignes.append(f"Type de courrier : {metadata['type']}")
     if metadata.get('categorie'):
-        lignes.append(f"Catégorie : {metadata['categorie']}")
+        lignes.append(f"Cat├®gorie : {metadata['categorie']}")
     if metadata.get('date_document'):
         lignes.append(f"Date : {metadata['date_document'][:10]}")
-    return '\n'.join(lignes) or 'Informations limitées sur ce document.'
+    return '\n'.join(lignes) or 'Informations limit├®es sur ce document.'
 
 
 def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = False) -> dict:
@@ -1553,7 +1553,7 @@ def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def assistant_document_search_view(request):
-    """Recherche TF-IDF optimisée pour l'assistant IA"""
+    """Recherche TF-IDF optimis├®e pour l'assistant IA"""
 
     query = (request.query_params.get('q') or '').strip()
     if not query:
@@ -1673,7 +1673,7 @@ setattr(assistant_document_search_faiss_view, 'ressource', 'documents')
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def document_search_view(request):
-    """Recherche simplifiée de documents"""
+    """Recherche simplifi├®e de documents"""
     terme = (request.query_params.get('q') or '').strip()
     limite = int(request.query_params.get('limit') or 10)
 
@@ -1708,13 +1708,13 @@ setattr(document_search_view, 'ressource', 'documents')
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def assistant_semantic_search_view(request):
     """
-    Recherche sémantique avancée pour l'assistant IA.
-    Utilise des embeddings multilingues pour comprendre le sens des requêtes.
+    Recherche s├®mantique avanc├®e pour l'assistant IA.
+    Utilise des embeddings multilingues pour comprendre le sens des requ├¬tes.
     Fallback sur TF-IDF si sentence-transformers n'est pas disponible.
     
-    Paramètres de filtre optionnels :
+    Param├¿tres de filtre optionnels :
     - client: code client (ex: 3CB)
-    - exercice: année de l'exercice (ex: 2018)
+    - exercice: ann├®e de l'exercice (ex: 2018)
     - risque: type de risque (ex: sante)
     """
     query = (request.query_params.get('q') or '').strip()
@@ -1733,11 +1733,11 @@ def assistant_semantic_search_view(request):
     exercice_filter = (request.query_params.get('exercice') or '').strip()
     risque_filter = (request.query_params.get('risque') or '').strip().lower()
 
-    # Construire la requête avec filtres
+    # Construire la requ├¬te avec filtres
     queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
     
     if client_filter:
-        # Le client peut être identifié par son nom ou son numero_client
+        # Le client peut ├¬tre identifi├® par son nom ou son numero_client
         queryset = queryset.filter(
             Q(risque__exercice__client__nom__iexact=client_filter) |
             Q(risque__exercice__client__numero_client__iexact=client_filter)
@@ -1753,7 +1753,7 @@ def assistant_semantic_search_view(request):
             pass
     
     if risque_filter:
-        # Le risque est identifié par son type
+        # Le risque est identifi├® par son type
         queryset = queryset.filter(risque__type__icontains=risque_filter)
         logging.info(f"Filtre risque: {risque_filter}")
     
@@ -1765,16 +1765,16 @@ def assistant_semantic_search_view(request):
     payloads = [_build_document_payload(doc, request) for doc in documents]
     corpus = [_build_document_text(payload) for payload in payloads]
 
-    # Essayer la recherche sémantique si disponible
+    # Essayer la recherche s├®mantique si disponible
     if SEMANTIC_SEARCH_AVAILABLE:
         try:
             model = get_semantic_model()
             if model is not None:
-                # Encoder la requête et les documents
+                # Encoder la requ├¬te et les documents
                 query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
                 doc_embeddings = model.encode(corpus, convert_to_numpy=True, normalize_embeddings=True)
                 
-                # Créer l'index FAISS avec les embeddings sémantiques
+                # Cr├®er l'index FAISS avec les embeddings s├®mantiques
                 dimension = doc_embeddings.shape[1]
                 index = faiss.IndexFlatIP(dimension)
                 index.add(doc_embeddings.astype(np.float32))
@@ -1812,17 +1812,17 @@ def assistant_semantic_search_view(request):
                             apercu,
                         )
                     except Exception as log_error:
-                        logging.error("Erreur lors du logging des résultats sémantiques: %s", log_error)
+                        logging.error("Erreur lors du logging des r├®sultats s├®mantiques: %s", log_error)
 
                     return Response({'results': results, 'method': 'semantic'})
                 
-                # Pas de résultats sémantiques, fallback
-                logging.info("Recherche sémantique: aucun résultat, fallback TF-IDF")
+                # Pas de r├®sultats s├®mantiques, fallback
+                logging.info("Recherche s├®mantique: aucun r├®sultat, fallback TF-IDF")
         except Exception as e:
-            logging.error(f"Erreur recherche sémantique: {e}, fallback TF-IDF")
+            logging.error(f"Erreur recherche s├®mantique: {e}, fallback TF-IDF")
 
-    # Fallback sur TF-IDF si la recherche sémantique échoue ou n'est pas disponible.
-    # On privilégie les chunks de documents (texte extrait des PDF) s'ils sont disponibles.
+    # Fallback sur TF-IDF si la recherche s├®mantique ├®choue ou n'est pas disponible.
+    # On privil├®gie les chunks de documents (texte extrait des PDF) s'ils sont disponibles.
     try:
         chunks_qs = DocumentChunk.objects.filter(document__in=documents)
         chunks = list(
@@ -1832,7 +1832,7 @@ def assistant_semantic_search_view(request):
             )
         )
     except Exception:
-        logging.exception("Erreur lors de la récupération des chunks pour la recherche TF-IDF")
+        logging.exception("Erreur lors de la r├®cup├®ration des chunks pour la recherche TF-IDF")
         chunks = []
 
     if chunks:
@@ -1856,8 +1856,8 @@ def assistant_semantic_search_view(request):
 
     indexed_scores = list(enumerate(scores.tolist()))
 
-    # Agréger les scores au niveau du document pour éviter de renvoyer plusieurs
-    # fois le même document lorsque plusieurs chunks sont pertinents.
+    # Agr├®ger les scores au niveau du document pour ├®viter de renvoyer plusieurs
+    # fois le m├¬me document lorsque plusieurs chunks sont pertinents.
     doc_best = {}
     for idx, score in indexed_scores:
         if score <= 0:
@@ -1870,10 +1870,10 @@ def assistant_semantic_search_view(request):
             continue
         current = doc_best.get(doc_id)
         if current is None or score > current[0]:
-            # Conserver le meilleur chunk (score le plus élevé) pour chaque document
+            # Conserver le meilleur chunk (score le plus ├®lev├®) pour chaque document
             doc_best[doc_id] = (score, payload)
 
-    # Trier les documents par score décroissant (meilleur chunk en premier)
+    # Trier les documents par score d├®croissant (meilleur chunk en premier)
     sorted_docs = sorted(doc_best.items(), key=lambda item: item[1][0], reverse=True)
 
     results = []
@@ -1882,7 +1882,7 @@ def assistant_semantic_search_view(request):
         result['search_method'] = 'tfidf'
         results.append(result)
 
-    # Fallback document si aucun résultat
+    # Fallback document si aucun r├®sultat
     if include_fallback and not results:
         fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
         if fallback_document:
@@ -1912,9 +1912,175 @@ def assistant_semantic_search_view(request):
                 apercu,
             )
         except Exception as log_error:
-            logging.error("Erreur lors du logging des résultats TF-IDF: %s", log_error)
+            logging.error("Erreur lors du logging des r├®sultats TF-IDF: %s", log_error)
 
     return Response({'results': results, 'method': 'tfidf' if results else 'none'})
 
 
 setattr(assistant_semantic_search_view, 'ressource', 'documents')
+
+
+# ============================================================================
+# HEALTHCHECK ENDPOINTS
+# ============================================================================
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    """Endpoint de santé basique (liveness probe)."""
+    return Response({
+        'status': 'healthy',
+        'service': 'acs-archive-api',
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def ready_check(request):
+    """Endpoint de disponibilité (readiness probe)."""
+    checks = {'database': False}
+    errors = []
+    
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+        checks['database'] = True
+    except Exception as e:
+        errors.append(f'Database: {str(e)}')
+    
+    is_ready = checks['database']
+    
+    return Response({
+        'status': 'ready' if is_ready else 'not_ready',
+        'checks': checks,
+        'errors': errors if errors else None,
+    }, status=status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def version_info(request):
+    """Informations sur la version de l'API."""
+    import django
+    import sys
+    
+    return Response({
+        'api_version': '1.0.0',
+        'django_version': django.__version__,
+        'python_version': sys.version.split()[0],
+    })
+
+
+# ============================================================================
+# AUDIT LOG ENDPOINTS
+# ============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def audit_log_list(request):
+    """Liste des logs d'audit."""
+    from .models import HistoriqueActivite
+    
+    logs = HistoriqueActivite.objects.all().order_by('-date_action')[:100]
+    data = [
+        {
+            'id': log.id,
+            'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else None,
+            'action': log.action,
+            'details': log.details,
+            'date': log.date_action.isoformat(),
+        }
+        for log in logs
+    ]
+    return Response({'logs': data})
+
+
+setattr(audit_log_list, 'ressource', 'audit')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def audit_log_detail(request, log_id):
+    """Détail d'un log d'audit."""
+    from .models import HistoriqueActivite
+    
+    try:
+        log = HistoriqueActivite.objects.get(id=log_id)
+        return Response({
+            'id': log.id,
+            'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else None,
+            'action': log.action,
+            'details': log.details,
+            'date': log.date_action.isoformat(),
+        })
+    except HistoriqueActivite.DoesNotExist:
+        return Response({'error': 'Log non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+
+
+setattr(audit_log_detail, 'ressource', 'audit')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def audit_log_stats(request):
+    """Statistiques des logs d'audit."""
+    from .models import HistoriqueActivite
+    
+    total = HistoriqueActivite.objects.count()
+    return Response({
+        'total_logs': total,
+    })
+
+
+setattr(audit_log_stats, 'ressource', 'audit')
+
+
+# ============================================================================
+# ASSISTANT LEARNING ENDPOINTS (placeholder)
+# ============================================================================
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def assistant_learning_record(request):
+    """Enregistre un feedback d'apprentissage."""
+    return Response({
+        'success': True,
+        'message': 'Feedback enregistré (fonctionnalité en développement)',
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def assistant_learning_similar(request):
+    """Recherche des patterns similaires."""
+    return Response({
+        'patterns': [],
+        'message': 'Fonctionnalité en développement',
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_learning_stats(request):
+    """Statistiques d'apprentissage."""
+    return Response({
+        'total_patterns': 0,
+        'message': 'Fonctionnalité en développement',
+    })
+
+
+setattr(assistant_learning_stats, 'ressource', 'assistant')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_learning_pattern_update(request):
+    """Met à jour un pattern d'apprentissage."""
+    return Response({
+        'success': True,
+        'message': 'Pattern mis à jour (fonctionnalité en développement)',
+    })
+
+
+setattr(assistant_learning_pattern_update, 'ressource', 'assistant')

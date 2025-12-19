@@ -30,14 +30,36 @@ Application de gestion et d’archivage documentaire pour ACS (Assureurs Conseil
 
 ## Démarrage rapide
 
-### 1. Backend (Django + PostgreSQL)
+### Option A : Docker (recommandé)
 
-Depuis le dossier racine :
+La méthode la plus simple pour lancer l'application complète :
+
+```bash
+# Lancer tous les services (DB + Backend + Frontend)
+docker compose up -d
+
+# Voir les logs
+docker compose logs -f
+
+# Arrêter
+docker compose down
+```
+
+**Accès :**
+- Frontend : http://localhost:3000
+- Backend API : http://localhost:8000/api
+- Health check : http://localhost:8000/api/health/
+
+> ⚠️ Docker Desktop doit être lancé avant d'exécuter ces commandes.
+
+### Option B : Développement local
+
+#### 1. Backend (Django + PostgreSQL)
 
 ```powershell
 cd backend
 
-# (1ère fois uniquement) créer et activer le venv
+# (1ère fois) créer et activer le venv
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
@@ -48,13 +70,9 @@ pip install -r requirements.txt
 python manage.py runserver
 ```
 
-Par défaut, l’API est disponible sur : `http://127.0.0.1:8000/api/`.
+API disponible sur : `http://127.0.0.1:8000/api/`
 
-> ⚠️ Les migrations Django ne sont pas toutes appliquées volontairement pour préserver une base existante. Ne pas lancer `python manage.py migrate` sans avoir vérifié l’impact sur la base PostgreSQL.
-
-### 2. Frontend (Next.js)
-
-Dans un autre terminal, depuis le dossier racine :
+#### 2. Frontend (Next.js)
 
 ```powershell
 cd front
@@ -62,7 +80,9 @@ npm install
 npm run dev
 ```
 
-L’interface web est disponible sur : `http://localhost:3000`.
+Interface web sur : `http://localhost:3000`
+
+> ⚠️ En développement local, vous devez avoir PostgreSQL installé et configuré.
 
 ## Fonctionnalités principales
 
