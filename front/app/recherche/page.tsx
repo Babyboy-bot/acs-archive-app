@@ -724,6 +724,8 @@ export default function PageRecherche() {
     )
 
     return uniques
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
   }, [documentsSource, client, exercice, typeCourrier, filtrerDocuments])
 
   const suggestionsTypeCourrier = useMemo(() => {
@@ -742,6 +744,12 @@ export default function PageRecherche() {
     )
 
     return uniques
+      .slice()
+      .sort((a, b) => {
+        const la = TYPE_COURRIER_LIBELLES[a] ?? a
+        const lb = TYPE_COURRIER_LIBELLES[b] ?? b
+        return la.localeCompare(lb, 'fr', { sensitivity: 'base' })
+      })
   }, [documentsSource, client, exercice, risque, filtrerDocuments])
 
   const suggestionsExercices = useMemo(() => {
@@ -766,11 +774,15 @@ export default function PageRecherche() {
     const dyn = typesRisqueDisponibles.map((type) => type.toUpperCase())
     const fallback = RISQUE_FALLBACK_TYPES.map(({ value }) => value.toUpperCase())
     return fusionnerSuggestions(dyn, fallback, normalizeRisqueKey)
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
   }, [typesRisqueDisponibles, fusionnerSuggestions])
 
   const anneesOptions = useMemo(() => {
     const base = exercicesDisponibles.length > 0 ? exercicesDisponibles : anneesFallback()
     return fusionnerSuggestions(suggestionsExercices, base)
+      .slice()
+      .sort((a, b) => b - a)
   }, [exercicesDisponibles, suggestionsExercices, fusionnerSuggestions, anneeMaxDisponible])
 
   const resultatsAffiches = useMemo(() => {
@@ -873,12 +885,20 @@ export default function PageRecherche() {
 
   const typesRisque = useMemo(() => {
     const ordonnes = fusionnerSuggestions(suggestionsRisque, baseRisques, normalizeRisqueKey)
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
     return [''].concat(ordonnes)
   }, [suggestionsRisque, baseRisques, fusionnerSuggestions])
 
   const typesCourrier = useMemo<TypeCourrierOption[]>(
     () => {
       const ordonnes = fusionnerSuggestions(suggestionsTypeCourrier, toutesTypesCourrier)
+        .slice()
+        .sort((a, b) => {
+          const la = TYPE_COURRIER_LIBELLES[a] ?? a
+          const lb = TYPE_COURRIER_LIBELLES[b] ?? b
+          return la.localeCompare(lb, 'fr', { sensitivity: 'base' })
+        })
       return [{ value: '', label: 'Tous les courriers', theme: DEFAULT_TYPE_COURRIER_THEME }].concat(
         ordonnes.map((value) => ({
           value,
