@@ -450,7 +450,7 @@ type DocumentDetail = {
   }
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+const API_BASE_URL = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
 const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
 const DEFAULT_TOP_K = 30 // Permet de remonter davantage de documents pertinents (ex: plusieurs avenants)
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
