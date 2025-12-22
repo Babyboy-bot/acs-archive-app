@@ -285,17 +285,19 @@ def login_view(request):
             status=status.HTTP_200_OK,
         )
 
-        # D├®terminer les param├¿tres des cookies
+        # Déterminer les paramètres des cookies
+        # Avec nginx comme reverse proxy, tout est sur le même domaine donc SameSite=Lax fonctionne
         secure_cookie = not settings.DEBUG
         access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
         refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
-
+        samesite_policy = 'Lax'
+        
         response.set_cookie(
             'access_token',
             str(access_token),
             httponly=True,
             secure=secure_cookie,
-            samesite='Lax',
+            samesite=samesite_policy,
             max_age=int(access_lifetime.total_seconds()),
         )
         response.set_cookie(
@@ -303,7 +305,7 @@ def login_view(request):
             str(refresh),
             httponly=True,
             secure=secure_cookie,
-            samesite='Lax',
+            samesite=samesite_policy,
             max_age=int(refresh_lifetime.total_seconds()),
         )
 

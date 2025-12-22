@@ -25,6 +25,10 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+# Désactiver la redirection automatique des URLs sans trailing slash
+# Cela évite les redirects qui cassent les requêtes preflight CORS
+APPEND_SLASH = False
+
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -224,10 +228,14 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
 
 # CORS Configuration
-CORS_ALLOWED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS',
-    'http://localhost:3010,http://127.0.0.1:3010'
-).split(',')
+# En mode DEBUG, autoriser toutes les origines pour simplifier le développement
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOWED_ORIGINS = os.getenv(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:3010,http://127.0.0.1:3010,http://localhost:3000,http://127.0.0.1:3000'
+    ).split(',')
 
 CORS_ALLOW_CREDENTIALS = True
 

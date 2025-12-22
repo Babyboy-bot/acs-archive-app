@@ -21,6 +21,8 @@ COPY . .
 # Variables d'environnement pour le build
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+# URL du backend pour les rewrites Next.js (utilisé au build time)
+ENV BACKEND_URL=http://backend:8000
 
 # Build de l'application
 RUN npm run build
