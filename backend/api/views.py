@@ -1025,16 +1025,37 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return queryset
     
     def create(self, request, *args, **kwargs):
-        """Cr├®er un document et logger l'activit├®"""
+        """Créer un document et logger l'activité"""
+        from .search_index import invalidate_document_index
+        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = serializer.save()
         try:
             chunker_document(document)
         except Exception:
-            logging.exception("Erreur lors de la g├®n├®ration des chunks de document")
+            logging.exception("Erreur lors de la génération des chunks de document")
+        
+        # Invalider l'index de recherche
+        invalidate_document_index()
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    def update(self, request, *args, **kwargs):
+        """Mettre à jour un document"""
+        from .search_index import invalidate_document_index
+        
+        response = super().update(request, *args, **kwargs)
+        invalidate_document_index()
+        return response
+    
+    def destroy(self, request, *args, **kwargs):
+        """Supprimer un document"""
+        from .search_index import invalidate_document_index
+        
+        response = super().destroy(request, *args, **kwargs)
+        invalidate_document_index()
+        return response
 
 
 class DocumentUploadView(APIView):
@@ -1086,12 +1107,16 @@ class DocumentUploadView(APIView):
         try:
             chunker_document(document)
         except Exception:
-            logging.exception("Erreur lors de la g├®n├®ration des chunks de document (upload)")
+            logging.exception("Erreur lors de la génération des chunks de document (upload)")
+        
+        # Invalider l'index de recherche
+        from .search_index import invalidate_document_index
+        invalidate_document_index()
 
         serializer = DocumentSerializer(document, context={'request': request})
         return Response({
             'success': True,
-            'message': 'Document t├®l├®vers├® avec succ├¿s',
+            'message': 'Document téléversé avec succès',
             'document': serializer.data
         }, status=status.HTTP_201_CREATED)
 
@@ -1364,31 +1389,62 @@ def _normalize_text(value: str) -> str:
 
 
 def _extract_text_from_pdf(document: Document) -> list[tuple[int, str]]:
-    if not PDF_EXTRACTION_AVAILABLE:
-        return []
-
+    """
+    Extrait le texte d'un PDF avec fallback OCR pour les documents scannés.
+    """
     if not document.chemin_fichier:
         return []
 
-    try:
-        with default_storage.open(document.chemin_fichier, 'rb') as f:
-            reader = PyPDF2.PdfReader(f)  # type: ignore[call-arg]
-            pages: list[tuple[int, str]] = []
-            for index, page in enumerate(reader.pages):
-                try:
-                    text = page.extract_text() or ""
-                except Exception:
-                    logging.exception("Erreur lors de l'extraction du texte de la page %s du document %s", index + 1, document.id)
-                    text = ""
-                if text.strip():
-                    pages.append((index + 1, text))
-            return pages
-    except Exception:
-        logging.exception("Erreur lors de l'ouverture du fichier PDF pour le document %s", document.id)
-        return []
+    pages: list[tuple[int, str]] = []
+    total_text_length = 0
+    
+    # Essayer l'extraction native avec PyPDF2
+    if PDF_EXTRACTION_AVAILABLE:
+        try:
+            with default_storage.open(document.chemin_fichier, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                for index, page in enumerate(reader.pages):
+                    try:
+                        text = page.extract_text() or ""
+                    except Exception:
+                        logging.exception("Erreur extraction texte page %s du document %s", index + 1, document.id)
+                        text = ""
+                    if text.strip():
+                        pages.append((index + 1, text))
+                        total_text_length += len(text)
+        except Exception:
+            logging.exception("Erreur ouverture PDF pour le document %s", document.id)
+    
+    # Si peu de texte extrait, essayer l'OCR
+    avg_text_per_page = total_text_length / max(len(pages), 1) if pages else 0
+    
+    if avg_text_per_page < 100:  # Seuil: moins de 100 caractères par page
+        try:
+            from .ocr import is_pdf_ocr_available, ocr_pdf_bytes
+            
+            if is_pdf_ocr_available():
+                logging.info(f"Document {document.id}: peu de texte ({avg_text_per_page:.0f} car/page), tentative OCR...")
+                
+                with default_storage.open(document.chemin_fichier, 'rb') as f:
+                    pdf_bytes = f.read()
+                
+                ocr_pages = ocr_pdf_bytes(pdf_bytes)
+                if ocr_pages:
+                    logging.info(f"Document {document.id}: OCR réussi, {len(ocr_pages)} pages extraites")
+                    return ocr_pages
+        except Exception:
+            logging.exception("Erreur OCR pour le document %s", document.id)
+    
+    return pages
 
 
 def chunker_document(document: Document) -> None:
+    """
+    Découpe un document en chunks pour la recherche.
+    Utilise un chunking intelligent basé sur les paragraphes et phrases.
+    """
+    from .chunking import chunk_document_pages, chunk_document_text
+    
     client_nom = None
     exercice_annee = None
     risque_type = None
@@ -1399,47 +1455,33 @@ def chunker_document(document: Document) -> None:
         if exercice.client:
             client_nom = exercice.client.nom
 
+    # Supprimer les anciens chunks
+    DocumentChunk.objects.filter(document=document).delete()
+    
     chunks_crees = 0
 
-    # Extraction avanc├®e pour les PDF si possible
+    # Extraction avancée pour les PDF si possible
     type_fichier = (document.type_fichier or "").lower()
     if 'pdf' in type_fichier:
         pages = _extract_text_from_pdf(document)
         if pages:
-            ordre = 0
-            max_chars = 2000
-            overlap = 400
-
-            for page_num, texte_page in pages:
-                texte_page = (texte_page or "").replace("\r", "\n")
-                texte_page = texte_page.strip()
-                if not texte_page:
-                    continue
-
-                start = 0
-                length = len(texte_page)
-                while start < length:
-                    end = min(length, start + max_chars)
-                    extrait = texte_page[start:end].strip()
-                    if extrait:
-                        DocumentChunk.objects.create(
-                            document=document,
-                            ordre=ordre,
-                            page=page_num,
-                            texte=extrait,
-                            client_nom=client_nom,
-                            exercice_annee=exercice_annee,
-                            risque_type=risque_type,
-                            type_courrier=document.type_courrier,
-                            reference=document.reference,
-                        )
-                        ordre += 1
-                        chunks_crees += 1
-
-                    if end >= length:
-                        break
-                    # overlap pour ├®viter de couper brutalement le contexte
-                    start = max(0, end - overlap)
+            # Utiliser le chunker intelligent
+            chunked_pages = chunk_document_pages(pages)
+            
+            for page_num, chunk_text, ordre in chunked_pages:
+                if chunk_text and chunk_text.strip():
+                    DocumentChunk.objects.create(
+                        document=document,
+                        ordre=ordre,
+                        page=page_num,
+                        texte=chunk_text,
+                        client_nom=client_nom,
+                        exercice_annee=exercice_annee,
+                        risque_type=risque_type,
+                        type_courrier=document.type_courrier,
+                        reference=document.reference,
+                    )
+                    chunks_crees += 1
 
     # Fallback simple si aucune extraction PDF n'est possible ou n'a rien produit
     if chunks_crees == 0:
@@ -1447,17 +1489,22 @@ def chunker_document(document: Document) -> None:
         if not texte.strip():
             return
 
-        DocumentChunk.objects.create(
-            document=document,
-            ordre=0,
-            page=None,
-            texte=texte,
-            client_nom=client_nom,
-            exercice_annee=exercice_annee,
-            risque_type=risque_type,
-            type_courrier=document.type_courrier,
-            reference=document.reference,
-        )
+        # Utiliser le chunker intelligent même pour le texte simple
+        chunks = chunk_document_text(texte)
+        for ordre, chunk_text in enumerate(chunks):
+            DocumentChunk.objects.create(
+                document=document,
+                ordre=ordre,
+                page=None,
+                texte=chunk_text,
+                client_nom=client_nom,
+                exercice_annee=exercice_annee,
+                risque_type=risque_type,
+                type_courrier=document.type_courrier,
+                reference=document.reference,
+            )
+    
+    logging.info(f"Document {document.id}: {chunks_crees} chunks créés")
 
 
 def _build_document_text(payload: dict) -> str:
@@ -1553,7 +1600,8 @@ def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def assistant_document_search_view(request):
-    """Recherche TF-IDF optimis├®e pour l'assistant IA"""
+    """Recherche TF-IDF optimisée pour l'assistant IA avec index persistant"""
+    from .search_index import get_document_index, rebuild_document_index
 
     query = (request.query_params.get('q') or '').strip()
     if not query:
@@ -1564,6 +1612,21 @@ def assistant_document_search_view(request):
     except ValueError:
         top_k = 5
 
+    # Utiliser l'index persistant (reconstruit automatiquement si nécessaire)
+    try:
+        rebuild_document_index()
+        index = get_document_index()
+        search_results = index.search_tfidf(query, top_k=top_k)
+        
+        results = []
+        for payload, score in search_results:
+            results.append(_build_assistant_result(payload, score))
+        
+        return Response({'results': results, 'index_stats': index.get_stats()})
+    except Exception as e:
+        logging.error(f"Erreur index persistant, fallback sur calcul direct: {e}")
+    
+    # Fallback: calcul direct si l'index échoue
     documents = list(
         Document.objects.select_related('categorie', 'risque__exercice__client').all()
     )

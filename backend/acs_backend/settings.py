@@ -277,6 +277,22 @@ MISTRAL_MODEL_DEFAULT = os.getenv('MISTRAL_MODEL_DEFAULT', 'mistral-medium-lates
 MISTRAL_MODEL_ADVANCED = os.getenv('MISTRAL_MODEL_ADVANCED', 'mistral-large-latest')
 
 # ============================================================================
+# OCR (Tesseract)
+# ============================================================================
+
+OCR_ENABLED = os.getenv('OCR_ENABLED', 'true').lower() == 'true'
+TESSERACT_CMD = os.getenv('TESSERACT_CMD')  # Chemin vers tesseract.exe si non dans PATH
+TESSERACT_LANG = os.getenv('TESSERACT_LANG', 'fra')  # Langue par défaut (français)
+OCR_DPI = int(os.getenv('OCR_DPI', '300'))  # Résolution pour la conversion PDF -> image
+
+# ============================================================================
+# Index de recherche
+# ============================================================================
+
+SEARCH_INDEX_DIR = BASE_DIR / 'search_indexes'
+SEARCH_INDEX_TTL_SECONDS = int(os.getenv('SEARCH_INDEX_TTL_SECONDS', '3600'))  # 1 heure
+
+# ============================================================================
 # Sentry (Monitoring d'erreurs)
 # ============================================================================
 
