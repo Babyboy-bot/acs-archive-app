@@ -1058,6 +1058,24 @@ class DocumentViewSet(viewsets.ModelViewSet):
         response = super().destroy(request, *args, **kwargs)
         invalidate_document_index()
         return response
+    
+    @action(detail=False, methods=['get'])
+    def recents(self, request):
+        """Récupérer les documents récents"""
+        from django.utils.dateparse import parse_datetime
+        
+        limit = int(request.query_params.get('limit', 10))
+        since = request.query_params.get('since', None)
+        
+        queryset = Document.objects.all().order_by('-cree_le')[:limit]
+        
+        if since:
+            since_date = parse_datetime(since)
+            if since_date:
+                queryset = Document.objects.filter(cree_le__gt=since_date).order_by('-cree_le')[:limit]
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class DocumentUploadView(APIView):
