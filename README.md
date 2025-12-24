@@ -1,12 +1,16 @@
 # ACS Archive App
 
-Application de gestion et d’archivage documentaire pour ACS (Assureurs Conseils Service), avec :
+Application de gestion et d'archivage documentaire pour ACS (Assureurs Conseils Service), avec :
 
 - Authentification sécurisée multi‑rôles (JWT en cookies **httpOnly** + middleware, rôles admin / archiviste / consultant)
 - Gestion des clients, exercices, risques, documents (dont clients groupe / flotte)
 - Recherche avancée et recherche rapide des documents (client / exercice / risque / type de courrier, avec normalisation robuste accents/casse)
-- Assistant IA conversationnel intégré (recherche documentaire TF‑IDF / FAISS; recherche sémantique par embeddings reportée à plus tard)
+- Assistant IA conversationnel intégré avec suggestions personnalisées
+- Optimisation des performances avec mise en cache des embeddings et TF-IDF
+- Gestion avancée des documents PDF avec OCR intégré (Tesseract.js)
 - Interface moderne (Next.js, thème clair/sombre, tableaux de bord, etc.)
+- Optimisation Nginx pour le chargement rapide des documents
+- Monitoring des performances et journalisation avancée
 
 ## Structure du projet
 
@@ -27,6 +31,23 @@ Application de gestion et d’archivage documentaire pour ACS (Assureurs Conseil
 ├── types/         # Types TypeScript globaux (partagés)
 └── fichiers de configuration racine (postcss.config.mjs, prisma.config.ts, …)
 ```
+
+## Fonctionnalités récentes
+
+- **Optimisations de performances**
+  - Mise en cache des embeddings et des résultats de recherche
+  - Précuisson du modèle sémantique au démarrage
+  - Limitation de la portée des requêtes (top_k et nombre de documents analysés)
+
+- **Améliorations de l'expérience utilisateur**
+  - Suggestions de recherche contextuelles améliorées
+  - Meilleure gestion des erreurs et timeouts
+  - Interface plus réactive avec indicateurs de chargement
+
+- **Sécurité et fiabilité**
+  - Configuration optimisée de Nginx pour la sécurité et les performances
+  - Cache des documents PDF avec en-têtes appropriés
+  - Journalisation détaillée pour le débogage
 
 ## Démarrage rapide
 
@@ -100,9 +121,13 @@ Interface web sur : `http://localhost:3000`
   - Tableau de bord, pages clients, documents, utilisateurs, paramètres
   - Interface moderne avec animations (Framer Motion), thème et navigation cohérente
 - **Assistant IA**
-  - Chat conversationnel orienté aide à la recherche documentaire
-  - Utilise actuellement une recherche lexicale (TF‑IDF / FAISS) sur les documents indexés
-  - Intégration LLM Mistral (API Mistral) sans système de quotas applicatif côté ACS (seuls les quotas Mistral s'appliquent)
+  - Chat conversationnel avec recherche sémantique avancée (FAISS) et fallback TF-IDF
+  - Cache des embeddings pour des performances optimales
+  - Suggestions de requêtes personnalisées pour les avenants et contrats
+  - Gestion des conversations avec historique persistant
+  - Timeout configurable côté client (20s par défaut)
+  - Optimisation pour la recherche d'avenants et contrats spécifiques
+  - Intégration LLM Mistral (API Mistral) sans système de quotas applicatif côté ACS
 
 ## Rôles & permissions
 
