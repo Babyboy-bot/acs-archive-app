@@ -7,7 +7,6 @@ import { useRequireAuth } from '@/hooks/useRequireAuth'
 import { hasPermission } from '@/lib/permissions'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
-
 import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { PreviewPDF } from '@/components/PreviewPDF'
@@ -284,16 +283,29 @@ export default function PageDocuments() {
       setChargement(true)
       setErreur('')
       try {
-        const { response, data } = await apiFetchJson('/documents/')
-        if (!response.ok) {
-          throw new Error((data as any)?.detail ?? 'Impossible de charger les documents')
+        // D'abord récupérer la première page pour connaître le total
+        const { response: firstResponse, data: firstData } = await apiFetchJson('/documents/?page_size=50&ordering=-cree_le')
+        if (!firstResponse.ok) {
+          throw new Error((firstData as any)?.detail ?? 'Impossible de charger les documents')
         }
 
-        const bruts: any[] = Array.isArray(data)
-          ? data
-          : Array.isArray((data as any)?.results)
-            ? (data as any).results
-            : []
+        let allDocuments: any[] = Array.isArray((firstData as any)?.results) ? (firstData as any).results : []
+        const total = (firstData as any)?.count || allDocuments.length
+        const pageSize = 50
+        const totalPages = Math.ceil(total / pageSize)
+
+        // Récupérer les pages suivantes
+        for (let page = 2; page <= totalPages; page++) {
+          const { response, data } = await apiFetchJson(`/documents/?page=${page}&page_size=50&ordering=-cree_le`)
+          if (!response.ok) {
+            throw new Error((data as any)?.detail ?? 'Impossible de charger les documents')
+          }
+
+          const pageResults = Array.isArray((data as any)?.results) ? (data as any).results : []
+          allDocuments = allDocuments.concat(pageResults)
+        }
+
+        const bruts = allDocuments
 
         const normalises = bruts.map((doc) => {
           const risqueDetail = doc.risque_detail ?? doc.risqueDetail ?? null
@@ -724,7 +736,7 @@ export default function PageDocuments() {
               <p className="text-sm font-medium text-theme-secondary uppercase tracking-wider mb-1">Gestion</p>
               <h1 className="text-3xl font-semibold text-theme-primary">Documents</h1>
               <p className="text-sm text-theme-secondary mt-1">
-                {documentsFiltres.length} document{documentsFiltres.length > 1 ? 's' : ''}
+                {documentsPagination.items.length} document{documentsPagination.items.length > 1 ? 's' : ''} affiché{documentsPagination.items.length > 1 ? 's' : ''} sur {documentsFiltres.length} au total
               </p>
             </div>
 

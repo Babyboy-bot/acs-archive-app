@@ -15,6 +15,7 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import Blob3D from "@/components/ui/Blob3D";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
+import { applyTheme } from "@/lib/theme";
 
 interface PieceJustificativeMetadata extends Record<string, unknown> {
   url?: string;
@@ -60,9 +61,9 @@ interface AssistantConversationSummary {
 }
 
 const SUGGESTIONS = [
-  "Quels sont les derniers avenants de 2025 ?",
-  "Montre-moi les documents du client SANLAM",
-  "Quels contrats arrivent à échéance ce mois ?",
+  "Recherche le document Avenant N° 0529 2024 de 3CB risque MRP",
+  "Donne moi le bilan du système",
+  "Qu'est ce qu'un risque dans notre contexte ?",
 ];
 
 const LOCAL_STORAGE_KEY = "acs-assistant-conversation-v1";
@@ -97,6 +98,7 @@ export default function ConsultantChatPage() {
     variant: "error" | "warning" | "success" | "info";
   }>({ open: false, title: "", message: "", variant: "error" });
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
+  const [modaleTutoriel, setModaleTutoriel] = useState(false);
 
   // État pour la modale de prévisualisation document
   const [modaleDocument, setModaleDocument] = useState<{
@@ -133,11 +135,9 @@ export default function ConsultantChatPage() {
     return () => window.removeEventListener("storage", syncTheme);
   }, []);
 
-  // Sauvegarder le thème dans localStorage à chaque changement
+  // Appliquer le thème globalement (ajoute/enlève la classe 'dark' et persiste localStorage)
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("theme", theme);
-    }
+    applyTheme(theme);
   }, [theme]);
 
   useEffect(() => {
@@ -681,21 +681,12 @@ export default function ConsultantChatPage() {
   if (!mounted) return null;
   return (
     <div
-      className={`flex h-screen ${
-        isDark
-          ? "bg-[#0f0f0f]"
-          : "bg-gradient-to-br from-slate-50 via-white to-slate-100"
-      }`}
+      className={"flex h-screen w-full overflow-x-hidden bg-theme-base text-theme-primary"}
     >
       {/* Sidebar moderne */}
       <aside
-        className={`${
-          sidebarOpen ? "w-72" : "w-0"
-        } flex-shrink-0 overflow-hidden transition-all duration-500 ease-out ${
-          isDark
-            ? "bg-[#171717] border-r border-white/5"
-            : "bg-white/80 backdrop-blur-xl border-r border-slate-200/50"
-        }`}
+        className={`${sidebarOpen ? "w-72" : "w-0"
+          } flex-shrink-0 overflow-hidden transition-all duration-500 ease-out bg-theme-card border-r border-theme`}
       >
         <div className="flex flex-col h-full p-4">
           {/* Header sidebar */}
@@ -707,16 +698,12 @@ export default function ConsultantChatPage() {
             </div>
             <div>
               <h2
-                className={`font-semibold text-sm ${
-                  isDark ? "text-white" : "text-slate-900"
-                }`}
+                className={"font-semibold text-sm text-theme-primary"}
               >
                 ACS Assistant
               </h2>
               <p
-                className={`text-xs ${
-                  isDark ? "text-slate-500" : "text-slate-500"
-                }`}
+                className={"text-xs text-theme-secondary"}
               >
                 Intelligence documentaire
               </p>
@@ -726,16 +713,11 @@ export default function ConsultantChatPage() {
           {/* Nouveau chat */}
           <button
             onClick={nouvelleConversation}
-            className={`group flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium mb-4 transition-all duration-300 ${
-              isDark
-                ? "bg-gradient-to-r from-cyan-600/20 to-purple-600/20 text-white hover:from-cyan-600/30 hover:to-purple-600/30 border border-white/10"
-                : "bg-gradient-to-r from-cyan-50 to-purple-50 text-cyan-700 hover:from-cyan-100 hover:to-purple-100 border border-cyan-200/50"
-            }`}
+            className={"group flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium mb-4 transition-all duration-300 bg-theme-card border border-theme text-theme-primary hover:bg-theme-muted"}
           >
             <div
-              className={`w-6 h-6 rounded-lg flex items-center justify-center transition-transform group-hover:scale-110 ${
-                isDark ? "bg-cyan-500/30" : "bg-cyan-500/20"
-              }`}
+              className={`w-6 h-6 rounded-lg flex items-center justify-center transition-transform group-hover:scale-110 ${isDark ? "bg-cyan-500/30" : "bg-cyan-500/20"
+                }`}
             >
               <Icon
                 name="plus"
@@ -749,9 +731,7 @@ export default function ConsultantChatPage() {
           {/* Historique */}
           <div className="flex-1 overflow-y-auto space-y-1">
             <p
-              className={`text-[10px] font-semibold uppercase tracking-wider px-3 py-2 ${
-                isDark ? "text-slate-600" : "text-slate-400"
-              }`}
+              className={"text-[10px] font-semibold uppercase tracking-wider px-3 py-2 text-theme-secondary"}
             >
               Historique
             </p>
@@ -767,15 +747,10 @@ export default function ConsultantChatPage() {
                       chargerConversation(conv.id);
                     }
                   }}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl transition-all duration-200 cursor-pointer ${
-                    conv.id === conversationId
-                      ? isDark
-                        ? "bg-white/10 text-white"
-                        : "bg-cyan-50 text-cyan-700"
-                      : isDark
-                      ? "text-slate-400 hover:bg-white/5 hover:text-white"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  }`}
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl transition-all duration-200 cursor-pointer ${conv.id === conversationId
+                      ? "bg-theme-muted text-theme-primary"
+                      : "text-theme-secondary hover:bg-theme-muted hover:text-theme-primary"
+                    }`}
                 >
                   <Icon
                     name="document"
@@ -797,11 +772,10 @@ export default function ConsultantChatPage() {
                       e.stopPropagation();
                       ouvrirModaleSuppressionConversation(conv);
                     }}
-                    className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${
-                      isDark
+                    className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${isDark
                         ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
                         : "text-slate-400 hover:text-red-500 hover:bg-red-50"
-                    }`}
+                      }`}
                     aria-label="Supprimer"
                   >
                     <Icon name="trash" size="xs" />
@@ -811,9 +785,8 @@ export default function ConsultantChatPage() {
             ))}
             {conversations.length === 0 && (
               <div
-                className={`px-3 py-8 text-center ${
-                  isDark ? "text-slate-600" : "text-slate-400"
-                }`}
+                className={`px-3 py-8 text-center ${isDark ? "text-slate-600" : "text-slate-400"
+                  }`}
               >
                 <Icon
                   name="document"
@@ -827,14 +800,12 @@ export default function ConsultantChatPage() {
 
           {/* Utilisateur */}
           <div
-            className={`mt-4 pt-4 ${
-              isDark ? "border-t border-white/5" : "border-t border-slate-100"
-            }`}
+            className={`mt-4 pt-4 ${isDark ? "border-t border-white/5" : "border-t border-slate-100"
+              }`}
           >
             <div
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg ${
-                isDark ? "bg-white/5" : "bg-slate-50"
-              }`}
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg ${isDark ? "bg-white/5" : "bg-slate-50"
+                }`}
             >
               <div className="relative">
                 <div className="w-9 h-9 rounded-lg bg-zinc-700 flex items-center justify-center text-white text-sm font-semibold">
@@ -847,16 +818,14 @@ export default function ConsultantChatPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <p
-                  className={`text-sm font-medium truncate ${
-                    isDark ? "text-white" : "text-slate-900"
-                  }`}
+                  className={`text-sm font-medium truncate ${isDark ? "text-white" : "text-slate-900"
+                    }`}
                 >
                   {utilisateur?.prenom} {utilisateur?.nom}
                 </p>
                 <p
-                  className={`text-[11px] ${
-                    isDark ? "text-slate-500" : "text-slate-500"
-                  }`}
+                  className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"
+                    }`}
                 >
                   {utilisateur?.role === "ADMIN"
                     ? "Administrateur"
@@ -869,11 +838,10 @@ export default function ConsultantChatPage() {
               {utilisateur?.role === "ADMIN" && (
                 <button
                   onClick={() => router.push("/tableau-de-bord")}
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
-                    isDark
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${isDark
                       ? "text-slate-400 hover:text-white hover:bg-white/5"
                       : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
-                  }`}
+                    }`}
                 >
                   <Icon name="home" size="xs" />
                   Dashboard
@@ -881,11 +849,10 @@ export default function ConsultantChatPage() {
               )}
               <button
                 onClick={handleLogout}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
-                  isDark
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${isDark
                     ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
                     : "text-slate-400 hover:text-red-500 hover:bg-red-50"
-                }`}
+                  }`}
               >
                 <Icon name="logout" size="xs" />
                 Déconnexion
@@ -896,27 +863,32 @@ export default function ConsultantChatPage() {
       </aside>
 
       {/* Zone principale */}
-      <div className="flex-1 flex flex-col relative">
+      <div className="flex-1 min-w-0 flex flex-col relative overflow-x-hidden">
         {/* Header flottant */}
         <div
-          className={`absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 ${
-            isDark
-              ? "bg-gradient-to-b from-[#0f0f0f] via-[#0f0f0f]/80 to-transparent"
+          className={`absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 ${isDark
+              ? "bg-gradient-to-b from-theme-base via-theme-base/80 to-transparent"
               : "bg-gradient-to-b from-white via-white/80 to-transparent"
-          }`}
+            }`}
         >
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className={`p-2.5 rounded-xl transition-all duration-300 ${
-              isDark
+            className={`p-2.5 rounded-xl transition-all duration-300 ${isDark
                 ? "text-slate-500 hover:text-white hover:bg-white/10"
                 : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-            }`}
+              }`}
           >
             <Icon name={sidebarOpen ? "chevron-left" : "menu"} size="sm" />
           </button>
 
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setModaleTutoriel(true)}
+              className={`p-2.5 rounded-xl transition-all duration-300 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted`}
+              title="Tutoriel"
+            >
+              <Icon name="info" size="sm" />
+            </button>
             <button
               onClick={() => setTheme(isDark ? "light" : "dark")}
               aria-label={isDark ? "Mode clair" : "Mode sombre"}
@@ -927,8 +899,8 @@ export default function ConsultantChatPage() {
               {/* Thumb */}
               <span
                 className={`absolute top-1 w-6 h-6 z-5 rounded-full shadow-md transition-all duration-300 flex items-center justify-center
-                  ${isDark 
-                    ? "left-7 bg-slate-600 text-cyan-400" 
+                  ${isDark
+                    ? "left-7 bg-slate-600 text-cyan-400"
                     : "left-1 bg-amber-400 text-white"
                   }
                 `}
@@ -963,9 +935,8 @@ export default function ConsultantChatPage() {
                 ACS Assistant
               </h1>
               <p
-                className={`text-center max-w-lg mb-10 text-base ${
-                  isDark ? "text-slate-400" : "text-slate-500"
-                }`}
+                className={`text-center max-w-lg mb-10 text-base ${isDark ? "text-slate-400" : "text-slate-500"
+                  }`}
               >
                 Explorez vos archives intelligemment. Posez une question sur vos
                 documents, contrats ou pièces justificatives.
@@ -977,19 +948,17 @@ export default function ConsultantChatPage() {
                   <button
                     key={i}
                     onClick={() => handleSuggestionClick(suggestion)}
-                    className={`group relative p-5 rounded-lg text-left text-sm transition-all duration-300 overflow-hidden ${
-                      isDark
+                    className={`group relative p-5 rounded-lg text-left text-sm transition-all duration-300 overflow-hidden ${isDark
                         ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/30"
                         : "bg-white hover:bg-cyan-50/50 border border-slate-200 hover:border-cyan-300 shadow-sm hover:shadow-lg hover:shadow-cyan-500/10"
-                    }`}
+                      }`}
                   >
                     <div
                       className={`absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-cyan-500 to-fuchsia-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300`}
                     />
                     <div
-                      className={`w-8 h-8 rounded-xl mb-3 flex items-center justify-center ${
-                        isDark ? "bg-cyan-500/20" : "bg-cyan-100"
-                      }`}
+                      className={`w-8 h-8 rounded-xl mb-3 flex items-center justify-center ${isDark ? "bg-cyan-500/20" : "bg-cyan-100"
+                        }`}
                     >
                       <Icon
                         name="sparkles"
@@ -998,9 +967,8 @@ export default function ConsultantChatPage() {
                       />
                     </div>
                     <p
-                      className={`font-medium ${
-                        isDark ? "text-white" : "text-slate-700"
-                      }`}
+                      className={`font-medium ${isDark ? "text-white" : "text-slate-700"
+                        }`}
                     >
                       {suggestion}
                     </p>
@@ -1010,9 +978,8 @@ export default function ConsultantChatPage() {
 
               {/* Indicateur de capacités */}
               <div
-                className={`mt-12 flex items-center gap-6 text-xs ${
-                  isDark ? "text-slate-600" : "text-slate-400"
-                }`}
+                className={`mt-12 flex items-center gap-6 text-xs ${isDark ? "text-slate-600" : "text-slate-400"
+                  }`}
               >
                 <span className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
@@ -1034,28 +1001,25 @@ export default function ConsultantChatPage() {
               {messages.map((message, idx) => (
                 <div
                   key={message.id}
-                  className={`mb-6 ${
-                    message.role === "user" ? "flex justify-end" : ""
-                  }`}
+                  className={`mb-6 ${message.role === "user" ? "flex justify-end" : ""
+                    }`}
                 >
                   {message.role === "user" ? (
                     // Message utilisateur - bulle à droite
                     <div className="max-w-[80%]">
                       <div
-                        className={`px-5 py-3.5 rounded-3xl rounded-tr-md ${
-                          isDark
+                        className={`px-5 py-3.5 rounded-3xl rounded-tr-md ${isDark
                             ? "bg-gradient-to-r from-cyan-600 to-purple-600 text-white"
                             : "bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-sm shadow-cyan-500/20"
-                        }`}
+                          }`}
                       >
                         <p className="text-[15px] leading-relaxed">
                           {message.content}
                         </p>
                       </div>
                       <p
-                        className={`text-[10px] mt-1.5 text-right ${
-                          isDark ? "text-slate-600" : "text-slate-400"
-                        }`}
+                        className={`text-[10px] mt-1.5 text-right ${isDark ? "text-slate-600" : "text-slate-400"
+                          }`}
                       >
                         {message.timestamp.toLocaleTimeString("fr-FR", {
                           hour: "2-digit",
@@ -1071,9 +1035,8 @@ export default function ConsultantChatPage() {
                           className={`rounded-tl-md px-5 py-4`}
                         >
                           <p
-                            className={`text-[15px] leading-relaxed whitespace-pre-wrap ${
-                              isDark ? "text-slate-200" : "text-slate-700"
-                            }`}
+                            className={`text-[15px] leading-relaxed whitespace-pre-wrap ${isDark ? "text-slate-200" : "text-slate-700"
+                              }`}
                           >
                             {message.content}
                           </p>
@@ -1081,18 +1044,16 @@ export default function ConsultantChatPage() {
                           {/* Pièces justificatives modernisées */}
                           {message.pieces && message.pieces.length > 0 && (
                             <div
-                              className={`mt-5 pt-4 ${
-                                isDark
+                              className={`mt-5 pt-4 ${isDark
                                   ? "border-t border-white/10"
                                   : "border-t border-slate-100"
-                              }`}
+                                }`}
                             >
                               {/* Header avec compteur et toggle vue */}
                               <div className="flex items-center justify-between mb-3">
                                 <p
-                                  className={`text-xs font-medium flex items-center gap-2 ${
-                                    isDark ? "text-slate-400" : "text-slate-500"
-                                  }`}
+                                  className={`text-xs font-medium flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"
+                                    }`}
                                 >
                                   <Icon name="document" size="xs" />
                                   {message.pieces.length} document
@@ -1100,16 +1061,14 @@ export default function ConsultantChatPage() {
                                   {message.pieces.length > 1 ? "s" : ""}
                                 </p>
                                 {/* Toggle vue grille/liste */}
-                                <div className={`flex items-center rounded-lg p-0.5 ${
-                                  isDark ? "bg-slate-800" : "bg-slate-100"
-                                }`}>
+                                <div className={`flex items-center rounded-lg p-0.5 ${isDark ? "bg-slate-800" : "bg-slate-100"
+                                  }`}>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setVueDocuments("grille"); }}
-                                    className={`p-1.5 rounded-md transition-all ${
-                                      vueDocuments === "grille"
+                                    className={`p-1.5 rounded-md transition-all ${vueDocuments === "grille"
                                         ? (isDark ? "bg-cyan-500/20 text-cyan-400" : "bg-white text-cyan-600 shadow-sm")
                                         : (isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600")
-                                    }`}
+                                      }`}
                                     title="Vue grille"
                                   >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1118,11 +1077,10 @@ export default function ConsultantChatPage() {
                                   </button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setVueDocuments("liste"); }}
-                                    className={`p-1.5 rounded-md transition-all ${
-                                      vueDocuments === "liste"
+                                    className={`p-1.5 rounded-md transition-all ${vueDocuments === "liste"
                                         ? (isDark ? "bg-cyan-500/20 text-cyan-400" : "bg-white text-cyan-600 shadow-sm")
                                         : (isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600")
-                                    }`}
+                                      }`}
                                     title="Vue liste"
                                   >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1139,24 +1097,22 @@ export default function ConsultantChatPage() {
                                     <div
                                       key={piece.id}
                                       onClick={() => void ouvrirPiece(piece)}
-                                      className={`group rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg ${
-                                        isDark
+                                      className={`group rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg ${isDark
                                           ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50"
                                           : "bg-slate-50 hover:bg-cyan-50 border border-slate-200 hover:border-cyan-300"
-                                      }`}
+                                        }`}
                                     >
                                       {/* Miniature du document */}
-                                      <div className={`relative aspect-[3/4] flex flex-col items-center justify-center overflow-hidden ${
-                                        isDark ? "bg-slate-800" : "bg-gradient-to-br from-slate-100 to-slate-200"
-                                      }`}>
+                                      <div className={`relative aspect-[3/4] flex flex-col items-center justify-center overflow-hidden ${isDark ? "bg-slate-800" : "bg-gradient-to-br from-slate-100 to-slate-200"
+                                        }`}>
                                         {(() => {
                                           const ext = piece.metadata?.fichier_url?.split('.').pop()?.toLowerCase() || '';
                                           const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
                                           const isPdf = ext === 'pdf';
-                                          const proxyUrl = piece.metadata?.fichier_url 
+                                          const proxyUrl = piece.metadata?.fichier_url
                                             ? `/api/proxy/document?url=${encodeURIComponent(piece.metadata.fichier_url)}`
                                             : null;
-                                          
+
                                           if (isImage && proxyUrl) {
                                             return (
                                               <img
@@ -1167,7 +1123,7 @@ export default function ConsultantChatPage() {
                                               />
                                             );
                                           }
-                                          
+
                                           if (isPdf && proxyUrl) {
                                             return (
                                               <iframe
@@ -1177,22 +1133,20 @@ export default function ConsultantChatPage() {
                                               />
                                             );
                                           }
-                                          
+
                                           // Fallback: icône pour les autres types
                                           return (
                                             <>
-                                              <div className={`w-12 h-14 rounded-lg flex items-center justify-center ${
-                                                isDark ? "bg-blue-500/20" : "bg-blue-100"
-                                              }`}>
-                                                <Icon 
-                                                  name="document" 
-                                                  size="md" 
+                                              <div className={`w-12 h-14 rounded-lg flex items-center justify-center ${isDark ? "bg-blue-500/20" : "bg-blue-100"
+                                                }`}>
+                                                <Icon
+                                                  name="document"
+                                                  size="md"
                                                   className={isDark ? "text-blue-400" : "text-blue-500"}
                                                 />
                                               </div>
-                                              <span className={`text-[10px] mt-2 font-bold uppercase tracking-wider ${
-                                                isDark ? "text-blue-400" : "text-blue-500"
-                                              }`}>
+                                              <span className={`text-[10px] mt-2 font-bold uppercase tracking-wider ${isDark ? "text-blue-400" : "text-blue-500"
+                                                }`}>
                                                 {ext.toUpperCase() || 'DOC'}
                                               </span>
                                             </>
@@ -1209,9 +1163,8 @@ export default function ConsultantChatPage() {
                                       {/* Infos du document */}
                                       <div className="p-2">
                                         <h4
-                                          className={`font-medium text-xs truncate group-hover:text-cyan-500 transition-colors ${
-                                            isDark ? "text-white" : "text-slate-800"
-                                          }`}
+                                          className={`font-medium text-xs truncate group-hover:text-cyan-500 transition-colors ${isDark ? "text-white" : "text-slate-800"
+                                            }`}
                                         >
                                           {piece.metadata?.titre || piece.source || "Document"}
                                         </h4>
@@ -1237,27 +1190,25 @@ export default function ConsultantChatPage() {
                                       <div
                                         key={piece.id}
                                         onClick={() => void ouvrirPiece(piece)}
-                                        className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 ${
-                                          isDark
+                                        className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 ${isDark
                                             ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50"
                                             : "bg-slate-50 hover:bg-cyan-50 border border-slate-200 hover:border-cyan-300"
-                                        }`}
+                                          }`}
                                       >
                                         {/* Icône type fichier */}
-                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                          isPdf 
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${isPdf
                                             ? (isDark ? "bg-red-500/20" : "bg-red-100")
-                                            : isImage 
+                                            : isImage
                                               ? (isDark ? "bg-emerald-500/20" : "bg-emerald-100")
                                               : (isDark ? "bg-blue-500/20" : "bg-blue-100")
-                                        }`}>
-                                          <Icon 
-                                            name="document" 
-                                            size="sm" 
+                                          }`}>
+                                          <Icon
+                                            name="document"
+                                            size="sm"
                                             className={
-                                              isPdf 
+                                              isPdf
                                                 ? (isDark ? "text-red-400" : "text-red-500")
-                                                : isImage 
+                                                : isImage
                                                   ? (isDark ? "text-emerald-400" : "text-emerald-500")
                                                   : (isDark ? "text-blue-400" : "text-blue-500")
                                             }
@@ -1265,9 +1216,8 @@ export default function ConsultantChatPage() {
                                         </div>
                                         {/* Infos */}
                                         <div className="flex-1 min-w-0">
-                                          <h4 className={`font-medium text-sm truncate group-hover:text-cyan-500 transition-colors ${
-                                            isDark ? "text-white" : "text-slate-800"
-                                          }`}>
+                                          <h4 className={`font-medium text-sm truncate group-hover:text-cyan-500 transition-colors ${isDark ? "text-white" : "text-slate-800"
+                                            }`}>
                                             {piece.metadata?.titre || piece.source || "Document"}
                                           </h4>
                                           <div className="flex items-center gap-2 mt-0.5">
@@ -1277,27 +1227,24 @@ export default function ConsultantChatPage() {
                                               </span>
                                             )}
                                             {piece.metadata?.type && (
-                                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                                                isDark ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-600"
-                                              }`}>
+                                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-600"
+                                                }`}>
                                                 {piece.metadata.type}
                                               </span>
                                             )}
-                                            <span className={`text-[10px] font-medium uppercase ${
-                                              isPdf 
+                                            <span className={`text-[10px] font-medium uppercase ${isPdf
                                                 ? (isDark ? "text-red-400" : "text-red-500")
-                                                : isImage 
+                                                : isImage
                                                   ? (isDark ? "text-emerald-400" : "text-emerald-500")
                                                   : (isDark ? "text-blue-400" : "text-blue-500")
-                                            }`}>
+                                              }`}>
                                               {ext.toUpperCase() || 'DOC'}
                                             </span>
                                           </div>
                                         </div>
                                         {/* Action */}
-                                        <div className={`opacity-0 group-hover:opacity-100 transition-opacity ${
-                                          isDark ? "text-cyan-400" : "text-cyan-600"
-                                        }`}>
+                                        <div className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDark ? "text-cyan-400" : "text-cyan-600"
+                                          }`}>
                                           <Icon name="eye" size="sm" />
                                         </div>
                                       </div>
@@ -1309,9 +1256,8 @@ export default function ConsultantChatPage() {
                           )}
                         </div>
                         <p
-                          className={`text-[10px] mt-1.5 ${
-                            isDark ? "text-slate-600" : "text-slate-400"
-                          }`}
+                          className={`text-[10px] mt-1.5 ${isDark ? "text-slate-600" : "text-slate-400"
+                            }`}
                         >
                           {message.timestamp.toLocaleTimeString("fr-FR", {
                             hour: "2-digit",
@@ -1337,37 +1283,32 @@ export default function ConsultantChatPage() {
                     </div>
                   </div>
                   <div
-                    className={`flex-1 rounded-2xl rounded-tl-md px-5 py-4 ${
-                      isDark
+                    className={`flex-1 rounded-2xl rounded-tl-md px-5 py-4 ${isDark
                         ? "bg-white/5 border border-white/10"
                         : "bg-white border border-slate-200 shadow-sm"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center gap-2">
                       <div className="flex gap-1">
                         <div
-                          className={`w-2 h-2 rounded-full animate-bounce ${
-                            isDark ? "bg-cyan-400" : "bg-cyan-500"
-                          }`}
+                          className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-cyan-400" : "bg-cyan-500"
+                            }`}
                           style={{ animationDelay: "0ms" }}
                         />
                         <div
-                          className={`w-2 h-2 rounded-full animate-bounce ${
-                            isDark ? "bg-purple-400" : "bg-purple-500"
-                          }`}
+                          className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-purple-400" : "bg-purple-500"
+                            }`}
                           style={{ animationDelay: "150ms" }}
                         />
                         <div
-                          className={`w-2 h-2 rounded-full animate-bounce ${
-                            isDark ? "bg-fuchsia-400" : "bg-fuchsia-500"
-                          }`}
+                          className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-fuchsia-400" : "bg-fuchsia-500"
+                            }`}
                           style={{ animationDelay: "300ms" }}
                         />
                       </div>
                       <span
-                        className={`text-sm ${
-                          isDark ? "text-slate-500" : "text-slate-400"
-                        }`}
+                        className={`text-sm ${isDark ? "text-slate-500" : "text-slate-400"
+                          }`}
                       >
                         Recherche en cours...
                       </span>
@@ -1387,11 +1328,10 @@ export default function ConsultantChatPage() {
         >
           <form onSubmit={envoyerMessage} className="max-w-3xl mx-auto">
             <div
-              className={`relative flex items-center rounded-xl transition-all duration-300 ${
-                isDark
+              className={`relative flex items-center rounded-xl transition-all duration-300 ${isDark
                   ? "bg-white/5 border border-white/10 focus-within:border-cyan-500/50 focus-within:bg-white/10"
                   : "bg-white border border-slate-200 shadow-lg shadow-slate-200/50 focus-within:border-cyan-400 focus-within:shadow-cyan-500/10"
-              }`}
+                }`}
             >
               <input
                 type="text"
@@ -1399,30 +1339,27 @@ export default function ConsultantChatPage() {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Posez votre question..."
                 disabled={isLoading}
-                className={`flex-1 bg-transparent py-4 px-5 outline-none text-[15px] disabled:opacity-50 ${
-                  isDark
-                    ? "text-white placeholder-slate-500"
-                    : "text-slate-800 placeholder-slate-400"
-                }`}
+                className={`flex-1 py-4 px-5 bg-transparent rounded-l-xl outline-none text-[15px] ${isDark
+                    ? "text-white"
+                    : "text-slate-800"
+                  }`}
               />
               <button
                 type="submit"
                 disabled={!input.trim() || isLoading}
-                className={`mr-2 p-3 rounded-lg transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed ${
-                  input.trim() && !isLoading
+                className={`p-4 rounded-r-xl transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed ${input.trim() && !isLoading
                     ? "bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50"
                     : isDark
-                    ? "bg-white/5 text-slate-600"
-                    : "bg-slate-100 text-slate-400"
-                }`}
+                      ? "bg-white/5 text-slate-600"
+                      : "bg-slate-100 text-slate-400"
+                  }`}
               >
                 <Icon name="arrow-right" size="sm" />
               </button>
             </div>
             <p
-              className={`text-[11px] text-center mt-2 ${
-                isDark ? "text-slate-600" : "text-slate-400"
-              }`}
+              className={`text-[11px] text-center mt-2 ${isDark ? "text-slate-600" : "text-slate-400"
+                }`}
             >
               ACS Assistant peut faire des erreurs. Vérifiez les informations
               importantes.
@@ -1455,40 +1392,104 @@ export default function ConsultantChatPage() {
         isDark={isDark}
       />
 
+      {/* Modale Tutoriel Assistant */}
+      {modaleTutoriel && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setModaleTutoriel(false)
+          }}
+        >
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div
+            className="relative max-w-2xl w-full p-6 rounded-2xl bg-theme-card border border-theme shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tutoriel-title"
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-theme-muted flex items-center justify-center flex-shrink-0">
+                <Icon name="info" size="sm" className="text-theme-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 id="tutoriel-title" className="text-lg font-semibold text-theme-primary">Comment utiliser l'Assistant IA</h3>
+                <p className="mt-1 text-sm text-theme-secondary">
+                  L’assistant répond à des questions sur vos documents et exercices. Pour de meilleurs résultats, soyez précis.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModaleTutoriel(false)}
+                className="p-2 rounded-lg text-theme-secondary hover:text-theme-primary hover:bg-theme-muted"
+                aria-label="Fermer"
+              >
+                <Icon name="close" size="sm" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-sm">
+              <div>
+                <h4 className="font-medium text-theme-primary mb-1">Conseils</h4>
+                <ul className="list-disc pl-5 space-y-1 text-theme-secondary">
+                  <li>Précisez le <span className="font-medium">client</span>, l’<span className="font-medium">année</span>, le <span className="font-medium">type de document</span> et le <span className="font-medium">risque</span>.</li>
+                  <li>Utilisez des mots-clés exacts (ex: « avenant », « police », « échéance »).</li>
+                  <li>Ajoutez des filtres temporels: « ce mois », « 2023 », « entre 2019 et 2021 ».</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-medium text-theme-primary mb-1">Exemples de requêtes</h4>
+                <div className="space-y-2">
+                  <div className="p-3 rounded-lg bg-theme-muted text-theme-primary flex items-start justify-between gap-3">
+                    <span className="text-sm">Trouve-moi l’avenant 2018 du client 3CB risque Automobile</span>
+                    <button
+                      type="button"
+                      onClick={() => { setInput("Trouve-moi l’avenant 2018 du client 3CB risque Automobile"); setModaleTutoriel(false); }}
+                      className="shrink-0 px-3 py-1.5 text-xs rounded-md bg-theme-card border border-theme hover:bg-theme-muted"
+                    >
+                      Utiliser
+                    </button>
+                  </div>
+                  <div className="p-3 rounded-lg bg-theme-muted text-theme-primary">Quels sont les derniers avenants de 2025 ?</div>
+                  <div className="p-3 rounded-lg bg-theme-muted text-theme-primary">Montre-moi les documents du client SANLAM</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modale de prévisualisation document plein écran */}
       {modaleDocument.open && modaleDocument.url && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
           onClick={() => setModaleDocument({ open: false, piece: null, url: null })}
         >
-          <div 
-            className={`relative w-[95vw] h-[95vh] max-w-6xl rounded-2xl overflow-hidden shadow-2xl ${
-              isDark ? "bg-slate-900" : "bg-white"
-            }`}
+          <div
+            className={`relative w-[95vw] h-[95vh] max-w-6xl rounded-2xl overflow-hidden shadow-2xl ${isDark ? "bg-slate-900" : "bg-white"
+              }`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className={`flex items-center justify-between px-4 py-3 border-b ${
-              isDark ? "border-slate-700 bg-slate-800" : "border-slate-200 bg-slate-50"
-            }`}>
+            <div className={`flex items-center justify-between px-4 py-3 border-b ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-200 bg-slate-50"
+              }`}>
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <Icon name="document" size="sm" className={isDark ? "text-cyan-400" : "text-cyan-600"} />
                 <h3 className={`font-medium text-sm truncate ${isDark ? "text-white" : "text-slate-800"}`}>
                   {modaleDocument.piece?.metadata?.titre || modaleDocument.piece?.source || "Document"}
                 </h3>
                 {modaleDocument.piece?.metadata?.client && (
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    isDark ? "bg-blue-500/20 text-blue-300" : "bg-blue-100 text-blue-600"
-                  }`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? "bg-blue-500/20 text-blue-300" : "bg-blue-100 text-blue-600"
+                    }`}>
                     {modaleDocument.piece.metadata.client}
                   </span>
                 )}
               </div>
               <button
                 onClick={() => setModaleDocument({ open: false, piece: null, url: null })}
-                className={`p-2 rounded-lg transition-colors ${
-                  isDark ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-slate-200 text-slate-500 hover:text-slate-800"
-                }`}
+                className={`p-2 rounded-lg transition-colors ${isDark ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-slate-200 text-slate-500 hover:text-slate-800"
+                  }`}
                 title="Fermer"
               >
                 <Icon name="close" size="sm" />
@@ -1515,7 +1516,7 @@ export default function ConsultantChatPage() {
                     </div>
                   );
                 }
-                
+
                 if (isPdf) {
                   return (
                     <iframe
