@@ -408,3 +408,425 @@ class AssistantHealthTests(APITestCase):
             data = response.json()
             self.assertFalse(data['config_ok'])
             self.assertGreaterEqual(len(data['errors']), 1)
+
+
+class AuditLogTests(APITestCase):
+    """Tests pour le journal d'audit."""
+
+    def setUp(self):
+        self.client = APIClient()
+        
+        # Admin pour accéder aux logs
+        self.admin = Utilisateur.objects.create_user(
+            nom_utilisateur='audit.admin',
+            nom='Audit',
+            prenom='Admin',
+            password='StrongPass123!',
+            role='ADMIN',
+            email='audit.admin@test.com',
+        )
+        
+        # Utilisateur non-admin
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='audit.user',
+            nom='Audit',
+            prenom='User',
+            password='StrongPass123!',
+            role='CONSULTANT',
+            email='audit.user@test.com',
+        )
+
+    def test_audit_log_model_creation(self):
+        """Test de création d'une entrée d'audit via le modèle."""
+        from .models import AuditLog
+        
+        log = AuditLog.log(
+            action='CREATE',
+            resource_type='document',
+            resource_id='123',
+            resource_name='Test Document',
+            utilisateur=self.admin,
+            details={'field': 'value'},
+            ip_address='127.0.0.1',
+            success=True,
+        )
+        
+        self.assertIsNotNone(log.id)
+        self.assertEqual(log.action, 'CREATE')
+        self.assertEqual(log.resource_type, 'document')
+        self.assertEqual(log.utilisateur_nom, str(self.admin))
+        self.assertEqual(log.details, {'field': 'value'})
+
+    def test_audit_log_list_admin_only(self):
+        """Seuls les admins peuvent voir les logs d'audit."""
+        from .models import AuditLog
+        
+        # Créer quelques logs
+        AuditLog.log(action='LOGIN', resource_type='session', utilisateur=self.user)
+        AuditLog.log(action='READ', resource_type='document', resource_id='1', utilisateur=self.admin)
+        
+        # Test avec admin
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(reverse('audit-log-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['total'], 2)
+        self.assertEqual(len(data['results']), 2)
+        
+        # Test avec non-admin
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse('audit-log-list'))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_audit_log_list_filters(self):
+        """Test des filtres sur la liste des logs."""
+        from .models import AuditLog
+        
+        AuditLog.log(action='CREATE', resource_type='document', utilisateur=self.admin)
+        AuditLog.log(action='READ', resource_type='document', utilisateur=self.admin)
+        AuditLog.log(action='LOGIN', resource_type='session', utilisateur=self.user)
+        
+        self.client.force_authenticate(user=self.admin)
+        
+        # Filtrer par action
+        response = self.client.get(reverse('audit-log-list'), {'action': 'CREATE'})
+        self.assertEqual(response.json()['total'], 1)
+        
+        # Filtrer par resource_type
+        response = self.client.get(reverse('audit-log-list'), {'resource_type': 'document'})
+        self.assertEqual(response.json()['total'], 2)
+
+    def test_audit_log_detail(self):
+        """Test de récupération du détail d'un log."""
+        from .models import AuditLog
+        
+        log = AuditLog.log(
+            action='UPDATE',
+            resource_type='client',
+            resource_id='42',
+            resource_name='Client Test',
+            utilisateur=self.admin,
+            details={'before': {'nom': 'Old'}, 'after': {'nom': 'New'}},
+        )
+        
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(reverse('audit-log-detail', args=[log.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['action'], 'UPDATE')
+        self.assertEqual(data['details']['before']['nom'], 'Old')
+
+    def test_audit_log_stats(self):
+        """Test des statistiques d'audit."""
+        from .models import AuditLog
+        
+        AuditLog.log(action='CREATE', resource_type='document', utilisateur=self.admin)
+        AuditLog.log(action='CREATE', resource_type='document', utilisateur=self.admin)
+        AuditLog.log(action='READ', resource_type='client', utilisateur=self.user)
+        
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(reverse('audit-log-stats'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['total_entries'], 3)
+        self.assertEqual(data['actions_count'].get('CREATE'), 2)
+        self.assertEqual(data['resources_count'].get('document'), 2)
+
+
+class AssistantLearningTests(APITestCase):
+    """Tests pour les endpoints d'apprentissage de l'assistant."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='learning.user',
+            nom='Learning',
+            prenom='User',
+            password='StrongPass123!',
+            role='ADMIN',
+            email='learning@test.com',
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_learning_record_interaction(self):
+        """Test d'enregistrement d'une interaction."""
+        url = reverse('assistant-learning-record')
+        response = self.client.post(url, {
+            'id': 'int_test_123',
+            'question': 'Quels sont les documents du client ABC ?',
+            'question_normalized': 'documents client abc',
+            'response': 'Voici les documents trouvés...',
+            'intent': 'documents',
+            'type_message': 'document',
+            'response_time_ms': 150,
+            'llm_used': False,
+        }, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertEqual(data['id'], 'int_test_123')
+
+    def test_learning_record_duplicate_id(self):
+        """Test qu'un ID dupliqué met à jour l'interaction existante."""
+        from .models import AssistantInteraction
+        
+        # Créer une interaction
+        AssistantInteraction.objects.create(
+            id='int_dup_123',
+            question='Question originale',
+            question_normalized='question originale',
+            response='Réponse originale',
+            intent='documents',
+        )
+        
+        url = reverse('assistant-learning-record')
+        response = self.client.post(url, {
+            'id': 'int_dup_123',
+            'question': 'Question mise à jour',
+            'question_normalized': 'question mise a jour',
+            'response': 'Réponse mise à jour',
+            'intent': 'statistiques',
+            'type_message': 'statistiques',
+            'response_time_ms': 200,
+            'llm_used': True,
+        }, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        # Vérifier la mise à jour
+        interaction = AssistantInteraction.objects.get(id='int_dup_123')
+        self.assertEqual(interaction.question, 'Question mise à jour')
+        self.assertEqual(interaction.intent, 'statistiques')
+
+    def test_learning_similar_search(self):
+        """Test de recherche d'interactions similaires."""
+        from .models import AssistantInteraction
+        
+        # Créer des interactions
+        AssistantInteraction.objects.create(
+            id='int_sim_1',
+            question='Documents du client ACME',
+            question_normalized='documents client acme',
+            response='Voici les documents ACME',
+            intent='documents',
+            feedback='positive',
+        )
+        AssistantInteraction.objects.create(
+            id='int_sim_2',
+            question='Statistiques mensuelles',
+            question_normalized='statistiques mensuelles',
+            response='Voici les stats',
+            intent='statistiques',
+        )
+        
+        url = reverse('assistant-learning-similar')
+        response = self.client.get(url, {'q': 'documents client'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIn('results', data)
+        # Devrait trouver l'interaction avec "documents client"
+        self.assertGreaterEqual(len(data['results']), 1)
+
+    def test_learning_stats(self):
+        """Test des statistiques d'apprentissage."""
+        from .models import AssistantInteraction
+        
+        AssistantInteraction.objects.create(
+            id='int_stat_1', question='Q1', question_normalized='q1',
+            response='R1', intent='documents', feedback='positive',
+        )
+        AssistantInteraction.objects.create(
+            id='int_stat_2', question='Q2', question_normalized='q2',
+            response='R2', intent='documents', feedback='negative',
+        )
+        AssistantInteraction.objects.create(
+            id='int_stat_3', question='Q3', question_normalized='q3',
+            response='R3', intent='statistiques', feedback='positive',
+        )
+        
+        url = reverse('assistant-learning-stats')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['total_interactions'], 3)
+        self.assertEqual(data['feedback_positive'], 2)
+        self.assertEqual(data['feedback_negative'], 1)
+
+    def test_learning_pattern_update(self):
+        """Test de mise à jour des patterns de questions."""
+        url = reverse('assistant-learning-patterns')
+        response = self.client.post(url, {
+            'pattern': 'documents client',
+            'example': 'quels sont les documents du client xyz',
+            'response': 'Voici les documents trouvés pour XYZ',
+            'feedback_score': 1,
+        }, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['pattern'], 'documents client')
+        self.assertEqual(data['frequency'], 1)
+
+    def test_learning_pattern_increment_frequency(self):
+        """Test que les patterns existants voient leur fréquence incrémentée."""
+        from .models import AssistantQuestionPattern
+        
+        # Créer un pattern existant
+        AssistantQuestionPattern.objects.create(
+            pattern='stats mensuelles',
+            frequency=5,
+            avg_feedback_score=0.8,
+        )
+        
+        url = reverse('assistant-learning-patterns')
+        response = self.client.post(url, {
+            'pattern': 'stats mensuelles',
+            'example': 'montre moi les stats du mois',
+            'response': 'Voici les statistiques',
+            'feedback_score': 1,
+        }, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        pattern = AssistantQuestionPattern.objects.get(pattern='stats mensuelles')
+        self.assertEqual(pattern.frequency, 6)
+
+
+class DocumentModelTests(TestCase):
+    """Tests pour le modèle Document."""
+
+    def setUp(self):
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='doc.user',
+            nom='Doc',
+            prenom='User',
+            password='StrongPass123!',
+            role='ARCHIVISTE',
+            email='doc@test.com',
+        )
+        self.client_obj = Client.objects.create(nom='Client Test')
+        self.exercice = Exercice.objects.create(annee=2024, client=self.client_obj)
+        self.categorie = Categorie.objects.create(nom='Catégorie Test')
+        self.risque = Risque.objects.create(exercice=self.exercice, type='RC')
+
+    def test_document_creation(self):
+        """Test de création d'un document."""
+        doc = Document.objects.create(
+            titre='Document Test',
+            description='Description test',
+            chemin_fichier='documents/test.pdf',
+            type_fichier='application/pdf',
+            taille_fichier=2048,
+            type_courrier='ACS_VERS_CLIENT',
+            risque=self.risque,
+            auteur=self.user,
+            categorie=self.categorie,
+            reference='DOC-TEST-001',
+        )
+        
+        self.assertIsNotNone(doc.id)
+        self.assertEqual(doc.titre, 'Document Test')
+        self.assertEqual(doc.risque.exercice.client.nom, 'Client Test')
+
+    def test_document_str(self):
+        """Test de la représentation string d'un document."""
+        doc = Document.objects.create(
+            titre='Mon Document',
+            chemin_fichier='documents/mon_doc.pdf',
+            type_fichier='application/pdf',
+            taille_fichier=1024,
+            type_courrier='CLIENT_VERS_ACS',
+            risque=self.risque,
+            auteur=self.user,
+            categorie=self.categorie,
+        )
+        
+        self.assertIn('Mon Document', str(doc))
+
+
+class ClientModelTests(TestCase):
+    """Tests pour le modèle Client."""
+
+    def test_client_creation(self):
+        """Test de création d'un client."""
+        client = Client.objects.create(
+            nom='Entreprise ABC',
+            code='ABC001',
+            adresse='123 Rue Test',
+            email='contact@abc.com',
+        )
+        
+        self.assertIsNotNone(client.id)
+        self.assertEqual(client.nom, 'Entreprise ABC')
+        self.assertEqual(client.code, 'ABC001')
+
+    def test_client_str(self):
+        """Test de la représentation string d'un client."""
+        client = Client.objects.create(nom='Client XYZ')
+        self.assertEqual(str(client), 'Client XYZ')
+
+
+class RolePermissionTests(APITestCase):
+    """Tests pour les permissions basées sur les rôles."""
+
+    def setUp(self):
+        self.client_api = APIClient()
+        
+        self.admin = Utilisateur.objects.create_user(
+            nom_utilisateur='perm.admin',
+            nom='Perm', prenom='Admin',
+            password='StrongPass123!',
+            role='ADMIN',
+            email='perm.admin@test.com',
+        )
+        
+        self.archiviste = Utilisateur.objects.create_user(
+            nom_utilisateur='perm.archiviste',
+            nom='Perm', prenom='Archiviste',
+            password='StrongPass123!',
+            role='ARCHIVISTE',
+            email='perm.archiviste@test.com',
+        )
+        
+        self.consultant = Utilisateur.objects.create_user(
+            nom_utilisateur='perm.consultant',
+            nom='Perm', prenom='Consultant',
+            password='StrongPass123!',
+            role='CONSULTANT',
+            email='perm.consultant@test.com',
+        )
+
+    def test_admin_can_create_user(self):
+        """Un admin peut créer un utilisateur."""
+        self.client_api.force_authenticate(user=self.admin)
+        response = self.client_api.post(reverse('utilisateur-list'), {
+            'nom_utilisateur': 'new.user',
+            'nom': 'New',
+            'prenom': 'User',
+            'password': 'NewPass123!',
+            'role': 'CONSULTANT',
+            'email': 'new@test.com',
+        }, format='json')
+        
+        self.assertIn(response.status_code, [status.HTTP_201_CREATED, status.HTTP_200_OK])
+
+    def test_consultant_cannot_create_user(self):
+        """Un consultant ne peut pas créer un utilisateur."""
+        self.client_api.force_authenticate(user=self.consultant)
+        response = self.client_api.post(reverse('utilisateur-list'), {
+            'nom_utilisateur': 'blocked.user',
+            'nom': 'Blocked',
+            'prenom': 'User',
+            'password': 'BlockedPass123!',
+            'role': 'CONSULTANT',
+            'email': 'blocked@test.com',
+        }, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_consultant_can_read_documents(self):
+        """Un consultant peut lire les documents."""
+        self.client_api.force_authenticate(user=self.consultant)
+        response = self.client_api.get(reverse('document-list'))
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)

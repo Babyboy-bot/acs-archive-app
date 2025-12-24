@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState, useRef } from "react";
+import { FormEvent, useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import {
@@ -15,6 +15,15 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import Blob3D from "@/components/ui/Blob3D";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
+import { NotificationsDocuments } from "@/components/NotificationsDocuments";
+
+// 🚀 PRO: Type pour les suggestions de clients
+type ClientSuggestion = {
+  id: string;
+  nom: string;
+  numero_client?: string;
+  type?: string;
+};
 import { applyTheme } from "@/lib/theme";
 
 interface PieceJustificativeMetadata extends Record<string, unknown> {
@@ -60,6 +69,46 @@ interface AssistantConversationSummary {
   nombre_messages?: number;
 }
 
+// 💡 Générer des suggestions intelligentes basées sur le contexte (conversation en cours)
+function genererSuggestionsIntelligentes(messages: Message[]): string[] {
+  const suggestions: string[] = [];
+  const now = new Date();
+  const moisActuel = now.toLocaleDateString("fr-FR", { month: "long" });
+  const anneeActuelle = now.getFullYear();
+
+  suggestions.push(`Documents ajoutés en ${moisActuel} ${anneeActuelle}`);
+
+  // Extraire des clients potentiels depuis les messages utilisateur
+  const clientsMentionnes = new Set<string>();
+  messages
+    .filter((m) => m.role === "user")
+    .slice(-20)
+    .forEach((m) => {
+      const matches = m.content.match(/\b([A-Z0-9]{2,6})\b/gi);
+      if (!matches) return;
+      matches.forEach((candidate) => {
+        const value = candidate.toUpperCase();
+        if (value.length >= 2 && value.length <= 6 && /[A-Z]/i.test(value)) {
+          clientsMentionnes.add(value);
+        }
+      });
+    });
+
+  const topClients = [...clientsMentionnes].slice(0, 2);
+  topClients.forEach((client) => {
+    suggestions.push(`Derniers documents de ${client}`);
+  });
+
+  suggestions.push(`Factures de ${anneeActuelle}`);
+  suggestions.push("Avenants récents");
+
+  return suggestions.slice(0, 4);
+}
+
+const SUGGESTIONS_DEFAUT = [
+  "Avenant N° 0529 2024 de 3CB risque MRP",
+  "Avenant divers 2025 de 3CB risque santé",
+  "divers 2025 de 3CB risque sante ",
 const SUGGESTIONS = [
   "Recherche le document Avenant N° 0529 2024 de 3CB risque MRP",
   "Donne moi le bilan du système",
@@ -81,6 +130,12 @@ export default function ConsultantChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  
+  // 🚀 PRO: Autocomplétion clients
+  const [clientSuggestions, setClientSuggestions] = useState<ClientSuggestion[]>([]);
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+  const clientSearchDebounce = useRef<NodeJS.Timeout | null>(null);
   const [utilisateur, setUtilisateur] = useState<SessionUtilisateur | null>(
     null
   );
@@ -453,7 +508,8 @@ export default function ConsultantChatPage() {
           ...(token && { Authorization: `Bearer ${token}` }),
           ...(utilisateur?.role && { "x-user-role": utilisateur.role }),
         },
-        body: JSON.stringify({ question }),
+        // 🔴 FIX: Envoyer le conversationId pour isoler le contexte par discussion
+        body: JSON.stringify({ question, conversationId: currentConversationId }),
       });
 
       if (!response.ok) {
@@ -583,6 +639,94 @@ export default function ConsultantChatPage() {
 
   const handleSuggestionClick = (suggestion: string) => {
     setInput(suggestion);
+  };
+
+  // 🚀 PRO: Recherche de clients pour autocomplétion
+  const rechercherClients = useCallback(async (query: string) => {
+    if (query.length < 2) {
+      setClientSuggestions([]);
+      setShowClientSuggestions(false);
+      return;
+    }
+    try {
+      const { data } = await apiFetchJson<ClientSuggestion[]>(
+        `/clients/?search=${encodeURIComponent(query)}&simple=1`
+      );
+      const clients = Array.isArray(data) ? data.slice(0, 6) : [];
+      setClientSuggestions(clients);
+      setShowClientSuggestions(clients.length > 0);
+      setSelectedSuggestionIndex(-1);
+    } catch (error) {
+      console.error("Erreur autocomplétion clients:", error);
+      setClientSuggestions([]);
+      setShowClientSuggestions(false);
+    }
+  }, []);
+
+  // 🚀 PRO: Gérer le changement d'input avec détection de client
+  // L'autocomplétion ne se déclenche QUE après des mots-clés spécifiques
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInput(value);
+    
+    // Détecter UNIQUEMENT après des mots-clés précis:
+    // - "de X", "du X", "pour X" (après documents, factures, etc.)
+    // - "client X"
+    // - "@X" (raccourci explicite)
+    const clientPatterns = [
+      /(?:de|du|pour)\s+([A-Z0-9]{2,})$/i,  // "de 3CB", "du 3CB", "pour 3CB"
+      /client\s+([A-Z0-9]{2,})$/i,           // "client 3CB"
+      /@([A-Z0-9]{2,})$/i,                   // "@3CB" (raccourci)
+    ];
+    
+    let clientQuery: string | null = null;
+    for (const pattern of clientPatterns) {
+      const match = value.match(pattern);
+      if (match && match[1]) {
+        clientQuery = match[1];
+        break;
+      }
+    }
+    
+    if (clientQuery && clientQuery.length >= 2) {
+      if (clientSearchDebounce.current) clearTimeout(clientSearchDebounce.current);
+      clientSearchDebounce.current = setTimeout(() => rechercherClients(clientQuery!), 200);
+    } else {
+      setShowClientSuggestions(false);
+      setClientSuggestions([]);
+    }
+  };
+
+  // 🚀 PRO: Sélectionner un client suggéré
+  const handleSelectClient = (client: ClientSuggestion) => {
+    // Remplacer le dernier mot par le nom du client
+    const words = input.split(/\s+/);
+    words[words.length - 1] = client.nom;
+    setInput(words.join(" ") + " ");
+    setShowClientSuggestions(false);
+    setClientSuggestions([]);
+  };
+
+  // 🚀 PRO: Navigation clavier dans les suggestions
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showClientSuggestions || clientSuggestions.length === 0) return;
+    
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => 
+        prev < clientSuggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => 
+        prev > 0 ? prev - 1 : clientSuggestions.length - 1
+      );
+    } else if (e.key === "Enter" && selectedSuggestionIndex >= 0) {
+      e.preventDefault();
+      handleSelectClient(clientSuggestions[selectedSuggestionIndex]);
+    } else if (e.key === "Escape") {
+      setShowClientSuggestions(false);
+    }
   };
 
   const chargerConversation = async (id: string) => {
@@ -747,10 +891,15 @@ export default function ConsultantChatPage() {
                       chargerConversation(conv.id);
                     }
                   }}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl transition-all duration-200 cursor-pointer ${conv.id === conversationId
-                      ? "bg-theme-muted text-theme-primary"
-                      : "text-theme-secondary hover:bg-theme-muted hover:text-theme-primary"
-                    }`}
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl transition-all duration-200 cursor-pointer ${
+                    conv.id === conversationId
+                      ? isDark
+                        ? "bg-white/10 text-white"
+                        : "bg-cyan-50 text-cyan-700"
+                      : isDark
+                      ? "text-slate-400 hover:bg-white/5 hover:text-white"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  }`}
                 >
                   <Icon
                     name="document"
@@ -772,10 +921,11 @@ export default function ConsultantChatPage() {
                       e.stopPropagation();
                       ouvrirModaleSuppressionConversation(conv);
                     }}
-                    className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${isDark
+                    className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${
+                      isDark
                         ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
                         : "text-slate-400 hover:text-red-500 hover:bg-red-50"
-                      }`}
+                    }`}
                     aria-label="Supprimer"
                   >
                     <Icon name="trash" size="xs" />
@@ -838,10 +988,11 @@ export default function ConsultantChatPage() {
               {utilisateur?.role === "ADMIN" && (
                 <button
                   onClick={() => router.push("/tableau-de-bord")}
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${isDark
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
+                    isDark
                       ? "text-slate-400 hover:text-white hover:bg-white/5"
                       : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
-                    }`}
+                  }`}
                 >
                   <Icon name="home" size="xs" />
                   Dashboard
@@ -849,10 +1000,11 @@ export default function ConsultantChatPage() {
               )}
               <button
                 onClick={handleLogout}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${isDark
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
+                  isDark
                     ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
                     : "text-slate-400 hover:text-red-500 hover:bg-red-50"
-                  }`}
+                }`}
               >
                 <Icon name="logout" size="xs" />
                 Déconnexion
@@ -866,29 +1018,33 @@ export default function ConsultantChatPage() {
       <div className="flex-1 min-w-0 flex flex-col relative overflow-x-hidden">
         {/* Header flottant */}
         <div
-          className={`absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 ${isDark
-              ? "bg-gradient-to-b from-theme-base via-theme-base/80 to-transparent"
+          className={`absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 ${
+            isDark
+              ? "bg-gradient-to-b from-[#0f0f0f] via-[#0f0f0f]/80 to-transparent"
               : "bg-gradient-to-b from-white via-white/80 to-transparent"
-            }`}
+          }`}
         >
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className={`p-2.5 rounded-xl transition-all duration-300 ${isDark
+            className={`p-2.5 rounded-xl transition-all duration-300 ${
+              isDark
                 ? "text-slate-500 hover:text-white hover:bg-white/10"
                 : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              }`}
+            }`}
           >
             <Icon name={sidebarOpen ? "chevron-left" : "menu"} size="sm" />
           </button>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => setModaleTutoriel(true)}
-              className={`p-2.5 rounded-xl transition-all duration-300 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted`}
-              title="Tutoriel"
-            >
-              <Icon name="info" size="sm" />
-            </button>
+            {/* 🔔 Notifications nouveaux documents */}
+            <NotificationsDocuments 
+              isDark={isDark} 
+              onDocumentClick={(doc) => {
+                // Insérer une recherche pour ce document
+                setInput(`document ${doc.titre || doc.id}`);
+              }}
+            />
+            
             <button
               onClick={() => setTheme(isDark ? "light" : "dark")}
               aria-label={isDark ? "Mode clair" : "Mode sombre"}
@@ -942,16 +1098,20 @@ export default function ConsultantChatPage() {
                 documents, contrats ou pièces justificatives.
               </p>
 
-              {/* Suggestions modernes */}
+              {/* 💡 Suggestions intelligentes */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl w-full px-4">
-                {SUGGESTIONS.map((suggestion, i) => (
+                {(messages.length > 0
+                  ? genererSuggestionsIntelligentes(messages)
+                  : SUGGESTIONS_DEFAUT
+                ).map((suggestion: string, i: number) => (
                   <button
                     key={i}
                     onClick={() => handleSuggestionClick(suggestion)}
-                    className={`group relative p-5 rounded-lg text-left text-sm transition-all duration-300 overflow-hidden ${isDark
+                    className={`group relative p-5 rounded-lg text-left text-sm transition-all duration-300 overflow-hidden ${
+                      isDark
                         ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/30"
                         : "bg-white hover:bg-cyan-50/50 border border-slate-200 hover:border-cyan-300 shadow-sm hover:shadow-lg hover:shadow-cyan-500/10"
-                      }`}
+                    }`}
                   >
                     <div
                       className={`absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-cyan-500 to-fuchsia-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300`}
@@ -1008,10 +1168,11 @@ export default function ConsultantChatPage() {
                     // Message utilisateur - bulle à droite
                     <div className="max-w-[80%]">
                       <div
-                        className={`px-5 py-3.5 rounded-3xl rounded-tr-md ${isDark
+                        className={`px-5 py-3.5 rounded-3xl rounded-tr-md ${
+                          isDark
                             ? "bg-gradient-to-r from-cyan-600 to-purple-600 text-white"
                             : "bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-sm shadow-cyan-500/20"
-                          }`}
+                        }`}
                       >
                         <p className="text-[15px] leading-relaxed">
                           {message.content}
@@ -1044,10 +1205,11 @@ export default function ConsultantChatPage() {
                           {/* Pièces justificatives modernisées */}
                           {message.pieces && message.pieces.length > 0 && (
                             <div
-                              className={`mt-5 pt-4 ${isDark
+                              className={`mt-5 pt-4 ${
+                                isDark
                                   ? "border-t border-white/10"
                                   : "border-t border-slate-100"
-                                }`}
+                              }`}
                             >
                               {/* Header avec compteur et toggle vue */}
                               <div className="flex items-center justify-between mb-3">
@@ -1065,10 +1227,11 @@ export default function ConsultantChatPage() {
                                   }`}>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setVueDocuments("grille"); }}
-                                    className={`p-1.5 rounded-md transition-all ${vueDocuments === "grille"
+                                    className={`p-1.5 rounded-md transition-all ${
+                                      vueDocuments === "grille"
                                         ? (isDark ? "bg-cyan-500/20 text-cyan-400" : "bg-white text-cyan-600 shadow-sm")
                                         : (isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600")
-                                      }`}
+                                    }`}
                                     title="Vue grille"
                                   >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1077,10 +1240,11 @@ export default function ConsultantChatPage() {
                                   </button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setVueDocuments("liste"); }}
-                                    className={`p-1.5 rounded-md transition-all ${vueDocuments === "liste"
+                                    className={`p-1.5 rounded-md transition-all ${
+                                      vueDocuments === "liste"
                                         ? (isDark ? "bg-cyan-500/20 text-cyan-400" : "bg-white text-cyan-600 shadow-sm")
                                         : (isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600")
-                                      }`}
+                                    }`}
                                     title="Vue liste"
                                   >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1097,10 +1261,11 @@ export default function ConsultantChatPage() {
                                     <div
                                       key={piece.id}
                                       onClick={() => void ouvrirPiece(piece)}
-                                      className={`group rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg ${isDark
+                                      className={`group rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg ${
+                                        isDark
                                           ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50"
                                           : "bg-slate-50 hover:bg-cyan-50 border border-slate-200 hover:border-cyan-300"
-                                        }`}
+                                      }`}
                                     >
                                       {/* Miniature du document */}
                                       <div className={`relative aspect-[3/4] flex flex-col items-center justify-center overflow-hidden ${isDark ? "bg-slate-800" : "bg-gradient-to-br from-slate-100 to-slate-200"
@@ -1190,21 +1355,23 @@ export default function ConsultantChatPage() {
                                       <div
                                         key={piece.id}
                                         onClick={() => void ouvrirPiece(piece)}
-                                        className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 ${isDark
+                                        className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 ${
+                                          isDark
                                             ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50"
                                             : "bg-slate-50 hover:bg-cyan-50 border border-slate-200 hover:border-cyan-300"
-                                          }`}
+                                        }`}
                                       >
                                         {/* Icône type fichier */}
-                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${isPdf
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                          isPdf 
                                             ? (isDark ? "bg-red-500/20" : "bg-red-100")
-                                            : isImage
+                                            : isImage 
                                               ? (isDark ? "bg-emerald-500/20" : "bg-emerald-100")
                                               : (isDark ? "bg-blue-500/20" : "bg-blue-100")
-                                          }`}>
-                                          <Icon
-                                            name="document"
-                                            size="sm"
+                                        }`}>
+                                          <Icon 
+                                            name="document" 
+                                            size="sm" 
                                             className={
                                               isPdf
                                                 ? (isDark ? "text-red-400" : "text-red-500")
@@ -1232,12 +1399,13 @@ export default function ConsultantChatPage() {
                                                 {piece.metadata.type}
                                               </span>
                                             )}
-                                            <span className={`text-[10px] font-medium uppercase ${isPdf
+                                            <span className={`text-[10px] font-medium uppercase ${
+                                              isPdf 
                                                 ? (isDark ? "text-red-400" : "text-red-500")
-                                                : isImage
+                                                : isImage 
                                                   ? (isDark ? "text-emerald-400" : "text-emerald-500")
                                                   : (isDark ? "text-blue-400" : "text-blue-500")
-                                              }`}>
+                                            }`}>
                                               {ext.toUpperCase() || 'DOC'}
                                             </span>
                                           </div>
@@ -1283,10 +1451,11 @@ export default function ConsultantChatPage() {
                     </div>
                   </div>
                   <div
-                    className={`flex-1 rounded-2xl rounded-tl-md px-5 py-4 ${isDark
+                    className={`flex-1 rounded-2xl rounded-tl-md px-5 py-4 ${
+                      isDark
                         ? "bg-white/5 border border-white/10"
                         : "bg-white border border-slate-200 shadow-sm"
-                      }`}
+                    }`}
                   >
                     <div className="flex items-center gap-2">
                       <div className="flex gap-1">
@@ -1327,39 +1496,83 @@ export default function ConsultantChatPage() {
           className={`p-2 mb-2`}
         >
           <form onSubmit={envoyerMessage} className="max-w-3xl mx-auto">
-            <div
-              className={`relative flex items-center rounded-xl transition-all duration-300 ${isDark
-                  ? "bg-white/5 border border-white/10 focus-within:border-cyan-500/50 focus-within:bg-white/10"
-                  : "bg-white border border-slate-200 shadow-lg shadow-slate-200/50 focus-within:border-cyan-400 focus-within:shadow-cyan-500/10"
+            <div className="relative">
+              {/* 🚀 PRO: Suggestions de clients */}
+              {showClientSuggestions && clientSuggestions.length > 0 && (
+                <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-xl overflow-hidden shadow-xl z-50 ${
+                  isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"
+                }`}>
+                  <div className={`px-3 py-2 text-xs font-medium ${isDark ? "text-slate-400 bg-slate-700/50" : "text-slate-500 bg-slate-50"}`}>
+                    Clients suggérés
+                  </div>
+                  {clientSuggestions.map((client, index) => (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => handleSelectClient(client)}
+                      className={`w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors ${
+                        index === selectedSuggestionIndex
+                          ? isDark ? "bg-cyan-500/20" : "bg-cyan-50"
+                          : isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
+                        {client.nom.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className={`font-medium truncate ${isDark ? "text-white" : "text-slate-800"}`}>
+                          {client.nom}
+                        </div>
+                        {client.numero_client && (
+                          <div className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            Code: {client.numero_client}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              <div
+                className={`flex items-center rounded-xl transition-all duration-300 ${
+                  isDark
+                    ? "bg-white/5 border border-white/10 focus-within:border-cyan-500/50 focus-within:bg-white/10"
+                    : "bg-white border border-slate-200 shadow-lg shadow-slate-200/50 focus-within:border-cyan-400 focus-within:shadow-cyan-500/10"
                 }`}
-            >
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Posez votre question..."
-                disabled={isLoading}
-                className={`flex-1 py-4 px-5 bg-transparent rounded-l-xl outline-none text-[15px] ${isDark
-                    ? "text-white"
-                    : "text-slate-800"
+              >
+                <input
+                  type="text"
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleInputKeyDown}
+                  placeholder="Posez votre question..."
+                  disabled={isLoading}
+                  className={`flex-1 bg-transparent py-4 px-5 outline-none text-[15px] disabled:opacity-50 ${
+                    isDark
+                      ? "text-white placeholder-slate-500"
+                      : "text-slate-800 placeholder-slate-400"
                   }`}
-              />
+                />
               <button
                 type="submit"
                 disabled={!input.trim() || isLoading}
-                className={`p-4 rounded-r-xl transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed ${input.trim() && !isLoading
+                className={`mr-2 p-3 rounded-lg transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed ${
+                  input.trim() && !isLoading
                     ? "bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50"
                     : isDark
-                      ? "bg-white/5 text-slate-600"
-                      : "bg-slate-100 text-slate-400"
-                  }`}
+                    ? "bg-white/5 text-slate-600"
+                    : "bg-slate-100 text-slate-400"
+                }`}
               >
                 <Icon name="arrow-right" size="sm" />
               </button>
+              </div>
             </div>
             <p
-              className={`text-[11px] text-center mt-2 ${isDark ? "text-slate-600" : "text-slate-400"
-                }`}
+              className={`text-[11px] text-center mt-2 ${
+                isDark ? "text-slate-600" : "text-slate-400"
+              }`}
             >
               ACS Assistant peut faire des erreurs. Vérifiez les informations
               importantes.

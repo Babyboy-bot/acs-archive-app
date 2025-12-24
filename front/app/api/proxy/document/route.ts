@@ -3,13 +3,18 @@ export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from 'next/server'
 
 function resolveTargetUrl(rawUrl: string): string {
+  // Base URL du backend (sans /api) - utiliser INTERNAL_API_BASE_URL pour les appels serveur
+  const apiBase = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+  const backendBase = apiBase.replace(/\/api\/?$/, '')
+
+  // Si l'URL est absolue avec localhost:8000, la réécrire pour utiliser le hostname Docker
+  if (rawUrl.startsWith('http://localhost:8000')) {
+    return rawUrl.replace('http://localhost:8000', backendBase)
+  }
+  
   if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
     return rawUrl
   }
-
-  // Base URL du backend (sans /api)
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
-  const backendBase = apiBase.replace(/\/api\/?$/, '')
   
   // Si l'URL commence par /media ou /api, utiliser la base du backend
   if (rawUrl.startsWith('/media/') || rawUrl.startsWith('/api/')) {
@@ -30,6 +35,7 @@ export async function GET(request: NextRequest) {
   }
 
   const targetUrl = resolveTargetUrl(targetParam)
+  console.log('[proxy/document] target', targetUrl)
 
   const headers = new Headers()
   const authorization = request.headers.get('authorization')

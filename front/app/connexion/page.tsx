@@ -97,8 +97,8 @@ export default function PageConnexion() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          nom_utilisateur: nomUtilisateur,
-          mot_de_passe: motDePasse
+          username: nomUtilisateur,
+          password: motDePasse
         })
       })
 

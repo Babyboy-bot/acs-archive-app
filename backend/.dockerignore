@@ -1,0 +1,57 @@
+# Environnement virtuel Python
+venv
+.venv
+env
+.env
+*.env
+
+# Cache Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Build
+build
+dist
+*.egg-info
+.eggs
+
+# Tests
+.pytest_cache
+.coverage
+htmlcov
+.tox
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Fichiers statiques collectés (seront générés dans le conteneur)
+staticfiles
+static
+
+# Media uploadés
+media
+
+# Base de données locale
+*.sqlite3
+db.sqlite3
+
+# Logs
+*.log
+
+# Documentation
+README.md
+*.md

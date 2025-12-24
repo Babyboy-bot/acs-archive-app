@@ -1,31 +1,12 @@
-﻿function extraireCleClient(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')
-  if (forwarded) {
-    return forwarded.split(',')[0].trim()
-  }
-  const realIp = request.headers.get('x-real-ip')
-  if (realIp) {
-    return realIp.trim()
-  }
-  return 'local'
-}
-
-function verifierRateLimit(request: Request): { ok: boolean; remaining: number } {
-  const key = extraireCleClient(request)
-  const now = Date.now()
-  const timestamps = rateLimitStore.get(key)?.filter((time) => now - time < RATE_LIMIT_WINDOW_MS) ?? []
-
-  if (timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
-    rateLimitStore.set(key, timestamps)
-    return { ok: false, remaining: 0 }
-  }
-
-  timestamps.push(now)
-  rateLimitStore.set(key, timestamps)
-  return { ok: true, remaining: RATE_LIMIT_MAX_REQUESTS - timestamps.length }
-}
-
-import { NextResponse } from 'next/server'
+﻿import { NextResponse } from 'next/server'
+import { 
+  verifierRateLimit, 
+  extraireUserIdDepuisToken,
+  extraireTokenDepuisCookies,
+  RATE_LIMIT_WINDOW_MS,
+  RATE_LIMIT_MAX_REQUESTS,
+  rateLimitStore
+} from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
 import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt } from './llm'
@@ -35,37 +16,31 @@ import {
   enrichPromptWithLearning,
   getContextualExamples 
 } from './learning'
-
-// ============================================================================
-// RÉSOLUTION DES RÉFÉRENCES CONTEXTUELLES
-// Permet de comprendre "il", "lui", "ce client", "ses factures" en se basant
-// sur l'historique de conversation
-// ============================================================================
-
-// Patterns qui indiquent une référence à un client précédent
-const REFERENCE_PATTERNS: RegExp[] = [
-  /\b(il|lui|elle|le|la|ce client|son|sa|ses|leur|leurs)\b/i,
-  /\b(en a-t-il|en a-t-elle|combien en a)\b/i,
-  /\b(le même|la même|les mêmes|celui-ci|celle-ci)\b/i,
-]
-
-// Types de documents reconnus dans ACS pour le filtrage de pertinence
-const TYPE_DOCUMENT_KEYWORDS: Record<string, string[]> = {
-  // Types de courrier ACS
-  'acs vers client': ['acs vers client', 'acs client', 'courrier client', 'lettre client'],
-  'acs vers compagnie': ['acs vers compagnie', 'acs compagnie', 'courrier compagnie', 'lettre compagnie'],
-  // Types de documents
-  'avenant': ['avenant', 'modification', 'amendement', 'modification contrat'],
-  'facture': ['facture', 'fact', 'invoice', 'facturation'],
-  'règlement': ['règlement', 'reglement', 'paiement', 'payment', 'versement'],
-  'divers': ['divers', 'autre', 'autres', 'miscellaneous'],
-  'sinistre': ['sinistre', 'déclaration sinistre', 'claim', 'accident'],
-  // Types additionnels courants
-  'contrat': ['contrat', 'police', 'contract', 'police d\'assurance'],
-  'attestation': ['attestation', 'certificat', 'certificate'],
-  'quittance': ['quittance', 'reçu', 'receipt'],
-  'devis': ['devis', 'proposition', 'quote', 'offre'],
-}
+import {
+  type TypeMessage,
+  type MessageMetadata,
+  analyserMessageComplet,
+  genererReponseNonDocument,
+  estSalutation,
+  estQuestionDefinitionGenerale,
+  estQuestionConseilGeneral,
+  estQuestionExplicationConcept,
+  estQuestionCapacitesAssistant
+} from './classification'
+// Import centralisé depuis criteria.ts (source unique de vérité)
+import {
+  type CriteresRecherche as CriteresRechercheCriteria,
+  type ModeAssistant as ModeAssistantCriteria,
+  TYPE_DOCUMENT_KEYWORDS,
+  TYPES_RISQUES,
+  REFERENCE_PATTERNS,
+  extraireCriteresRecherche as extraireCriteresCriteria,
+  classifierSimple as classifierSimpleCriteria,
+  estQuestionAssuranceCourtage as estQuestionAssuranceCourtageCriteria,
+  estQuestionComptageContextuel as estQuestionComptageContextuelCriteria,
+  detectIntent as detectIntentCriteria,
+  contientReferenceContextuelle as contientReferenceContextuelleCriteria,
+} from './criteria'
 
 /**
  * Contexte extrait de l'historique de conversation
@@ -475,22 +450,18 @@ type DocumentDetail = {
   }
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+const API_BASE_URL = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
 const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
 const DEFAULT_TOP_K = 30 // Permet de remonter davantage de documents pertinents (ex: plusieurs avenants)
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000
 const USE_FAISS = process.env.NEXT_PUBLIC_ASSISTANT_USE_FAISS === 'true'
 const ASSISTANT_ENABLED = (process.env.NEXT_PUBLIC_ASSISTANT_ENABLED ?? 'true').toLowerCase() !== 'false'
-const RATE_LIMIT_WINDOW_MS = 60 * 1000
-const RATE_LIMIT_MAX_REQUESTS = Number(process.env.NEXT_PUBLIC_ASSISTANT_RATE_LIMIT ?? '12')
 
 const CLIENT_VALIDATION_TTL_MS = Number(process.env.ASSISTANT_CLIENT_VALIDATION_TTL_MS ?? '600000')
 
 type ClientValidationCacheEntry = { ok: boolean; expiresAt: number }
 const clientValidationCache = new Map<string, ClientValidationCacheEntry>()
-
-const rateLimitStore = new Map<string, number[]>()
 
 const ROLES_AUTORISES_DOCUMENTS = new Set<RoleUtilisateur>([
   RoleUtilisateur.ADMIN,
@@ -653,44 +624,8 @@ function analyserRisqueQuestion(question: string): SecurityAnalysis {
 // - Type de courrier (ACS vers Client, ACS vers Compagnie...)
 // ============================================================================
 
-// Types de risques reconnus dans ACS
-const TYPES_RISQUES: Record<string, string[]> = {
-  'sante': ['sante', 'santé', 'maladie', 'hospitalisation', 'medical', 'médical'],
-  'auto': ['auto', 'automobile', 'vehicule', 'véhicule', 'voiture', 'moto'],
-  'habitation': ['habitation', 'maison', 'appartement', 'logement', 'mrh', 'multirisque habitation'],
-  'vie': ['vie', 'deces', 'décès', 'epargne', 'épargne', 'retraite'],
-  'prevoyance': ['prevoyance', 'prévoyance', 'incapacite', 'incapacité', 'invalidite', 'invalidité'],
-  'rc': ['rc', 'responsabilite civile', 'responsabilité civile', 'rcp', 'rcms'],
-  'transport': ['transport', 'marchandise', 'maritime', 'aerien', 'aérien'],
-  'construction': ['construction', 'decennale', 'décennale', 'dommage ouvrage', 'trc', 'tous risques chantier'],
-  'flotte': ['flotte', 'parc automobile', 'vehicules', 'véhicules'],
-  'caution': ['caution', 'cautions'],
-  'multirisques professionnel': [
-    'multirisques professionnel',
-    'multirisque professionnel',
-    'mrp',
-    'multirisque pro',
-    'multirisques pro',
-    'professionnel',
-    'pro',
-    'multirisque',
-    'multirisques',
-    'rc professionnelle',
-    'rc pro',
-    'responsabilite civile professionnelle',
-    'responsabilité civile professionnelle',
-  ],
-}
-
-// Structure des critères extraits de la question
-type CriteresRecherche = {
-  typeDocument: string | null
-  client: string | null
-  annee: string | null
-  risque: string | null
-  typeCourrier: string | null
-  reference: string | null
-}
+// TYPES_RISQUES et CriteresRecherche sont maintenant importés depuis criteria.ts
+type CriteresRecherche = CriteresRechercheCriteria
 
 function libelleCritere(critere: keyof CriteresRecherche): string {
   switch (critere) {
@@ -711,114 +646,8 @@ function libelleCritere(critere: keyof CriteresRecherche): string {
   }
 }
 
-// Extrait tous les critères de filtrage de la question
-function extraireCriteresRecherche(question: string): CriteresRecherche {
-  const lower = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  
-  // 1. Type de document
-  let typeDocument: string | null = null
-  for (const [type, keywords] of Object.entries(TYPE_DOCUMENT_KEYWORDS)) {
-    if (keywords.some(kw => lower.includes(kw))) {
-      typeDocument = type
-      break
-    }
-  }
-  
-  // 2. Client (code client en majuscules ou nom)
-  let client: string | null = null
-  
-  // Mots réservés à ne pas confondre avec des codes clients
-  // Inclut les verbes d'action, abréviations courantes et mots du domaine
-  const motsReserves = [
-    // Abréviations techniques
-    'ACS', 'PDF', 'DOC', 'REF', 'TYPE', 'DATE', 'CFA', 'EUR', 'USD',
-    // Verbes d'action courants (requêtes de suivi)
-    'MONTRE', 'AFFICHE', 'OUVRE', 'DONNE', 'ENVOIE', 'VOIR', 'CHERCHE', 'TROUVE',
-    'TELECHARGE', 'IMPRIME', 'COPIE', 'PARTAGE', 'OUVRIR', 'FERME',
-    // Pronoms et articles
-    'MOI', 'TOI', 'LUI', 'ELLE', 'NOUS', 'VOUS', 'EUX', 'ICI', 'CELA', 'CECI',
-    // Mots du domaine document
-    'DOCUMENT', 'FICHIER', 'PIECE', 'ARCHIVE', 'DOSSIER',
-    // Types de documents (ne pas confondre avec clients)
-    'AVENANT', 'FACTURE', 'CONTRAT', 'SINISTRE', 'DEVIS', 'QUITTANCE',
-    // Risques (ne pas confondre avec clients)
-    'SANTE', 'AUTO', 'VIE', 'FLOTTE', 'RC', 'MRH',
-  ]
-  
-  // Pattern 1: "client XXX" ou "du client XXX"
-  const clientExplicite = question.match(/\b(?:du\s+)?client\s+([A-Z0-9][A-Z0-9\-]{1,15})\b/i)
-  if (clientExplicite) {
-    const candidat = clientExplicite[1].toUpperCase()
-    if (!motsReserves.includes(candidat) && !/^(19|20)\d{2}$/.test(candidat)) {
-      client = candidat
-    }
-  }
-  
-  // Pattern 2: "de XXX" ou "du XXX" (très commun: "de 3CB", "du 3CB")
-  if (!client) {
-    const deClientMatch = question.match(/\b(?:de|du)\s+([0-9][A-Z]{1,5}|[A-Z][A-Z0-9]{1,5})\b/i)
-    if (deClientMatch) {
-      const candidat = deClientMatch[1].toUpperCase()
-      if (!motsReserves.includes(candidat) && !/^(19|20)\d{2}$/.test(candidat)) {
-        client = candidat
-      }
-    }
-  }
-  
-  // Pattern 3: Code client seul (lettres + chiffres ou chiffres + lettres)
-  // Exemples: 3CB, 2FZ, SANLAM, ABC123
-  if (!client) {
-    const codeMatch = question.match(/\b([A-Z][A-Z0-9]{1,5}|[0-9][A-Z]{1,3}[0-9]*)\b/i)
-    if (codeMatch) {
-      const brut = codeMatch[1]
-      const candidat = brut.toUpperCase()
-      const commenceParChiffre = /^\d/.test(brut)
-      const lettresUniquement = /^[A-Za-z]+$/.test(brut)
-      const estToutEnMajuscules = brut === brut.toUpperCase()
-
-      if (
-        !motsReserves.includes(candidat) &&
-        !/^(19|20)\d{2}$/.test(candidat) &&
-        (commenceParChiffre || !lettresUniquement || estToutEnMajuscules)
-      ) {
-        client = candidat
-      }
-    }
-  }
-  
-  // 3. Année
-  let annee: string | null = null
-  const anneeMatch = question.match(/\b(19\d{2}|20[0-2]\d)\b/)
-  if (anneeMatch) {
-    annee = anneeMatch[1]
-  }
-  
-  // 4. Risque
-  let risque: string | null = null
-  for (const [type, keywords] of Object.entries(TYPES_RISQUES)) {
-    if (keywords.some(kw => lower.includes(kw))) {
-      risque = type
-      break
-    }
-  }
-  
-  // 5. Type de courrier (ACS vers Client, ACS vers Compagnie)
-  let typeCourrier: string | null = null
-  if (/acs\s*(vers|pour|a|à)\s*client/i.test(lower)) {
-    typeCourrier = 'acs vers client'
-  } else if (/acs\s*(vers|pour|a|à)\s*compagnie/i.test(lower)) {
-    typeCourrier = 'acs vers compagnie'
-  }
-  
-  // 6. Référence / Numéro
-  let reference: string | null = null
-  const refMatch = question.match(/(?:ref|référence|reference|n°|numero|numéro)\s*[:.]?\s*([A-Z0-9\-\/]+)/i)
-  if (refMatch) {
-    reference = refMatch[1].toUpperCase()
-  }
-  
-  return { typeDocument, client, annee, risque, typeCourrier, reference }
-}
+// Utilise l'import de criteria.ts
+const extraireCriteresRecherche = extraireCriteresCriteria
 
 // Ancienne fonction maintenue pour compatibilité
 function extraireTypeDocumentDemande(question: string): string | null {
@@ -828,15 +657,12 @@ function extraireTypeDocumentDemande(question: string): string | null {
 // ============================================================================
 // CLASSIFICATION SIMPLIFIÉE - VERSION ROBUSTE
 // Détermine si la question est une recherche de document ou une conversation
+// NOTE: Ces fonctions sont des copies locales de criteria.ts avec des ajustements
+// spécifiques à route.ts. Un refactoring futur pourrait les unifier.
 // ============================================================================
 
-type ModeAssistant =
-  | 'recherche_document'
-  | 'assurance_courtage'
-  | 'clarification'
-  | 'hors_perimetre'
-  | 'salutation'
-  | 'confirmation'
+// Utilise le type importé de criteria.ts
+type ModeAssistant = ModeAssistantCriteria
 
 function estQuestionAssuranceCourtage(question: string): boolean {
   const lower = question
@@ -1242,847 +1068,6 @@ function verifierPertinenceResultats(pieces: DocumentPiece[], typeDemande: strin
   }
 }
 
-function estSalutation(question: string): boolean {
-	const normalized = question
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.trim()
-
-	if (!normalized) return false
-
-	const greetings = ['bonjour', 'salut', 'coucou', 'hello', 'bonsoir', 'hey', 'hi', 'yo']
-	return greetings.some((greeting) =>
-		normalized === greeting ||
-		normalized.startsWith(greeting + ' ') ||
-		normalized.startsWith(greeting + ',') ||
-		normalized.startsWith(greeting + '') ||
-		normalized.endsWith(' ' + greeting),
-	)
-}
-
-// ============================================================================
-// CLASSIFICATION INTELLIGENTE DES MESSAGES
-// Détecte le type de message pour un traitement approprié
-// ============================================================================
-
-type TypeMessage = 
-  | 'salutation'              // Bonjour, salut...
-  | 'conversation'            // ça va, moi aussi, merci...
-  | 'question_assistant'      // Qui es-tu, que sais-tu faire...
-  | 'hors_scope'             // Quelle heure, météo, calculs...
-  | 'action_impossible'      // Supprime, modifie, ajoute...
-  | 'confirmation'           // C'est bon, j'ai trouvé, super...
-  | 'incomprehensible'       // ???, ..., caractères aléatoires
-  | 'expression_emotion'     // Je suis frustré, c'est nul...
-  | 'demande_suivi'          // Montre plus, et ensuite, autre chose...
-  | 'demande_clarification'  // Je ne comprends pas, c'est quoi...
-  | 'test_spam'              // Test, 123, asdf...
-  | 'insulte'                // Insultes, propos inappropriés
-  | 'question_vague'         // Recherche trop vague nécessitant précision
-  | 'demande_urgent'         // Urgent, vite, pressé...
-  | 'demande_comparaison'    // Compare, différence entre...
-  | 'question_rappel'        // Comme avant, la dernière fois...
-  | 'langue_etrangere'       // Message dans une autre langue
-  | 'question_negative'      // Pas de X, sauf, sans...
-  | 'document'               // Requête de documents (défaut)
-
-// Métadonnées enrichies pour une réponse plus contextuelle
-type MessageMetadata = {
-  type: TypeMessage
-  confidence: number           // 0-1, confiance dans la classification
-  langue: 'fr' | 'en' | 'autre'
-  sentiment: 'positif' | 'negatif' | 'neutre'
-  urgence: boolean
-  clientDetecte: string | null
-  typeDocDetecte: string | null
-  periodeDetectee: string | null
-  questionMultiple: boolean    // Plusieurs questions en une
-  faibleQualite: boolean       // Fautes, abréviations excessives
-}
-
-// ============================================================================
-// ANALYSE AVANCÉE DU MESSAGE
-// Extraction de toutes les métadonnées utiles
-// ============================================================================
-
-function analyserMessageComplet(question: string): MessageMetadata {
-  const normalized = question
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-  
-  const words = normalized.split(/\s+/).filter(w => w.length > 0)
-  const wordCount = words.length
-  
-  // Détection de langue
-  const langue = detecterLangue(normalized)
-  
-  // Détection de sentiment
-  const sentiment = detecterSentiment(normalized)
-  
-  // Détection d'urgence
-  const urgence = /\b(urgent|vite|rapidement|asap|pressé|presse|immediatement|tout de suite|des que possible)\b/.test(normalized)
-  
-  // Détection de client potentiel (codes clients typiques: 3CB, 2FZ, SANLAM, etc.)
-  const clientMatch = normalized.match(/\b([A-Z0-9]{2,10}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/i)
-  const clientDetecte = clientMatch ? clientMatch[1].toUpperCase() : null
-  
-  // Détection de type de document
-  let typeDocDetecte: string | null = null
-  for (const [type, keywords] of Object.entries(TYPE_DOCUMENT_KEYWORDS)) {
-    if (keywords.some(kw => normalized.includes(kw))) {
-      typeDocDetecte = type
-      break
-    }
-  }
-  
-  // Détection de période
-  const periodeDetectee = detecterPeriode(normalized)
-  
-  // Question multiple (plusieurs ?)
-  const questionMultiple = (normalized.match(/\?/g) || []).length > 1 || /\bet\b.*\?/.test(normalized)
-  
-  // Faible qualité (trop d'abréviations, fautes, etc.)
-  const faibleQualite = detecterFaibleQualite(normalized, words)
-  
-  // Classification principale
-  const type = classifierMessagePrincipal(normalized, words, wordCount, langue)
-  
-  // Calcul de confiance
-  const confidence = calculerConfiance(type, normalized, wordCount)
-  
-  return {
-    type,
-    confidence,
-    langue,
-    sentiment,
-    urgence,
-    clientDetecte,
-    typeDocDetecte,
-    periodeDetectee,
-    questionMultiple,
-    faibleQualite,
-  }
-}
-
-function detecterLangue(text: string): 'fr' | 'en' | 'autre' {
-  // Mots français courants
-  const motsFr = ['je', 'tu', 'il', 'elle', 'nous', 'vous', 'les', 'des', 'une', 'est', 'sont', 'avoir', 'etre', 'pour', 'dans', 'que', 'qui', 'sur', 'avec', 'pas', 'plus', 'tout', 'faire', 'comme', 'mais', 'ou', 'donc', 'car', 'ni', 'quoi', 'comment', 'pourquoi', 'quand', 'merci', 'bonjour', 'montre', 'voir', 'document', 'client', 'cherche']
-  
-  // Mots anglais courants
-  const motsEn = ['the', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall', 'need', 'want', 'like', 'know', 'think', 'see', 'come', 'take', 'get', 'make', 'go', 'say', 'tell', 'ask', 'use', 'find', 'give', 'please', 'thank', 'show', 'help', 'what', 'where', 'when', 'why', 'how', 'which', 'who']
-  
-  const words = text.split(/\s+/)
-  let scoreFr = 0
-  let scoreEn = 0
-  
-  for (const word of words) {
-    if (motsFr.includes(word)) scoreFr++
-    if (motsEn.includes(word)) scoreEn++
-  }
-  
-  if (scoreFr > scoreEn && scoreFr >= 1) return 'fr'
-  if (scoreEn > scoreFr && scoreEn >= 2) return 'en'
-  
-  // Par défaut français si pas clair
-  return 'fr'
-}
-
-function detecterSentiment(text: string): 'positif' | 'negatif' | 'neutre' {
-  const positif = /\b(merci|super|genial|parfait|excellent|bien|content|ravi|bravo|cool|top|nickel|formidable|magnifique)\b/
-  const negatif = /\b(nul|mauvais|horrible|frustre|decu|enerve|agace|probleme|erreur|bug|marche pas|fonctionne pas|impossible)\b/
-  
-  if (positif.test(text)) return 'positif'
-  if (negatif.test(text)) return 'negatif'
-  return 'neutre'
-}
-
-function detecterPeriode(text: string): string | null {
-  // Années
-  const anneeMatch = text.match(/\b(20[0-2][0-9]|19[0-9]{2})\b/)
-  if (anneeMatch) return anneeMatch[1]
-  
-  // Mois
-  const moisMatch = text.match(/\b(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\b/)
-  if (moisMatch) return moisMatch[1]
-  
-  // Périodes relatives
-  if (/\b(aujourd'?hui|ce jour)\b/.test(text)) return 'aujourdhui'
-  if (/\b(hier)\b/.test(text)) return 'hier'
-  if (/\b(cette semaine|semaine en cours)\b/.test(text)) return 'cette_semaine'
-  if (/\b(ce mois|mois en cours)\b/.test(text)) return 'ce_mois'
-  if (/\b(cette annee|annee en cours)\b/.test(text)) return 'cette_annee'
-  if (/\b(dernier|derniere|derniers|dernieres)\b/.test(text)) return 'recent'
-  
-  return null
-}
-
-function detecterFaibleQualite(text: string, words: string[]): boolean {
-  // Trop court
-  if (text.length < 3) return true
-  
-  // Trop d'abréviations SMS
-  const abreviationsSms = ['pk', 'pq', 'stp', 'svp', 'jsp', 'jpp', 'mdr', 'lol', 'ptdr', 'tkt', 'dsl', 'slt', 'bjr', 'cc', 'cv', 'g', 'c', 'ta', 'ct']
-  const countAbbr = words.filter(w => abreviationsSms.includes(w)).length
-  if (countAbbr > words.length * 0.5 && words.length > 2) return true
-  
-  // Trop de répétitions de caractères
-  if (/(.)\1{4,}/.test(text)) return true
-  
-  // Pas assez de voyelles (charabia)
-  const voyelles = (text.match(/[aeiouy]/gi) || []).length
-  const consonnes = (text.match(/[bcdfghjklmnpqrstvwxz]/gi) || []).length
-  if (consonnes > 0 && voyelles / consonnes < 0.15 && text.length > 5) return true
-  
-  return false
-}
-
-function calculerConfiance(type: TypeMessage, text: string, wordCount: number): number {
-  let confidence = 0.7 // Base
-  
-  // Plus de mots = plus de contexte = plus de confiance
-  if (wordCount >= 3) confidence += 0.1
-  if (wordCount >= 5) confidence += 0.1
-  
-  // Types très clairs
-  if (['insulte', 'salutation', 'test_spam'].includes(type)) confidence = 0.95
-  
-  // Types ambigus
-  if (['question_vague', 'document'].includes(type)) confidence -= 0.1
-  
-  return Math.min(Math.max(confidence, 0.3), 0.99)
-}
-
-function classifierMessagePrincipal(normalized: string, words: string[], wordCount: number, langue: 'fr' | 'en' | 'autre'): TypeMessage {
-  
-  // =========================================================================
-  // 0. LANGUE ÉTRANGÈRE (si pas français et message substantiel)
-  // =========================================================================
-  if (langue === 'en' && wordCount >= 3) {
-    // Mais on accepte quand même certains mots anglais dans un contexte archive
-    if (!/\b(document|client|archive|facture|sinistre)\b/.test(normalized)) {
-      return 'langue_etrangere'
-    }
-  }
-
-  // =========================================================================
-  // 1. INSULTES ET PROPOS INAPPROPRIÉS (priorité haute pour filtrage)
-  // =========================================================================
-  const insultes = [
-    /\b(merde|putain|connard|salaud|enfoiré|nique|foutre|bordel|chier)\b/,
-    /\b(idiot|debile|cretin|imbecile|abruti|stupide|con)\b/,
-    /\b(fuck|shit|damn|bitch|ass|bastard|dickhead)\b/,
-    /va te faire/,
-    /ferme[- ]?(la|ta gueule)/,
-    /ta gueule/,
-    /degage/,
-    /casse[- ]?toi/,
-  ]
-  if (insultes.some(p => p.test(normalized))) {
-    return 'insulte'
-  }
-
-  // =========================================================================
-  // 2. TESTS ET SPAM (messages sans intention réelle)
-  // =========================================================================
-  const testSpam = [
-    /^test[s]?[!.\s]*$/,
-    /^(1234?|123456?|0000|1111)$/,
-    /^(azerty|qwerty|asdf|zxcv)[a-z]*$/,
-    /^[a-z]{1,2}$/,
-    /^(blabla|bla bla|truc|machin|chose|toto|tata|titi)$/,
-    /^(allo|oui allo|hello hello|allo allo)$/,
-    /^([a-z])\1+$/,
-    /^[^a-z]*$/,
-    /^(rien|vide|null|undefined|nan)$/,
-  ]
-  if (testSpam.some(p => p.test(normalized))) {
-    return 'test_spam'
-  }
-
-  // =========================================================================
-  // 3. RÉFÉRENCES DE DOCUMENTS (avant incompréhensible car format spécial)
-  // =========================================================================
-  // Pattern pour références de documents: 2018_3CB_Avenant_Sante_001, AV-2018-004, REF-123, etc.
-  const estReferenceDocument = (text: string): boolean => {
-    const patterns = [
-      /^\d{4}[_-][A-Z0-9]+[_-].+$/i,           // 2018_3CB_Avenant_Sante_001
-      /^[A-Z]{2,4}[_-]\d{4}[_-]\d+$/i,         // AV-2018-004, REF-2018-001
-      /^[A-Z]{2,4}[_-]\d+$/i,                   // AV-001, REF-123
-      /^N[°o]?\s*\d+/i,                         // N° 1234, No 1234
-      /^\d+[_-][A-Z]+[_-]\d+$/i,               // 001-AV-2018
-      /^[A-Z0-9]+[_-][A-Z0-9]+[_-][A-Z0-9]+/i, // XXX-YYY-ZZZ (pattern générique)
-    ]
-    return patterns.some(p => p.test(text.trim()))
-  }
-  
-  if (estReferenceDocument(normalized) || estReferenceDocument(words.join('_'))) {
-    // C'est une référence de document - on la traite comme une recherche de document
-    return 'document'
-  }
-
-  // =========================================================================
-  // 4. MESSAGES INCOMPRÉHENSIBLES
-  // =========================================================================
-  if (normalized.length <= 2 && !/^(ok|ca|va|ou|et|si|ni)$/.test(normalized)) return 'incomprehensible'
-  if (/^[.?!,;:\-_=+]+$/.test(normalized)) return 'incomprehensible'
-  if (/^(.)\1{3,}$/.test(normalized)) return 'incomprehensible'
-  if (/^[^a-z0-9\s]+$/.test(normalized)) return 'incomprehensible'
-  
-  // Trop de caractères spéciaux par rapport aux lettres
-  const lettersOnly = normalized.replace(/[^a-z]/g, '')
-  if (lettersOnly.length < normalized.length * 0.3 && normalized.length > 3) return 'incomprehensible'
-  
-  // Charabia détecté
-  if (normalized.length > 10 && !/\s/.test(normalized) && !/^[a-z]+$/.test(normalized)) return 'incomprehensible'
-
-  // =========================================================================
-  // 4. DEMANDES URGENTES
-  // =========================================================================
-  if (/\b(urgent|tres urgent|super urgent|asap|vite|rapidement|immediatement|tout de suite|des que possible|c'?est presse|pressant)\b/.test(normalized)) {
-    // C'est urgent mais c'est quand même une demande de document
-    // On retourne 'demande_urgent' seulement si c'est juste "urgent" sans contexte
-    if (wordCount <= 3 && !/document|client|facture|avenant|sinistre/.test(normalized)) {
-      return 'demande_urgent'
-    }
-  }
-
-  // =========================================================================
-  // 5. SALUTATIONS
-  // =========================================================================
-  const salutations = ['bonjour', 'salut', 'coucou', 'hello', 'bonsoir', 'hey', 'hi', 'yo', 'bjr', 'slt', 'cc', 'kikou', 'wesh', 'yop', 'plop']
-  const isSalutationOnly = salutations.some(s => normalized === s || normalized === s + '!')
-  const startsWithSalutation = salutations.some(s => normalized.startsWith(s + ' ') || normalized.startsWith(s + ',') || normalized.startsWith(s + '.'))
-  
-  if (isSalutationOnly) return 'salutation'
-  // Salutations avec contexte: "bonjour, je cherche..." → document, pas salutation
-  if (startsWithSalutation && wordCount > 4) {
-    // Continue vers document
-  } else if (startsWithSalutation && wordCount <= 4) {
-    return 'salutation'
-  }
-
-  // =========================================================================
-  // 6. QUESTIONS SUR L'ASSISTANT
-  // =========================================================================
-  const questionsAssistant = [
-    /^(qui es[- ]?tu|tu es qui|t'?es qui|vous etes qui)/,
-    /^(c'?est quoi ton nom|comment tu t'?appelles|quel est ton nom|ton nom c'?est quoi)/,
-    /^(que (sais|peux)[- ]tu faire|qu'?est[- ]ce que tu (sais|peux) faire|tu (sais|peux) faire quoi)/,
-    /^(tes capacites|ton role|tu sers a quoi|a quoi tu sers|tu fais quoi|c'?est quoi ton job)/,
-    /^(comment (ca marche|tu fonctionnes|tu marches|ca fonctionne))/,
-    /^(tu (comprends|parles) (quoi|francais|anglais)|tu parles quelle langue)/,
-    /^(tu es (un robot|une ia|intelligent|humain|vrai|reel|une machine))/,
-    /^(presente[- ]?toi|qui est l'?assistant|parle[- ]?moi de toi)/,
-    /^(tu es la|es[- ]tu la|t'?es la)/,
-  ]
-  if (questionsAssistant.some(p => p.test(normalized))) {
-    return 'question_assistant'
-  }
-
-  // =========================================================================
-  // 7. ACTIONS IMPOSSIBLES
-  // =========================================================================
-  const actionsImpossibles = [
-    /^(supprime|efface|delete|remove|vire|enleve|retire)/,
-    /^(modifie|change|edit|update|corrige|rectifie|mets a jour)/,
-    /^(ajoute|cree|create|new|nouveau|insere|rajoute)/,
-    /^(envoie|envoi|send|mail|email|fax|poste)/,
-    /^(telecharge|download|upload|transfere)/,
-    /^(imprime|print|imprimer|impression)/,
-    /^(exporte|export|sauvegarde|backup|archive)/,
-    /^(connecte|log|login|authentifie|deconnecte|logout)/,
-    /^(desactive|active|configure|parametre|regle|setup)/,
-    /^(installe|desinstalle|reinstalle)/,
-    /^(copie|colle|coupe|deplace|renomme)/,
-  ]
-  if (actionsImpossibles.some(p => p.test(normalized))) {
-    return 'action_impossible'
-  }
-
-  // =========================================================================
-  // 8. DEMANDES DE COMPARAISON
-  // =========================================================================
-  const comparaisons = [
-    /^(compare|comparaison|difference entre|quelle difference|versus|vs)\b/,
-    /\b(compare[rz]?|comparer)\s+(les|le|la|des|du)/,
-    /\b(difference|differences)\s+(entre|avec)/,
-    /\b(plus|moins)\s+(que|de)\s+\w+\s+(document|client|facture)/,
-  ]
-  if (comparaisons.some(p => p.test(normalized))) {
-    return 'demande_comparaison'
-  }
-
-  // =========================================================================
-  // 9. QUESTIONS DE RAPPEL (référence au passé)
-  // =========================================================================
-  const rappels = [
-    /\b(comme (avant|la derniere fois|tout a l'?heure|precedemment))\b/,
-    /\b(la derniere (fois|recherche|question))\b/,
-    /\b(refais|recommence|re[- ]?(fais|montre|cherche))\b/,
-    /\b(meme (chose|recherche|question))\b/,
-    /\b(encore une fois|a nouveau|de nouveau)\b/,
-  ]
-  if (rappels.some(p => p.test(normalized))) {
-    return 'question_rappel'
-  }
-
-  // =========================================================================
-  // 10. QUESTIONS AVEC NÉGATION (exclusion)
-  // =========================================================================
-  const negations = [
-    /\b(pas de|pas les|sans les?|sauf les?|except[ée]?|hormis|a part)\s+\w+/,
-    /\b(ne (veux|cherche|veut) pas)\b/,
-    /\b(tout sauf|tous sauf|toutes sauf)\b/,
-    /\b(a l'?exception|en dehors de)\b/,
-    /\b(exclure?|exclus|excluant)\b/,
-  ]
-  if (negations.some(p => p.test(normalized))) {
-    return 'question_negative'
-  }
-
-  // =========================================================================
-  // 11. DEMANDES DE SUIVI (continuation de conversation)
-  // =========================================================================
-  const demandesSuivi = [
-    /^(et (ensuite|apres|maintenant|puis|alors)|ensuite|apres)[?]?$/,
-    /^(montre[- ]?(moi)? (plus|d'?autres|la suite|encore|le reste))/,
-    /^(autre chose|quoi d'?autre|y'?a[- ]?t[- ]?il (d'?)?autre)/,
-    /^(continue[rz]?|vas[- ]?y|go|suite|next)[!]?$/,
-    /^(plus de (details|infos|informations|resultats|donnees))/,
-    /^(et les autres|les autres|d'?autres|voir plus)[?]?$/,
-    /^(suivant|precedent|prochain|previous|back)[!]?$/,
-    /^(encore|again|more|davantage)[!]?$/,
-    /^(developpe|explique plus|precise|detaille)[!]?$/,
-    /^(et[?]?|alors[?]?|donc[?]?)$/,
-  ]
-  if (demandesSuivi.some(p => p.test(normalized))) {
-    return 'demande_suivi'
-  }
-
-  // =========================================================================
-  // 12. DEMANDES DE CLARIFICATION
-  // =========================================================================
-  const demandesClarification = [
-    /^(je (ne )?(comprends pas|sais pas|vois pas|capte pas))/,
-    /^(c'?est quoi (ca|cela|ce truc)?|qu'?est[- ]ce (que c'?est|que ca veut dire|que tu veux dire))/,
-    /^(que veux[- ]tu dire|qu'?entends[- ]tu par|tu veux dire quoi)/,
-    /^(peux[- ]tu (reformuler|expliquer|preciser|clarifier|detailler|re[- ]?expliquer))/,
-    /^(je suis (perdu|confus|paume|largue|pige pas))/,
-    /^(pardon|excuse|desole)[,]? (quoi|je n'?ai pas (compris|capte))/,
-    /^(hein|quoi|comment|pardon|excuse|plaît)\?*$/,
-    /^(repete|redis[- ]?(moi)?|re[- ]?dis)/,
-    /^(kesako|koi|kwa|wut|what)\?*$/,
-  ]
-  if (demandesClarification.some(p => p.test(normalized))) {
-    return 'demande_clarification'
-  }
-
-  // =========================================================================
-  // 13. DÉTECTION DU SCOPE ACS (approche positive)
-  // On définit ce qui EST dans le scope, pas ce qui ne l'est pas
-  // =========================================================================
-  
-  // Mots-clés qui indiquent clairement une requête liée aux archives ACS
-  const MOTS_CLES_ACS = [
-    // Types de documents
-    'document', 'documents', 'doc', 'docs', 'fichier', 'fichiers', 'piece', 'pieces',
-    'avenant', 'avenants', 'facture', 'factures', 'sinistre', 'sinistres',
-    'contrat', 'contrats', 'police', 'polices', 'reglement', 'reglements',
-    'attestation', 'attestations', 'quittance', 'quittances', 'devis',
-    'courrier', 'courriers', 'lettre', 'lettres',
-    
-    // Entités ACS
-    'client', 'clients', 'assure', 'assures', 'souscripteur',
-    'compagnie', 'compagnies', 'assureur', 'assureurs',
-    'exercice', 'exercices', 'annee', 'annees',
-    
-    // Types de risques (assurance)
-    'risque', 'risques', 'auto', 'automobile', 'habitation', 'sante', 'prevoyance',
-    'rc', 'responsabilite', 'vie', 'deces', 'incendie', 'vol', 'multirisque',
-    'flotte', 'transport', 'marchandise', 'construction', 'decennale',
-    
-    // Actions sur archives
-    'archive', 'archives', 'archiver', 'archivage', 'archiviste',
-    'dossier', 'dossiers', 'recherche', 'rechercher', 'cherche', 'trouver',
-    'consulter', 'voir', 'afficher', 'montre', 'montrer',
-    
-    // Statistiques
-    'statistique', 'statistiques', 'stats', 'combien', 'nombre', 'total',
-    'recapitulatif', 'resume', 'bilan',
-    
-    // Termes métier assurance
-    'prime', 'primes', 'cotisation', 'cotisations', 'echeance', 'echeances',
-    'souscription', 'resiliation', 'modification', 'renouvellement',
-    'garantie', 'garanties', 'franchise', 'indemnisation', 'declaration',
-    
-    // Identifiants (codes clients typiques)
-    'ACS', 'numéro', 'référence', 'ref', 'code',
-  ]
-  
-  // Vérifier si la question contient au moins un mot-clé ACS
-  const contientMotCleAcs = MOTS_CLES_ACS.some(mot => {
-    const regex = new RegExp(`\\b${mot}\\b`, 'i')
-    return regex.test(normalized)
-  })
-  
-  // Patterns de codes clients (3CB, 2FZ, SANLAM, etc.)
-  const contientCodeClient = /\b[A-Z0-9]{2,5}\b/.test(normalized) && /\b(client|document|pour|de|du)\b/.test(normalized)
-  
-  // Si la question contient des éléments ACS → c'est une requête document
-  if (contientMotCleAcs || contientCodeClient) {
-    // On continue vers le type 'document' (fin de fonction)
-  } else {
-    // La question ne contient AUCUN mot-clé ACS
-    // Vérifier si c'est une question généraliste évidente
-    const questionsGeneralistes = [
-      /\b(quelle? heure|l'?heure)\b/,
-      /\b(meteo|temperature|temps qu'?il fait)\b/,
-      /\b(raconte|blague|histoire drole)\b/,
-      /\b(joue|jouons|jeu)\b/,
-      /\b(tradui|traduction)\b/,
-      /\b(dessine|image|photo)\b/,
-      /\b(recette|cuisine)\b/,
-      /\b(musique|chanson|film|serie)\b/,
-      /\b(horoscope|astrologie)\b/,
-      /\b(c'?est qui le|qui est le)\b/,
-      /\b(capitale de|capitale du)\b/,
-      /^\d+\s*[\+\-\*\/]\s*\d+/, // Calculs
-    ]
-    
-    if (questionsGeneralistes.some(p => p.test(normalized))) {
-      return 'hors_scope'
-    }
-  }
-
-  // =========================================================================
-  // 14. QUESTIONS VAGUES (trop génériques, besoin de précision)
-  // =========================================================================
-  const questionsVagues = [
-    /^(document|documents|doc|docs)[?!.]?$/,             // Juste "documents"
-    /^(client|clients)[?!.]?$/,                          // Juste "clients"
-    /^(cherche|recherche|trouve|trouver)[?!.]?$/,        // Verbe seul
-    /^(montre|voir|affiche)[?!.]?$/,                     // Action sans objet
-    /^(quoi|que|comment|ou|quand|pourquoi)[?!]?$/,       // Question sans contexte
-    /^(aide|help|sos|besoin)[?!]?$/,                     // Aide sans précision
-    /^(tout|tous|toutes)[?!.]?$/,                        // Trop large
-    /^(un truc|quelque chose|n'?importe quoi)[?!.]?$/,   // Très vague
-  ]
-  if (questionsVagues.some(p => p.test(normalized)) && wordCount <= 2) {
-    return 'question_vague'
-  }
-
-  // =========================================================================
-  // 15. CONFIRMATIONS
-  // =========================================================================
-  const confirmations = [
-    /^(c'?est (bon|parfait|exactement ca|ce que je (cherchais|voulais)|ca|correct|juste))[!.]?$/,
-    /^(j'?ai trouve|trouve|ca marche|ca fonctionne|ca roule)[!.]?$/,
-    /^(non[,]? (pas (celui[- ]?la|ca|ceux[- ]?la|cet?te)|c'?est pas ca|merci))/,
-    /^(oui[,]? (c'?est ca|exactement|voila|parfait|super))/,
-    /^(ok|okay|d'?accord|entendu|compris|je vois|vu|roger|recu|done|fait)[!.]?$/,
-    /^(valide|confirme|j'?accepte|go|let'?s go)[!.]?$/,
-    /^(non merci|pas besoin|ca ira|c'?est tout|rien d'?autre|stop)[!.]?$/,
-    /^(oui|non|yes|no|yep|nope|ouais|nan)[!.]?$/,
-  ]
-  if (confirmations.some(p => p.test(normalized))) {
-    return 'confirmation'
-  }
-
-  // =========================================================================
-  // 16. EXPRESSIONS ÉMOTIONNELLES
-  // =========================================================================
-  const emotions = [
-    /^(super|genial|excellent|magnifique|bravo|formidable|wow|waouh|incroyable|fantastique|extra)[!]*$/,
-    /^(nul|pourri|mauvais|decevant|frustrant|horrible|catastrophique|affreux|terrible)[!]*$/,
-    /^(je suis (content|frustre|perdu|confus|satisfait|decu|ravi|enchante|heureux|triste|enerve))/,
-    /^(merci (beaucoup|infiniment|bien|mille fois|enormement))[!]*$/,
-    /^(trop (bien|cool|fort|nul|top|genial))[!]*$/,
-    /^(quelle? (chance|horreur|surprise|bonheur|cauchemar))[!]*$/,
-    /^(enfin|ouf|pfiou|youpi|hourra|alleluia|yes|yay)[!]*$/,
-    /^(omg|oh mon dieu|punaise|flute|zut|mince|dommage)[!]*$/,
-  ]
-  if (emotions.some(p => p.test(normalized))) {
-    return 'expression_emotion'
-  }
-
-  // =========================================================================
-  // 17. CONVERSATIONS GÉNÉRALES
-  // =========================================================================
-  const conversations = [
-    /^(ca va|comment vas[- ]?tu|comment tu vas|comment allez[- ]?vous|la forme|quoi de neuf|quoi de 9)/,
-    /^(merci|thanks|thx|ty|thank you)[!]?$/,
-    /^(au revoir|a bientot|bye|ciao|a plus|bonne (journee|soiree|nuit)|a demain|adieu|salut|tchao|a la prochaine)/,
-    /^(peut[- ]?etre|pourquoi pas|bien sur|evidemment|certainement|absolument|carrément)$/,
-    /^(moi (de meme|aussi|pareil)|pareil|idem|egalement|aussi|same|likewise)$/,
-    /^(tres bien|bien|pas mal|tranquille|bof|moyen|couci[- ]?couca|comme ci comme ca)$/,
-    /^(et toi|et vous|toi aussi|vous aussi|et de ton cote)[?]?$/,
-    /^(a|ha|ah|oh|hm|hmm|euh|bah|bof|mouais|meh)$/,
-    /^(lol|mdr|haha|hihi|hoho|xd|ptdr|mort de rire|rofl|lmao)[!]*$/,
-    /^(bonne question|interessant|je vois|effectivement|en effet|tout a fait)[!.]?$/,
-    /^(de rien|pas de quoi|y'?a pas de quoi|avec plaisir|je t'?en prie)[!]?$/,
-  ]
-  if (conversations.some(p => p.test(normalized))) {
-    return 'conversation'
-  }
-
-  // =========================================================================
-  // 18. PAR DÉFAUT : REQUÊTE DE DOCUMENTS
-  // =========================================================================
-  return 'document'
-}
-
-// Ancienne fonction maintenue pour compatibilité
-function classifierMessage(question: string): TypeMessage {
-  return analyserMessageComplet(question).type
-}
-
-// Génère une réponse appropriée selon le type de message
-function genererReponseNonDocument(type: TypeMessage, question: string): string {
-  switch (type) {
-    case 'incomprehensible':
-      return "Je n'ai pas bien compris votre message. Pouvez-vous reformuler ? Par exemple :\n- \"Montre-moi les documents du client X\"\n- \"Combien de documents dans les archives ?\"\n- \"Quels sont les derniers avenants ?\""
-    
-    case 'question_assistant':
-      return "Je suis l'assistant virtuel ACS, spécialisé dans la gestion des archives d'assurance. Je peux vous aider à :\n- Rechercher des documents par client, type ou date\n- Consulter les statistiques des archives\n- Répondre à vos questions sur les documents\n\nEssayez par exemple : \"Documents du client 3CB\" ou \"Statistiques des archives\""
-    
-    case 'action_impossible':
-      return "Je suis un assistant en lecture seule. Je ne peux pas modifier, supprimer ou créer des documents.\n\nPour ces actions, veuillez :\n- Utiliser l'interface principale d'ACS\n- Contacter un administrateur\n\nEn revanche, je peux vous aider à rechercher et consulter des documents !"
-    
-    case 'hors_scope':
-      return "Cette question dépasse mes compétences. Je suis spécialisé dans les archives ACS.\n\nJe peux vous aider à :\n- Rechercher des documents\n- Consulter les statistiques\n- Répondre à vos questions sur l'archivage\n\nQue souhaitez-vous savoir sur vos archives ?"
-    
-    case 'confirmation':
-      return "Parfait ! N'hésitez pas si vous avez d'autres questions sur vos archives."
-    
-    case 'expression_emotion':
-      return "Je suis là pour vous aider ! Y a-t-il autre chose que je peux faire pour vous concernant vos archives ?"
-    
-    case 'demande_suivi':
-      return "Que souhaitez-vous voir de plus ? Vous pouvez me demander :\n- Plus de documents d'un client spécifique\n- Un autre type de document (factures, avenants...)\n- Les statistiques des archives"
-    
-    case 'demande_clarification':
-      return "Pas de souci, je vais clarifier ! Je suis l'assistant ACS et je peux vous aider à :\n- Rechercher des documents : \"Documents de 3CB\"\n- Voir les statistiques : \"Statistiques des archives\"\n- Filtrer par type : \"Factures du client X\"\n\nQue souhaitez-vous faire ?"
-    
-    case 'test_spam':
-      return "Je suis prêt à vous aider ! Posez-moi une vraie question sur vos archives, par exemple : \"Quels sont les derniers documents ajoutés ?\" ou \"Documents du client 3CB\""
-    
-    case 'insulte':
-      return "Je suis là pour vous aider avec vos archives de manière professionnelle. Comment puis-je vous assister ?"
-    
-    case 'question_vague':
-      return "Votre demande est un peu vague. Pouvez-vous préciser ?\n\nExemples de questions :\n- \"Documents du client 3CB\" (un client spécifique)\n- \"Les factures de ce mois\" (un type de document)\n- \"Derniers documents ajoutés\" (période récente)\n- \"Statistiques des archives\" (vue d'ensemble)"
-    
-    case 'demande_urgent':
-      return "Je comprends que c'est urgent ! Pour vous aider rapidement, précisez :\n- Quel client ?\n- Quel type de document ?\n- Quelle période ?\n\nExemple : \"Documents urgents de 3CB\" ou \"Dernières factures\""
-    
-    case 'demande_comparaison':
-      return "Je peux vous aider à comparer des documents ou des statistiques. Précisez ce que vous souhaitez comparer :\n- \"Documents de 3CB vs SANLAM\"\n- \"Factures 2024 vs 2023\"\n- \"Statistiques par client\""
-    
-    case 'question_rappel':
-      return "Je ne retrouve pas la recherche précédente dans notre conversation. Pouvez-vous reformuler votre demande ?\n\nPar exemple : \"Documents du client X\" ou \"Statistiques du mois dernier\""
-    
-    case 'langue_etrangere':
-      return "I detected English! I'm the ACS assistant, specialized in insurance archives. I work best in French, but I can understand basic requests.\n\nJe suis l'assistant ACS. Je fonctionne mieux en français !\n\nHow can I help you with your archives?"
-    
-    case 'question_negative':
-      return "Je comprends que vous voulez exclure certains éléments. Je vais faire de mon mieux, mais pour l'instant, je fonctionne mieux avec des recherches positives.\n\nEssayez plutôt : \"Documents de type X\" ou \"Documents du client Y\""
-    
-    default:
-      return "Comment puis-je vous aider avec vos archives ?"
-  }
-}
-
-// Ancienne fonction maintenue pour compatibilité
-function estQuestionConversationnelle(question: string): boolean {
-  const type = classifierMessage(question)
-  return ['conversation', 'confirmation', 'expression_emotion', 'incomprehensible'].includes(type)
-}
-
-function estQuestionDefinitionGenerale(question: string): boolean {
-	const normalized = question
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.trim()
-
-	if (!normalized) return false
-
-	const normalizedQuotes = normalized
-		.replace(/['']/g, "'")
-		.replace(/[’‘–—]/g, '-')
-
-	// ÉTAPE 1: Détecter si c'est une question de définition (GÉNÉRIQUE)
-	// On utilise des regex pour capturer tous les patterns possibles
-	const definitionPatterns = [
-		/^c'?e?st quoi/,                          // "c'est quoi", "cest quoi"
-		/^qu'?e?st[- ]ce qu/,                     // "qu'est-ce que", "quest ce que"
-		/^que signifie/,                          // "que signifie"
-		/^que veut dire/,                         // "que veut dire"
-		/^ca (veut|signifie|represente) quoi/,   // "ça veut dire quoi"
-		/^definition d[eu']/,                     // "définition de", "définition d'un"
-		/^defini[rs]/,                            // "définir", "définis"
-		/^explique[- ]?moi (ce qu|le |la |les |un |une )/,  // "explique-moi ce que"
-		/^(peux-?tu|tu peux) m'?expliquer/,       // "peux-tu m'expliquer"
-		/^(dis-?moi|dit-?moi) ce qu/,             // "dis-moi ce que"
-		/quelle (est la )?difference entre/,      // "quelle différence entre"
-		/qu'?entend[- ]?on par/,                  // "qu'entend-on par"
-		/ca correspond a quoi/,                   // "ça correspond à quoi"
-		/a quoi (ca |cela )?(sert|correspond)/,  // "à quoi ça sert"
-	]
-
-	const isDefinitionQuestion = definitionPatterns.some((pattern) => pattern.test(normalizedQuotes))
-	
-	if (!isDefinitionQuestion) return false
-
-	// ÉTAPE 2: Exclure si c'est une demande de documents spécifiques
-	// Si on détecte un code client ou une demande de liste, ce n'est PAS une définition
-	const documentRequestIndicators = [
-		/\b[0-9]{1,2}[a-z]{2}\b/i,                // Code client type "3CB", "2FZ"
-		/\b(client|pour) [a-z0-9]{2,4}\b/i,      // "client 3CB", "pour ABC"
-		/\b(montre|affiche|liste|donne|trouve|cherche|recupere)\b.*\b(moi|les|mes|tous)\b/,
-		/\b(mes|les|tous les|la liste des)\b.*(documents?|factures?|contrats?|courriers?)/,
-		/\bdu [0-9]{1,2}/,                        // Date spécifique
-		/\bn[°o] ?[0-9]+\b/i,                     // Référence document
-	]
-
-	const isDocumentRequest = documentRequestIndicators.some((pattern) => pattern.test(normalizedQuotes))
-	
-	// C'est une question de définition SI c'est un pattern de définition ET PAS une demande de document
-	return !isDocumentRequest
-}
-
-function estQuestionConseilGeneral(question: string): boolean {
-	const normalized = question
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.trim()
-
-	if (!normalized) return false
-
-	const normalizedQuotes = normalized
-		.replace(/['']/g, "'")
-		.replace(/[’‘–—]/g, '-')
-
-	// ÉTAPE 1: Détecter les patterns de demande de conseil (GÉNÉRIQUE)
-	const conseilPatterns = [
-		/^comment (bien |faire |puis-?je |peut-?on |dois-?je )?/,  // "comment faire...", "comment bien..."
-		/^que (dois-?je|faut-?il|me conseilles?)/,                 // "que dois-je faire"
-		/^quels? (sont les |bons? )?(conseils?|reflexes?|pratiques?)/,  // "quels conseils"
-		/\b(tu |vous )?(me |nous )?conseille(s|z|rais)/,           // "tu me conseillerais"
-		/^si je (demarrais|partais|commencais)/,                   // "si je démarrais de zéro"
-		/\bmeilleure? (facon|methode|pratique|maniere)\b/,         // "meilleure façon de"
-		/\bbonnes? pratiques?\b/,                                   // "bonnes pratiques"
-		/\b(eviter|prevenir|anticiper) (les |des |que )/,          // "éviter les erreurs"
-		/\b(organiser|structurer|classer|ranger|gerer)\b.*\b(mes|les|ses)\b/, // "organiser mes archives"
-		/^(as-?tu|avez-?vous) (des |un )?(conseils?|suggestions?|recommandations?)/,
-	]
-
-	const isConseilQuestion = conseilPatterns.some((pattern) => pattern.test(normalizedQuotes))
-	
-	if (!isConseilQuestion) return false
-
-	// ÉTAPE 2: Exclure les demandes de documents spécifiques
-	const documentRequestIndicators = [
-		/\b[0-9]{1,2}[a-z]{2}\b/i,                // Code client type "3CB", "2FZ"
-		/\b(client|pour) [a-z0-9]{2,4}\b/i,      // "client 3CB"
-		/\b(montre|affiche|liste|donne|trouve)\b.*\b(moi|les)\b/,
-		/\bdu [0-9]{1,2}/,                        // Date spécifique
-		/\bn[°o] ?[0-9]+\b/i,                     // Référence document
-	]
-
-	return !documentRequestIndicators.some((pattern) => pattern.test(normalizedQuotes))
-}
-
-function estQuestionExplicationConcept(question: string): boolean {
-	const normalized = question
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.trim()
-
-	if (!normalized) return false
-
-	const normalizedQuotes = normalized
-		.replace(/['']/g, "'")
-		.replace(/[’‘–—]/g, '-')
-
-	// ÉTAPE 1: Détecter les patterns de demande d'explication/clarification (GÉNÉRIQUE)
-	const explicationPatterns = [
-		/^je (veux|veut|voudrais|souhaite|aimerais) (juste )?(comprendre|savoir)/,  // "je veux comprendre"
-		/^(explique|dis|dit)[- ]?(moi|nous)/,                           // "explique-moi", "dis-moi"
-		/\b(dis|dit)[- ]?m'?en plus\b/,                                  // "dis m'en plus"
-		/^(peux-?tu|tu peux|pourrais-?tu) (m'?|me )?(expliquer|clarifier|detailler)/,
-		/^(j'?ai|je) (pas |mal )?(compris|saisi)/,                       // "j'ai pas compris"
-		/\b(plus |mieux )?(d'?explications?|de details?|d'?infos?)\b/,   // "plus d'explications"
-		/^(c'?est|ca serait) (quoi |comment )?(exactement|precisement|concretement)/,
-		/\bje (ne )?(comprends?|sais) (pas|plus)\b/,                     // "je comprends pas"
-		/^en (gros|resume|clair|fait)/,                                  // "en gros", "en résumé"
-		/\b(reformule|clarifie|precise|developpe)\b/,                    // "reformule", "clarifie"
-	]
-
-	const isExplicationQuestion = explicationPatterns.some((pattern) => pattern.test(normalizedQuotes))
-	
-	if (!isExplicationQuestion) return false
-
-	// ÉTAPE 2: Exclure les demandes de documents spécifiques
-	const documentRequestIndicators = [
-		/\b[0-9]{1,2}[a-z]{2}\b/i,                // Code client
-		/\b(client|pour) [a-z0-9]{2,4}\b/i,      
-		/\b(montre|affiche|liste|donne|trouve)\b.*\b(moi|les)\b/,
-		/\bdu [0-9]{1,2}/,                        
-		/\bn[°o] ?[0-9]+\b/i,
-	]
-
-	return !documentRequestIndicators.some((pattern) => pattern.test(normalizedQuotes))
-}
-
-// Détecte les questions sur les capacités / limites de l'assistant
-function estQuestionCapacitesAssistant(question: string): boolean {
-	const normalized = question
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.trim()
-
-	if (!normalized) return false
-
-	const normalizedQuotes = normalized
-		.replace(/['']/g, "'")
-		.replace(/[\u2010\u2011\u2012\u2013\u2014]/g, '-')
-
-	// ÉTAPE 1: Détecter les questions sur les capacités/limites de l'assistant (GÉNÉRIQUE)
-	const capacitesPatterns = [
-		/\b(est-?ce que |)(tu |vous )(peux|pouvez|sais|savez|es capable)\b/,  // "tu peux", "es-tu capable"
-		/\b(peux|pouvez|saurais|sauriez)-?(tu|vous)\b/,                        // "peux-tu", "saurais-tu"
-		/\bquelles? sont tes (limites|capacites|fonctions|possibilites)\b/,   // "quelles sont tes limites"
-		/\bqu'?e?st[- ]ce que tu (ne )?(peux|sais) (pas|faire)\b/,            // "qu'est-ce que tu peux faire"
-		/\b(tu|vous) (ne )?(peux|pouvez|sais|savez) (pas|plus)\b/,            // "tu ne peux pas"
-		/\bcomment (tu |vous )?(reagis|fonctionnes?|marches?)\b/,              // "comment tu réagis"
-		/\bsi (tu|vous) (n'?es|n'?etes) pas (sur|certain|capable)\b/,         // "si tu n'es pas sûr"
-		/\b(tes|vos) (limites|capacites|fonctions)\b/,                         // "tes limites"
-		/\bqu'?e?st[- ]ce que (tu|vous) (fais|faites) (si|quand)\b/,          // "qu'est-ce que tu fais si"
-		/\b(aide|aider|assister)[- ]?(moi|nous) a\b/,                          // "aide-moi à" (question sur capacité)
-	]
-
-	const isCapaciteQuestion = capacitesPatterns.some((pattern) => pattern.test(normalizedQuotes))
-	
-	if (!isCapaciteQuestion) return false
-
-	// ÉTAPE 2: Vérifier que c'est bien une question sur l'assistant lui-même
-	// et pas une demande d'action sur les documents
-	const actionIndicators = [
-		/\b(modifier|supprimer|creer|ajouter|editer|changer)\b.*\b(document|fichier|archive|facture|contrat)\b/,
-		/\b(document|fichier|archive|facture|contrat)\b.*\b(modifier|supprimer|creer|ajouter)\b/,
-	]
-
-	// Si c'est une demande d'action sur un document, c'est quand même une question sur les capacités
-	// car l'utilisateur demande si l'assistant PEUT faire cette action
-	return true
-}
 
 type QuestionClientsType = 'tous' | 'particuliers' | 'entreprises' | 'client_specifique'
 
@@ -2281,24 +1266,6 @@ async function logLlmUsage(
   } catch (error) {
     console.warn('Failed to log LLM usage:', error)
   }
-}
-
-function extraireTokenDepuisCookies(request: Request): string | null {
-  const cookieHeader = request.headers.get('cookie')
-  if (!cookieHeader) return null
-
-  const parts = cookieHeader.split(';')
-  for (const part of parts) {
-    const [rawName, ...rest] = part.split('=')
-    if (!rawName || rest.length === 0) continue
-    const name = rawName.trim()
-    if (name !== 'access_token') continue
-    const value = rest.join('=').trim()
-    if (!value) continue
-    return `Bearer ${value}`
-  }
-
-  return null
 }
 
 const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.ASSISTANT_BACKEND_FETCH_TIMEOUT_MS ?? '12000')
@@ -3072,13 +2039,15 @@ export async function POST(request: Request) {
   }
 
   const token = extraireTokenDepuisCookies(request)
+  const userId = extraireUserIdDepuisToken(token)
 
   try {
     if (!ASSISTANT_ENABLED) {
       return NextResponse.json({ erreur: 'Assistant désactivé' }, { status: 503 })
     }
 
-    const rateLimit = verifierRateLimit(request)
+    // Rate limit par IP ET par userId pour une protection robuste
+    const rateLimit = verifierRateLimit(request, userId)
     if (!rateLimit.ok) {
       return NextResponse.json({ erreur: 'Trop de requêtes, réessayez dans quelques instants.' }, { status: 429 })
     }

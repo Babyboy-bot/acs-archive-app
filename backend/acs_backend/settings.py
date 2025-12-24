@@ -25,6 +25,10 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+# Désactiver la redirection automatique des URLs sans trailing slash
+# Cela évite les redirects qui cassent les requêtes preflight CORS
+APPEND_SLASH = False
+
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -38,6 +42,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'drf_spectacular',
     
     # Local apps
     'api',
@@ -54,6 +59,8 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 ROOT_URLCONF = 'acs_backend.urls'
 
@@ -76,17 +83,33 @@ TEMPLATES = [
 WSGI_APPLICATION = 'acs_backend.wsgi.application'
 
 # Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME', 'acs_archive'),
-        'USER': os.getenv('DB_USER', 'postgres'),
-        # Le mot de passe doit toujours venir de la variable d'environnement DB_PASSWORD
-        'PASSWORD': os.getenv('DB_PASSWORD', ''),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+# Supporte DATABASE_URL (CI/production) ou variables séparées (développement/Docker)
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL:
+    # Parse DATABASE_URL format: postgresql://user:password@host:port/dbname
+    import urllib.parse
+    url = urllib.parse.urlparse(DATABASE_URL)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': url.path[1:],
+            'USER': url.username,
+            'PASSWORD': url.password,
+            'HOST': url.hostname,
+            'PORT': url.port or '5432',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('DB_NAME', 'acs_archive'),
+            'USER': os.getenv('DB_USER', 'acs_user'),
+            'PASSWORD': os.getenv('DB_PASSWORD', ''),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PORT': os.getenv('DB_PORT', '5432'),
+        }
+    }
 
 # Custom User Model
 AUTH_USER_MODEL = 'api.Utilisateur'
@@ -141,6 +164,27 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
     ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# DRF Spectacular (OpenAPI/Swagger)
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'ACS Archive API',
+    'DESCRIPTION': 'API de gestion des archives pour ACS - Application de gestion documentaire pour courtiers en assurance.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'TAGS': [
+        {'name': 'Authentification', 'description': 'Endpoints de connexion/déconnexion'},
+        {'name': 'Utilisateurs', 'description': 'Gestion des utilisateurs'},
+        {'name': 'Clients', 'description': 'Gestion des clients'},
+        {'name': 'Documents', 'description': 'Gestion des documents'},
+        {'name': 'Exercices', 'description': 'Gestion des exercices comptables'},
+        {'name': 'Risques', 'description': 'Gestion des risques'},
+        {'name': 'Assistant IA', 'description': 'Endpoints de l\'assistant intelligent'},
+        {'name': 'Audit', 'description': 'Journal d\'audit'},
+        {'name': 'Statistiques', 'description': 'Statistiques et KPI'},
+    ],
 }
 
 # JWT Configuration
@@ -186,10 +230,14 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
 
 # CORS Configuration
-CORS_ALLOWED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS',
-    'http://localhost:3010,http://127.0.0.1:3010'
-).split(',')
+# En mode DEBUG, autoriser toutes les origines pour simplifier le développement
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOWED_ORIGINS = os.getenv(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:3010,http://127.0.0.1:3010,http://localhost:3000,http://127.0.0.1:3000'
+    ).split(',')
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -237,3 +285,36 @@ MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
 MISTRAL_BASE_URL = os.getenv('MISTRAL_BASE_URL', 'https://api.mistral.ai/v1')
 MISTRAL_MODEL_DEFAULT = os.getenv('MISTRAL_MODEL_DEFAULT', 'mistral-medium-latest')
 MISTRAL_MODEL_ADVANCED = os.getenv('MISTRAL_MODEL_ADVANCED', 'mistral-large-latest')
+
+# ============================================================================
+# OCR (Tesseract)
+# ============================================================================
+
+OCR_ENABLED = os.getenv('OCR_ENABLED', 'true').lower() == 'true'
+TESSERACT_CMD = os.getenv('TESSERACT_CMD')  # Chemin vers tesseract.exe si non dans PATH
+TESSERACT_LANG = os.getenv('TESSERACT_LANG', 'fra')  # Langue par défaut (français)
+OCR_DPI = int(os.getenv('OCR_DPI', '300'))  # Résolution pour la conversion PDF -> image
+
+# ============================================================================
+# Index de recherche
+# ============================================================================
+
+SEARCH_INDEX_DIR = BASE_DIR / 'search_indexes'
+SEARCH_INDEX_TTL_SECONDS = int(os.getenv('SEARCH_INDEX_TTL_SECONDS', '3600'))  # 1 heure
+
+# ============================================================================
+# Sentry (Monitoring d'erreurs)
+# ============================================================================
+
+SENTRY_DSN = os.getenv('SENTRY_DSN')
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+    
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        environment=os.getenv('SENTRY_ENVIRONMENT', 'development'),
+        traces_sample_rate=float(os.getenv('SENTRY_TRACES_SAMPLE_RATE', '0.1')),
+        send_default_pii=False,  # Ne pas envoyer d'infos personnelles
+    )

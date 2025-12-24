@@ -217,6 +217,7 @@ export default function PageDocuments() {
   const peutCreerDocuments = hasPermission(role, 'documents', 'creer')
   const peutModifierDocuments = hasPermission(role, 'documents', 'modifier')
   const peutSupprimerDocuments = hasPermission(role, 'documents', 'supprimer')
+  const peutTelecharger = role !== 'CONSULTANT' // 🔒 PDG: Consultants ne peuvent pas télécharger
 
   const [recherche, setRecherche] = useState('')
   const [filtreRisque, setFiltreRisque] = useState('')
@@ -875,14 +876,16 @@ export default function PageDocuments() {
                   </div>
 
                   <div className="flex items-center gap-1 pt-3 border-t border-theme">
-                    <button
-                      onClick={() => telechargerDocument(doc)}
-                      disabled={!fichierUrl}
-                      className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors disabled:opacity-40"
-                      title="Télécharger"
-                    >
-                      <Icon name="download" size="sm" />
-                    </button>
+                    {peutTelecharger && (
+                      <button
+                        onClick={() => telechargerDocument(doc)}
+                        disabled={!fichierUrl}
+                        className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors disabled:opacity-40"
+                        title="Télécharger"
+                      >
+                        <Icon name="download" size="sm" />
+                      </button>
+                    )}
                     <button
                       onClick={() => imprimerDocument(doc)}
                       disabled={!fichierUrl}
@@ -970,9 +973,11 @@ export default function PageDocuments() {
                         <td className="px-4 py-3 text-xs text-theme-secondary">{doc.date}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => telechargerDocument(doc)} disabled={!fichierUrl} className="p-1.5 text-theme-secondary hover:text-theme-primary rounded transition-colors disabled:opacity-40" title="Télécharger">
-                              <Icon name="download" size="xs" />
-                            </button>
+                            {peutTelecharger && (
+                              <button onClick={() => telechargerDocument(doc)} disabled={!fichierUrl} className="p-1.5 text-theme-secondary hover:text-theme-primary rounded transition-colors disabled:opacity-40" title="Télécharger">
+                                <Icon name="download" size="xs" />
+                              </button>
+                            )}
                             <button onClick={() => ouvrirDansNouvelOnglet(doc)} disabled={!fichierUrl} className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors disabled:opacity-40" title="Voir">
                               <Icon name="eye" size="xs" />
                             </button>

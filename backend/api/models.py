@@ -400,3 +400,185 @@ class LlmUsage(models.Model):
     def __str__(self) -> str:  # pragma: no cover - représentation simple
         return f"{self.utilisateur_id} {self.purpose} {self.tokens_total} @ {self.timestamp}"
 
+
+class AssistantInteraction(models.Model):
+    """Interactions de l'assistant IA pour l'apprentissage progressif.
+    
+    Stocke les questions/réponses avec feedback pour améliorer l'assistant.
+    """
+    
+    FEEDBACK_CHOICES = [
+        ('positive', 'Positif'),
+        ('negative', 'Négatif'),
+        ('neutral', 'Neutre'),
+    ]
+    
+    INTENT_CHOICES = [
+        ('documents', 'Documents'),
+        ('statistiques', 'Statistiques'),
+    ]
+    
+    id = models.CharField(max_length=50, primary_key=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    utilisateur = models.ForeignKey(
+        Utilisateur,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assistant_interactions',
+    )
+    question = models.TextField()
+    question_normalized = models.TextField()
+    response = models.TextField()
+    intent = models.CharField(max_length=20, choices=INTENT_CHOICES)
+    type_message = models.CharField(max_length=50, default='document')
+    client_mentionne = models.CharField(max_length=255, null=True, blank=True)
+    type_doc_mentionne = models.CharField(max_length=100, null=True, blank=True)
+    feedback = models.CharField(max_length=20, choices=FEEDBACK_CHOICES, null=True, blank=True)
+    feedback_comment = models.TextField(null=True, blank=True)
+    response_time_ms = models.PositiveIntegerField(default=0)
+    llm_used = models.BooleanField(default=False)
+    
+    class Meta:
+        db_table = 'assistant_interactions'
+        verbose_name = "Interaction assistant"
+        verbose_name_plural = "Interactions assistant"
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['question_normalized']),
+            models.Index(fields=['feedback']),
+            models.Index(fields=['intent']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.id} - {self.question[:50]}..."
+
+
+class AssistantQuestionPattern(models.Model):
+    """Patterns de questions fréquentes pour l'apprentissage.
+    
+    Identifie les questions récurrentes et leurs meilleures réponses.
+    """
+    
+    pattern = models.CharField(max_length=500, unique=True)
+    examples = models.JSONField(default=list)  # Liste d'exemples de questions
+    best_responses = models.JSONField(default=list)  # Meilleures réponses
+    frequency = models.PositiveIntegerField(default=1)
+    avg_feedback_score = models.FloatField(default=0.0)  # -1 à 1
+    last_updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'assistant_question_patterns'
+        verbose_name = "Pattern de question"
+        verbose_name_plural = "Patterns de questions"
+        ordering = ['-frequency']
+    
+    def __str__(self) -> str:
+        return f"{self.pattern} (freq: {self.frequency})"
+
+
+class AuditLog(models.Model):
+    """Journal d'audit pour tracer les actions importantes.
+    
+    Conforme aux exigences d'archivage professionnel (NF Z42-013).
+    Enregistre toutes les actions sur les documents et données sensibles.
+    """
+    
+    ACTION_CHOICES = [
+        ('CREATE', 'Création'),
+        ('READ', 'Consultation'),
+        ('UPDATE', 'Modification'),
+        ('DELETE', 'Suppression'),
+        ('DOWNLOAD', 'Téléchargement'),
+        ('PRINT', 'Impression'),
+        ('EXPORT', 'Export'),
+        ('LOGIN', 'Connexion'),
+        ('LOGOUT', 'Déconnexion'),
+        ('SEARCH', 'Recherche'),
+        ('ACCESS_DENIED', 'Accès refusé'),
+    ]
+    
+    RESOURCE_CHOICES = [
+        ('document', 'Document'),
+        ('client', 'Client'),
+        ('exercice', 'Exercice'),
+        ('risque', 'Risque'),
+        ('utilisateur', 'Utilisateur'),
+        ('categorie', 'Catégorie'),
+        ('session', 'Session'),
+        ('assistant', 'Assistant IA'),
+    ]
+    
+    id = models.BigAutoField(primary_key=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    
+    # Qui a fait l'action
+    utilisateur = models.ForeignKey(
+        Utilisateur,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='audit_logs',
+    )
+    utilisateur_nom = models.CharField(max_length=255, blank=True)  # Copie pour historique
+    
+    # Quelle action
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, db_index=True)
+    
+    # Sur quelle ressource
+    resource_type = models.CharField(max_length=50, choices=RESOURCE_CHOICES, db_index=True)
+    resource_id = models.CharField(max_length=100, blank=True)
+    resource_name = models.CharField(max_length=500, blank=True)  # Titre/nom pour lisibilité
+    
+    # Détails
+    details = models.JSONField(default=dict, blank=True)  # Données avant/après, etc.
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    
+    # Résultat
+    success = models.BooleanField(default=True)
+    error_message = models.TextField(blank=True)
+    
+    class Meta:
+        db_table = 'audit_logs'
+        verbose_name = "Journal d'audit"
+        verbose_name_plural = "Journaux d'audit"
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['timestamp', 'action']),
+            models.Index(fields=['resource_type', 'resource_id']),
+            models.Index(fields=['utilisateur', 'timestamp']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.timestamp} - {self.utilisateur_nom} - {self.action} - {self.resource_type}"
+    
+    @classmethod
+    def log(
+        cls,
+        action: str,
+        resource_type: str,
+        resource_id: str = '',
+        resource_name: str = '',
+        utilisateur=None,
+        details: dict = None,
+        ip_address: str = None,
+        user_agent: str = '',
+        success: bool = True,
+        error_message: str = '',
+    ):
+        """Méthode helper pour créer une entrée d'audit."""
+        return cls.objects.create(
+            utilisateur=utilisateur,
+            utilisateur_nom=str(utilisateur) if utilisateur else 'Anonyme',
+            action=action,
+            resource_type=resource_type,
+            resource_id=str(resource_id),
+            resource_name=resource_name[:500] if resource_name else '',
+            details=details or {},
+            ip_address=ip_address,
+            user_agent=user_agent[:1000] if user_agent else '',
+            success=success,
+            error_message=error_message,
+        )
+
