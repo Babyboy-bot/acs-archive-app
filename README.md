@@ -67,9 +67,9 @@ docker compose down
 ```
 
 **Accès :**
-- Frontend : http://localhost:3000
-- Backend API : http://localhost:8000/api
-- Health check : http://localhost:8000/api/health/
+- Frontend : http://localhost:80 (via Nginx)
+- Backend API : http://localhost:80/api (via Nginx)
+- Health check : http://localhost:80/api/health/
 
 > ⚠️ Docker Desktop doit être lancé avant d'exécuter ces commandes.
 

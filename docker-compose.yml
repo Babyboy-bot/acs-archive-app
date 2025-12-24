@@ -89,8 +89,8 @@ services:
       - INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://backend:8000/api}
       - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
       - MISTRAL_ENABLED=${MISTRAL_ENABLED:-false}
-    expose:
-      - "3000"
+    ports:
+      - "3000:3000"
 
   # ==========================================================================
   # Nginx Reverse Proxy - Point d'entrée unique

@@ -2,9 +2,11 @@
 Vues pour l'API Django REST Framework
 """
 from rest_framework import viewsets, status, permissions
+from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import api_view, permission_classes, action
-from rest_framework.response import Response
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
@@ -140,7 +142,6 @@ def _load_embeddings_from_cache(cache_key):
         logging.error(f"Erreur lors du chargement du cache d'embeddings: {e}", exc_info=True)
         return None
 
-def _save_embeddings_to_cache(cache_key, embeddings):
 def _save_embeddings_to_cache(documents_hash: str, embeddings):
     """Sauvegarde les embeddings dans le cache disque."""
     cache_file = _get_cache_file_path(documents_hash, 'embeddings')
@@ -149,10 +150,11 @@ def _save_embeddings_to_cache(documents_hash: str, embeddings):
         _embeddings_cache[documents_hash] = embeddings
     
     try:
+        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
         with open(cache_file, 'wb') as f:
             pickle.dump(embeddings, f)
     except Exception as e:
-        logging.warning(f"Impossible de sauvegarder les embeddings cache: {e}")
+        logging.error(f"Erreur lors de la sauvegarde du cache d'embeddings: {e}", exc_info=True)
 
 def _load_tfidf_from_cache(corpus_hash: str):
     """Charge le TF-IDF depuis le cache disque si disponible."""
@@ -275,12 +277,11 @@ def log_llm_usage(
     tokens_output: int | None,
     ts=None,
 ) -> None:
-    """Journalise un appel LLM d├®taill├® et met ├á jour le compteur mensuel.
+    """Journalise un appel LLM détaillé et met à jour le compteur mensuel.
 
-    Cette fonction est appel├®e en asynchrone logique c├┤t├® front, apr├¿s l'appel
-    LLM, pour enregistrer les tokens r├®ellement consomm├®s.
+    Cette fonction est appelée de manière asynchrone côté front, après l'appel
+    LLM, pour enregistrer les tokens réellement consommés.
     """
-
     ts = ts or timezone.now()
     ti = tokens_input or 0
     to = tokens_output or 0
@@ -320,18 +321,50 @@ def log_llm_usage(
         total,
         year_month,
         quota.tokens_used,
+        quota.limit
+    )
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_view(request):
+    """Vue de connexion avec authentification JWT et gestion des sessions."""
+    try:
+        # Vérifier les identifiants
+        nom_utilisateur = request.data.get('username')
+        mot_de_passe = request.data.get('password')
+        
+        if not nom_utilisateur or not mot_de_passe:
+            return Response(
+                {'erreur': 'Nom d\'utilisateur et mot de passe requis'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Authentifier l'utilisateur
+        utilisateur = authenticate(username=nom_utilisateur, password=mot_de_passe)
+        if utilisateur is None:
+            return Response(
+                {'erreur': 'Identifiants incorrects'},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-
-        # Mettre ├á jour la derni├¿re connexion
+        
+        # Vérifier si le compte est actif
+        if not utilisateur.is_active:
+            return Response(
+                {'erreur': 'Ce compte est désactivé'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        
+        # Mettre à jour la dernière connexion
         utilisateur.derniere_connexion = timezone.now()
         utilisateur.save(update_fields=['derniere_connexion'])
-
-        # G├®n├®rer les tokens JWT
+        
+        # Générer les tokens JWT
         refresh = RefreshToken.for_user(utilisateur)
         access_token = refresh.access_token
-
-        # Donn├®es de session
+        
+        # Données de session
         session_data = {
             'id': str(utilisateur.id),
             'nomUtilisateur': utilisateur.nom_utilisateur,
@@ -340,9 +373,9 @@ def log_llm_usage(
             'email': utilisateur.email,
             'role': utilisateur.role,
         }
-
-        # Construire la r├®ponse JSON sans exposer les tokens c├┤t├® client :
-        # l'authentification repose d├®sormais uniquement sur les cookies httpOnly.
+        
+        # Construire la réponse JSON sans exposer les tokens côté client :
+        # l'authentification repose désormais uniquement sur les cookies httpOnly.
         response = Response(
             {
                 'success': True,
@@ -358,6 +391,7 @@ def log_llm_usage(
         refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
         samesite_policy = 'Lax'
         
+        # Définir les cookies de session
         response.set_cookie(
             'access_token',
             str(access_token),
@@ -377,15 +411,10 @@ def log_llm_usage(
 
         return response
 
-    except Utilisateur.DoesNotExist:
-        return Response(
-            {'erreur': 'Identifiants incorrects'},
-            status=status.HTTP_401_UNAUTHORIZED,
-        )
-    except Exception:
+    except Exception as e:
         logging.exception("Erreur lors de la tentative de connexion")
         return Response(
-            {'erreur': 'Erreur serveur'},
+            {'erreur': 'Erreur serveur lors de l\'authentification'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
