@@ -22,6 +22,9 @@ import mimetypes
 import uuid
 import unicodedata
 import re
+from sklearn.metrics.pairwise import linear_kernel
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.svm import LinearSVC
 
 import numpy as np
 import faiss
@@ -89,6 +92,100 @@ from .serializers import (
     AssistantMessageSerializer,
 )
 from .permissions import RoleBasedPermission, IsOwnerOrAdmin
+
+
+# ============================================================================
+# CACHE EMBEDDINGS ET TF-IDF (OPTIMISATION)
+# ============================================================================
+
+import threading
+import pickle
+import hashlib
+from pathlib import Path
+
+# Cache en mémoire pour les embeddings et TF-IDF
+_embeddings_cache = {}
+_tfidf_cache = {}
+_cache_lock = threading.Lock()
+
+def _get_cache_key(data: str) -> str:
+    """Génère une clé de cache unique pour les données."""
+    return hashlib.md5(data.encode('utf-8')).hexdigest()
+
+def _get_cache_file_path(cache_key: str, suffix: str) -> Path:
+    """Retourne le chemin du fichier cache."""
+    cache_dir = Path(settings.SEARCH_INDEX_DIR)
+    cache_dir.mkdir(exist_ok=True, parents=True)
+    return cache_dir / f"{cache_key}.{suffix}"
+
+def _load_embeddings_from_cache(cache_key):
+    """Charge les embeddings depuis le cache disque si disponible"""
+    if not settings.SEARCH_INDEX_DIR.exists():
+        logging.debug("Dossier de cache d'index non trouvé")
+        return None
+    
+    cache_file = settings.SEARCH_INDEX_DIR / f"embeddings_{cache_key}.pkl"
+    if not cache_file.exists():
+        logging.debug(f"Fichier de cache non trouvé: {cache_file}")
+        return None
+        
+    try:
+        start_time = time.time()
+        with open(cache_file, 'rb') as f:
+            embeddings = pickle.load(f)
+        load_time = (time.time() - start_time) * 1000  # en ms
+        logging.info(f"Embeddings chargés depuis le cache en {load_time:.2f}ms - Taille: {len(embeddings) if embeddings is not None else 0} vecteurs")
+        return embeddings
+    except Exception as e:
+        logging.error(f"Erreur lors du chargement du cache d'embeddings: {e}", exc_info=True)
+        return None
+
+def _save_embeddings_to_cache(cache_key, embeddings):
+def _save_embeddings_to_cache(documents_hash: str, embeddings):
+    """Sauvegarde les embeddings dans le cache disque."""
+    cache_file = _get_cache_file_path(documents_hash, 'embeddings')
+    
+    with _cache_lock:
+        _embeddings_cache[documents_hash] = embeddings
+    
+    try:
+        with open(cache_file, 'wb') as f:
+            pickle.dump(embeddings, f)
+    except Exception as e:
+        logging.warning(f"Impossible de sauvegarder les embeddings cache: {e}")
+
+def _load_tfidf_from_cache(corpus_hash: str):
+    """Charge le TF-IDF depuis le cache disque si disponible."""
+    cache_file = _get_cache_file_path(corpus_hash, 'tfidf')
+    
+    with _cache_lock:
+        if corpus_hash in _tfidf_cache:
+            return _tfidf_cache[corpus_hash]
+    
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'rb') as f:
+                vectorizer, matrix = pickle.load(f)
+            with _cache_lock:
+                _tfidf_cache[corpus_hash] = (vectorizer, matrix)
+            return vectorizer, matrix
+        except Exception as e:
+            logging.warning(f"Impossible de charger le TF-IDF cache: {e}")
+    
+    return None, None
+
+def _save_tfidf_to_cache(corpus_hash: str, vectorizer, matrix):
+    """Sauvegarde le TF-IDF dans le cache disque."""
+    cache_file = _get_cache_file_path(corpus_hash, 'tfidf')
+    
+    with _cache_lock:
+        _tfidf_cache[corpus_hash] = (vectorizer, matrix)
+    
+    try:
+        with open(cache_file, 'wb') as f:
+            pickle.dump((vectorizer, matrix), f)
+    except Exception as e:
+        logging.warning(f"Impossible de sauvegarder le TF-IDF cache: {e}")
 
 
 # ============================================================================
@@ -223,37 +320,6 @@ def log_llm_usage(
         total,
         year_month,
         quota.tokens_used,
-        quota.limit,
-    )
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def login_view(request):
-    """Vue de connexion - retourne un token JWT via cookies httpOnly."""
-    serializer = LoginSerializer(data=request.data)
-
-    if not serializer.is_valid():
-        return Response(
-            {'erreur': "Nom d'utilisateur et mot de passe requis"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    nom_utilisateur = serializer.validated_data['nom_utilisateur']
-    mot_de_passe = serializer.validated_data['mot_de_passe']
-
-    try:
-        utilisateur = Utilisateur.objects.get(nom_utilisateur=nom_utilisateur)
-
-        if not utilisateur.est_actif:
-            return Response(
-                {'erreur': 'Identifiants incorrects'},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        if not utilisateur.check_password(mot_de_passe):
-            return Response(
-                {'erreur': 'Identifiants incorrects'},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
@@ -1787,35 +1853,56 @@ def document_search_view(request):
 setattr(document_search_view, 'ressource', 'documents')
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, RoleBasedPermission])
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def _log_perf_metric(metric_name: str, duration_ms: float, **extra):
+    """Journalise une métrique de performance avec des tags supplémentaires"""
+    logging.info(
+        f"PERF_METRIC {metric_name} duration_ms={duration_ms:.2f} " + 
+        " ".join(f"{k}={v}" for k, v in extra.items())
+    )
+
 def assistant_semantic_search_view(request):
     """
-    Recherche s├®mantique avanc├®e pour l'assistant IA.
-    Utilise des embeddings multilingues pour comprendre le sens des requ├¬tes.
+    Recherche sémantique avancée pour l'assistant IA.
+    Utilise des embeddings multilingues pour comprendre le sens des requêtes.
     Fallback sur TF-IDF si sentence-transformers n'est pas disponible.
     
-    Param├¿tres de filtre optionnels :
+    Paramètres de filtre optionnels :
     - client: code client (ex: 3CB)
-    - exercice: ann├®e de l'exercice (ex: 2018)
+    - exercice: année de l'exercice (ex: 2018)
     - risque: type de risque (ex: sante)
+    - top_k: nombre de résultats à retourner (défaut: 5, max: 20)
+    - max_docs: nombre maximum de documents à analyser (défaut: 100, max: 500)
     """
-    query = (request.query_params.get('q') or '').strip()
+    request_start_time = time.time()
+    if not SEMANTIC_SEARCH_AVAILABLE:
+        return assistant_document_search_view(request)
+
+    query = request.data.get('query', '').strip()
     if not query:
-        return Response({'results': [], 'method': 'none'})
+        return Response({'error': 'La requête est vide'}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        top_k = int(request.query_params.get('top_k') or 5)
-    except ValueError:
-        top_k = 5
-
-    include_fallback = (request.query_params.get('include_fallback') or '').lower() == 'true'
+    # Récupération des paramètres de filtre et de limitation
+    client_filter = request.data.get('client')
+    exercice_filter = request.data.get('exercise')
+    risque_filter = request.data.get('risque')
+    top_k = min(int(request.data.get('top_k', 5)), 20)  # Limiter à 20 résultats max
+    max_docs = min(int(request.data.get('max_docs', 100)), 500)  # Limiter à 500 documents max
     
-    # Filtres optionnels pour affiner la recherche
-    client_filter = (request.query_params.get('client') or '').strip().upper()
-    exercice_filter = (request.query_params.get('exercice') or '').strip()
-    risque_filter = (request.query_params.get('risque') or '').strip().lower()
+    # Log des paramètres de la requête
+    _log_perf_metric(
+        "search_request", 
+        0,
+        query_length=len(query),
+        client_filter=bool(client_filter),
+        exercice_filter=bool(exercice_filter),
+        risque_filter=bool(risque_filter),
+        top_k=top_k,
+        max_docs=max_docs
+    )   
 
+    # Filtres optionnels pour affiner la recherche
     # Construire la requ├¬te avec filtres
     queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
     
@@ -1840,32 +1927,73 @@ def assistant_semantic_search_view(request):
         queryset = queryset.filter(risque__type__icontains=risque_filter)
         logging.info(f"Filtre risque: {risque_filter}")
     
-    documents = list(queryset.all())
-
+    # Limiter le nombre de documents analysés pour éviter les performances dégradées
+    documents = list(queryset.all()[:max_docs])
+    total_documents = queryset.count()
+    
     if not documents:
         return Response({'results': [], 'method': 'none'})
+        
+    if len(documents) >= max_docs:
+        logging.warning(
+            "Limite de documents atteinte: %d/%d documents analysés (max_docs=%d)",
+            max_docs, total_documents, max_docs
+        )
 
     payloads = [_build_document_payload(doc, request) for doc in documents]
     corpus = [_build_document_text(payload) for payload in payloads]
 
-    # Essayer la recherche s├®mantique si disponible
+    # Générer une clé de cache basée sur les documents et filtres
+    documents_text = '|'.join([f"{doc.id}:{doc.titre}" for doc in documents])
+    documents_hash = _get_cache_key(f"{documents_text}:{client_filter}:{exercice_filter}:{risque_filter}")
+
+    # Essayer la recherche sémantique si disponible
     if SEMANTIC_SEARCH_AVAILABLE:
         try:
+            model_load_start = time.time()
             model = get_semantic_model()
+            model_load_time = (time.time() - model_load_start) * 1000
+            _log_perf_metric("model_load", model_load_time)
+            
             if model is not None:
-                # Encoder la requ├¬te et les documents
-                query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
-                doc_embeddings = model.encode(corpus, convert_to_numpy=True, normalize_embeddings=True)
+                # Tenter de charger les embeddings depuis le cache
+                cached_embeddings = _load_embeddings_from_cache(documents_hash)
                 
-                # Cr├®er l'index FAISS avec les embeddings s├®mantiques
+                if cached_embeddings is not None:
+                    doc_embeddings = cached_embeddings
+                    _log_perf_metric("embeddings_load_cache", 0, docs_count=len(documents))
+                else:
+                    # Encoder les documents et mettre en cache
+                    encode_start = time.time()
+                    doc_embeddings = model.encode(corpus, convert_to_numpy=True, normalize_embeddings=True)
+                    encode_time = (time.time() - encode_start) * 1000
+                    
+                    cache_start = time.time()
+                    _save_embeddings_to_cache(documents_hash, doc_embeddings)
+                    cache_time = (time.time() - cache_start) * 1000
+                    
+                    _log_perf_metric(
+                        "embeddings_compute", 
+                        encode_time,
+                        docs_count=len(documents),
+                        cache_time_ms=cache_time
+                    )
+                
+                # Encoder la requête
+                query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
+                
+                # Créer l'index FAISS avec les embeddings sémantiques
                 dimension = doc_embeddings.shape[1]
                 index = faiss.IndexFlatIP(dimension)
                 index.add(doc_embeddings.astype(np.float32))
                 
                 # Rechercher les documents les plus similaires
+                search_start = time.time()
                 distances, indices = index.search(query_embedding.astype(np.float32), min(top_k, len(documents)))
+                search_time = (time.time() - search_start) * 1000
                 
                 results = []
+                process_start = time.time()
                 for idx, score in zip(indices[0], distances[0]):
                     if idx < 0 or score <= 0:
                         continue
@@ -1873,6 +2001,15 @@ def assistant_semantic_search_view(request):
                     result = _build_assistant_result(payload, float(score))
                     result['search_method'] = 'semantic'
                     results.append(result)
+                
+                process_time = (time.time() - process_start) * 1000
+                
+                _log_perf_metric(
+                    "semantic_search", 
+                    search_time,
+                    results_count=len(results),
+                    process_time_ms=process_time
+                )
                 
                 if results:
                     try:
@@ -1895,17 +2032,35 @@ def assistant_semantic_search_view(request):
                             apercu,
                         )
                     except Exception as log_error:
-                        logging.error("Erreur lors du logging des r├®sultats s├®mantiques: %s", log_error)
+                        logging.error("Erreur lors du logging des résultats sémantiques: %s", log_error)
 
-                    return Response({'results': results, 'method': 'semantic'})
+                    # Log de la requête complète
+                    total_time = (time.time() - request_start_time) * 1000
+                    _log_perf_metric(
+                        "search_complete", 
+                        total_time,
+                        method='semantic',
+                        results_count=len(results),
+                        cached=False
+                    )
+                    
+                    return Response({
+                        'results': results, 
+                        'method': 'semantic',
+                        'cached': False,
+                        'performance': {
+                            'total_time_ms': round(total_time, 2),
+                            'documents_processed': len(documents)
+                        }
+                    })
                 
-                # Pas de r├®sultats s├®mantiques, fallback
-                logging.info("Recherche s├®mantique: aucun r├®sultat, fallback TF-IDF")
+                # Pas de résultats sémantiques, fallback
+                logging.info("Recherche sémantique: aucun résultat, fallback TF-IDF")
         except Exception as e:
-            logging.error(f"Erreur recherche s├®mantique: {e}, fallback TF-IDF")
+            logging.error(f"Erreur recherche sémantique: {e}, fallback TF-IDF")
 
-    # Fallback sur TF-IDF si la recherche s├®mantique ├®choue ou n'est pas disponible.
-    # On privil├®gie les chunks de documents (texte extrait des PDF) s'ils sont disponibles.
+    # Fallback sur TF-IDF si la recherche sémantique échoue ou n'est pas disponible.
+    # On privilégie les chunks de documents (texte extrait des PDF) s'ils sont disponibles.
     try:
         chunks_qs = DocumentChunk.objects.filter(document__in=documents)
         chunks = list(
@@ -1932,8 +2087,24 @@ def assistant_semantic_search_view(request):
         payloads = new_payloads
         corpus = new_corpus
 
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(corpus)
+    # Générer une clé de cache pour le corpus TF-IDF
+    corpus_text = '|'.join(corpus[:50])  # Limiter pour éviter des clés trop longues
+    corpus_hash = _get_cache_key(f"{corpus_text}:{client_filter}:{exercice_filter}:{risque_filter}")
+
+    # Tenter de charger le TF-IDF depuis le cache
+    cached_vectorizer, cached_matrix = _load_tfidf_from_cache(corpus_hash)
+    
+    if cached_vectorizer is not None and cached_matrix is not None:
+        vectorizer = cached_vectorizer
+        tfidf_matrix = cached_matrix
+        logging.info("TF-IDF chargé depuis le cache")
+    else:
+        # Calculer et mettre en cache le TF-IDF
+        vectorizer = TfidfVectorizer()
+        tfidf_matrix = vectorizer.fit_transform(corpus)
+        _save_tfidf_to_cache(corpus_hash, vectorizer, tfidf_matrix)
+        logging.info("TF-IDF calculé et mis en cache")
+    
     query_vector = vectorizer.transform([query])
     scores = linear_kernel(query_vector, tfidf_matrix).flatten()
 

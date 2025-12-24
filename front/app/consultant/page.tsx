@@ -105,9 +105,9 @@ function genererSuggestionsIntelligentes(messages: Message[]): string[] {
 }
 
 const SUGGESTIONS_DEFAUT = [
-  "Quels sont les derniers avenants ?",
-  "Montre-moi les documents récents",
-  "Quels contrats arrivent à échéance ce mois ?",
+  "Avenant N° 0529 2024 de 3CB risque MRP",
+  "Avenant divers 2025 de 3CB risque santé",
+  "divers 2025 de 3CB risque sante ",
 ];
 
 const LOCAL_STORAGE_KEY = "acs-assistant-conversation-v1";

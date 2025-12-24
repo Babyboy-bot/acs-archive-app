@@ -51,8 +51,8 @@ export function OnboardingGuide({ onClose, autoShow = false }: OnboardingGuidePr
             <div className="bg-green-50 border border-green-200 rounded-lg p-3">
               <p className="text-sm font-semibold text-green-900 mb-1">✅ Exemples de bonnes questions :</p>
               <ul className="text-sm text-green-800 space-y-1 ml-4">
-                <li>• "Avenant 2024 de 3CB risque santé"</li>
-                <li>• "Factures du client SANLAM en 2023"</li>
+                <li>• "Avenant N° 0529 2024 de 3CB risque MRP"</li>
+                <li>• "Avenant divers 2025 de 3CB risque santé"</li>
                 <li>• "Combien de documents a le client 2FZ ?"</li>
                 <li>• "Montre-moi les sinistres de l'année dernière"</li>
               </ul>

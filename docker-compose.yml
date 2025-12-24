@@ -43,6 +43,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       - DEBUG=${DEBUG:-True}
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
@@ -57,7 +59,6 @@ services:
       - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
       - ASSISTANT_LLM_PROVIDER=${ASSISTANT_LLM_PROVIDER:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
     volumes:
       - ./backend:/app
       - static_volume:/app/staticfiles
@@ -80,11 +81,14 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-/api}
       - INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://backend:8000/api}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
+      - MISTRAL_ENABLED=${MISTRAL_ENABLED:-false}
     expose:
       - "3000"
 

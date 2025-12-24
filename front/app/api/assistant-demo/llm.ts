@@ -33,7 +33,16 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-5-sonnet-20241022'
 const LLM_ENABLED = (process.env.ASSISTANT_LLM_ENABLED ?? 'true').toLowerCase() !== 'false'
 
 // Timeout global (en millisecondes) pour les appels LLM afin d'éviter les requêtes qui pendent
-const LLM_TIMEOUT_MS = Number(process.env.ASSISTANT_LLM_TIMEOUT_MS ?? '20000')
+const MIN_LLM_TIMEOUT_MS = 5000
+const MAX_LLM_TIMEOUT_MS = 20000
+
+function clampTimeout(raw: string | number | undefined, fallback: number, min = MIN_LLM_TIMEOUT_MS, max = MAX_LLM_TIMEOUT_MS) {
+  const parsed = typeof raw === 'string' ? Number(raw) : typeof raw === 'number' ? raw : fallback
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(Math.max(parsed, min), max)
+}
+
+const LLM_TIMEOUT_MS = clampTimeout(process.env.ASSISTANT_LLM_TIMEOUT_MS, 20000)
 
 // Configuration pour la stratégie multi-modèles Mistral
 const MISTRAL_BASE_URL = (process.env.MISTRAL_BASE_URL ?? 'https://api.mistral.ai/v1').trim()
@@ -47,8 +56,13 @@ const MISTRAL_RETRY_MAX = Number(process.env.MISTRAL_RETRY_MAX ?? '2')
 const MISTRAL_RETRY_BASE_DELAY_MS = Number(process.env.MISTRAL_RETRY_BASE_DELAY_MS ?? '400')
 const MISTRAL_CIRCUIT_FAILURE_THRESHOLD = Number(process.env.MISTRAL_CIRCUIT_FAILURE_THRESHOLD ?? '3')
 const MISTRAL_CIRCUIT_OPEN_MS = Number(process.env.MISTRAL_CIRCUIT_OPEN_MS ?? '15000')
-const MISTRAL_TOTAL_BUDGET_MS = Number(process.env.MISTRAL_TOTAL_BUDGET_MS ?? String(LLM_TIMEOUT_MS))
-const MISTRAL_ATTEMPT_TIMEOUT_MS = Number(process.env.MISTRAL_ATTEMPT_TIMEOUT_MS ?? '8000')
+const MISTRAL_TOTAL_BUDGET_MS = clampTimeout(process.env.MISTRAL_TOTAL_BUDGET_MS, LLM_TIMEOUT_MS, MIN_LLM_TIMEOUT_MS, LLM_TIMEOUT_MS)
+const MISTRAL_ATTEMPT_TIMEOUT_MS = clampTimeout(
+  process.env.MISTRAL_ATTEMPT_TIMEOUT_MS,
+  Math.min(8000, Math.floor(MISTRAL_TOTAL_BUDGET_MS * 0.6)),
+  MIN_LLM_TIMEOUT_MS / 2,
+  MISTRAL_TOTAL_BUDGET_MS,
+)
 const MISTRAL_FORCE_CONNECTION_CLOSE = (process.env.MISTRAL_FORCE_CONNECTION_CLOSE ?? 'true').toLowerCase() === 'true'
 
 // Seuil de complexité pour utiliser le modèle avancé (abaissé pour utiliser plus souvent le modèle puissant)
