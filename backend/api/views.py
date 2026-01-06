@@ -29,35 +29,74 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
 
 import numpy as np
-import faiss
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import linear_kernel
+import time
+# faiss importé de façon lazy pour ne pas bloquer le démarrage
+_FAISS_MODULE = None
+def get_faiss():
+    global _FAISS_MODULE
+    if _FAISS_MODULE is None:
+        import faiss
+        _FAISS_MODULE = faiss
+    return _FAISS_MODULE
 
-try:
-    # Embeddings s├®mantiques avec sentence-transformers
-    from sentence_transformers import SentenceTransformer
+# Embeddings sémantiques avec sentence-transformers (chargement lazy pour ne pas bloquer le démarrage)
+# Le cache HuggingFace est persisté dans le volume Docker pour éviter les re-téléchargements
+_SEMANTIC_MODEL = None
+_SEMANTIC_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'  # Multilingue, rapide, bon pour le français
+_SENTENCE_TRANSFORMERS_CHECKED = False
+_SENTENCE_TRANSFORMERS_AVAILABLE = False
 
-    _SEMANTIC_MODEL = None
-    _SEMANTIC_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'  # Multilingue, rapide, bon pour le fran├ºais
-
-    def get_semantic_model():
-        global _SEMANTIC_MODEL
-        if _SEMANTIC_MODEL is None:
-            logging.info(f"Chargement du mod├¿le s├®mantique: {_SEMANTIC_MODEL_NAME}")
-            _SEMANTIC_MODEL = SentenceTransformer(_SEMANTIC_MODEL_NAME)
-            logging.info("Mod├¿le s├®mantique charg├® avec succ├¿s")
-        return _SEMANTIC_MODEL
-
-    SEMANTIC_SEARCH_AVAILABLE = True
-except Exception as exc:
-    logging.warning(
-        "sentence-transformers non disponible ou ├®chec d'initialisation (%s), recherche s├®mantique d├®sactiv├®e",
-        exc,
-    )
-    SEMANTIC_SEARCH_AVAILABLE = False
-
-    def get_semantic_model():
+def get_semantic_model():
+    """Charge le modèle sémantique de façon lazy (à la première utilisation)."""
+    global _SEMANTIC_MODEL, _SENTENCE_TRANSFORMERS_CHECKED, _SENTENCE_TRANSFORMERS_AVAILABLE
+    
+    if not _SENTENCE_TRANSFORMERS_CHECKED:
+        _SENTENCE_TRANSFORMERS_CHECKED = True
+        try:
+            from sentence_transformers import SentenceTransformer
+            _SENTENCE_TRANSFORMERS_AVAILABLE = True
+        except ImportError as exc:
+            logging.warning("sentence-transformers non disponible (%s), recherche sémantique désactivée", exc)
+            _SENTENCE_TRANSFORMERS_AVAILABLE = False
+    
+    if not _SENTENCE_TRANSFORMERS_AVAILABLE:
         return None
+    
+    if _SEMANTIC_MODEL is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            logging.info(f"Chargement du modèle sémantique: {_SEMANTIC_MODEL_NAME}")
+            _SEMANTIC_MODEL = SentenceTransformer(_SEMANTIC_MODEL_NAME)
+            logging.info("Modèle sémantique chargé avec succès")
+        except Exception as exc:
+            logging.warning("Échec du chargement du modèle sémantique (%s)", exc)
+            return None
+    
+    return _SEMANTIC_MODEL
+
+def is_semantic_search_available():
+    """Vérifie si la recherche sémantique est disponible (sans charger le modèle).
+    
+    Désactivé par défaut pour éviter le téléchargement de modèles lourds au démarrage.
+    Activer via ENABLE_SEMANTIC_SEARCH=true dans l'environnement.
+    """
+    import os
+    if os.environ.get('ENABLE_SEMANTIC_SEARCH', '').lower() != 'true':
+        return False
+    
+    global _SENTENCE_TRANSFORMERS_CHECKED, _SENTENCE_TRANSFORMERS_AVAILABLE
+    if not _SENTENCE_TRANSFORMERS_CHECKED:
+        _SENTENCE_TRANSFORMERS_CHECKED = True
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec('sentence_transformers')
+            _SENTENCE_TRANSFORMERS_AVAILABLE = spec is not None
+        except Exception:
+            _SENTENCE_TRANSFORMERS_AVAILABLE = False
+    return _SENTENCE_TRANSFORMERS_AVAILABLE
+
+# Pour compatibilité avec le code existant qui utilise SEMANTIC_SEARCH_AVAILABLE
+SEMANTIC_SEARCH_AVAILABLE = True  # On suppose disponible, vérifié à l'utilisation
 
 try:
     import PyPDF2
@@ -1102,7 +1141,17 @@ class DocumentViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Filtrer les documents selon les param├¿tres"""
-        queryset = Document.objects.all().order_by('-cree_le')
+        queryset = Document.objects.select_related(
+            'categorie',
+            'auteur',
+            'risque__exercice__client',
+        ).all()
+
+        ordering = self.request.query_params.get('ordering')
+        if ordering:
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-cree_le')
         
         # Filtrer par risque
         risque_id = self.request.query_params.get('risque', None)
@@ -1153,24 +1202,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
         response = super().destroy(request, *args, **kwargs)
         invalidate_document_index()
         return response
-    
-    @action(detail=False, methods=['get'])
-    def recents(self, request):
-        """Récupérer les documents récents"""
-        from django.utils.dateparse import parse_datetime
-        
-        limit = int(request.query_params.get('limit', 10))
-        since = request.query_params.get('since', None)
-        
-        queryset = Document.objects.all().order_by('-cree_le')[:limit]
-        
-        if since:
-            since_date = parse_datetime(since)
-            if since_date:
-                queryset = Document.objects.filter(cree_le__gt=since_date).order_by('-cree_le')[:limit]
-        
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
 
 
 class DocumentUploadView(APIView):
@@ -1279,9 +1310,82 @@ class AssistantMessageViewSet(viewsets.ModelViewSet):
 
         message = serializer.save()
 
+        # 🆕 Si c'est un message utilisateur, générer une réponse avec contexte
+        if message.role == 'USER':
+            self.generate_assistant_response(message, conversation)
+
         conversation.dernier_message_le = message.cree_le
         conversation.nombre_messages = (conversation.nombre_messages or 0) + 1
         conversation.save(update_fields=['dernier_message_le', 'nombre_messages'])
+
+    def generate_assistant_response(self, user_message, conversation):
+        """Génère une réponse assistant en utilisant le contexte documentaire"""
+        try:
+            # Restaurer le contexte documentaire
+            current_doc = conversation.memoire_etat.get('current_document')
+            if current_doc:
+                # Utiliser le document contextuel pour la recherche
+                from .search_index import get_document_index
+                index = get_document_index()
+                
+                # Rechercher dans le document spécifique
+                search_results = index.search_tfidf(
+                    user_message.contenu, 
+                    top_k=3,
+                    document_ids=[current_doc['document_id']]
+                )
+                
+                # Générer la réponse avec le contexte
+                response_content = f"Basé sur le document '{current_doc['document_titre']}', je peux analyser votre question.\n\n"
+                if search_results:
+                    response_content += "Voici ce que j'ai trouvé dans le document :\n\n"
+                    for payload, score in search_results[:2]:
+                        response_content += f"- {payload.get('titre', 'Section')} : {payload.get('description', '')[:200]}...\n"
+                else:
+                    response_content += "Je n'ai pas trouvé d'information spécifique dans ce document pour votre question."
+                
+                # Créer la réponse assistant
+                AssistantMessage.objects.create(
+                    conversation=conversation,
+                    role='ASSISTANT',
+                    contenu=response_content,
+                    metadata={
+                        'context_used': True,
+                        'document_id': current_doc['document_id'],
+                        'document_titre': current_doc['document_titre']
+                    }
+                )
+            else:
+                # Pas de contexte, réponse intelligente
+                response_content = "Je n'ai pas de contexte documentaire. "
+                
+                # Détecter si l'utilisateur fait référence à un document spécifique
+                user_content = user_message.contenu.lower()
+                if any(phrase in user_content for phrase in ['3eme document', '3ème document', 'troisième document', 'document n°3']):
+                    response_content += "Je vois que vous parlez du 3ème document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche. Cela me permettra de sauvegarder le contexte et de vous donner une réponse pertinente."
+                elif any(phrase in user_content for phrase in ['premier document', '1er document', 'document n°1']):
+                    response_content += "Je vois que vous parlez du premier document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
+                elif any(phrase in user_content for phrase in ['deuxième document', '2eme document', 'document n°2']):
+                    response_content += "Je vois que vous parlez du deuxième document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
+                else:
+                    response_content += "Veuillez d'abord sélectionner un document en cliquant dessus dans les résultats de recherche. Cela me permettra de sauvegarder le contexte et de vous donner une réponse pertinente sur ce document spécifique."
+                
+                AssistantMessage.objects.create(
+                    conversation=conversation,
+                    role='ASSISTANT',
+                    contenu=response_content,
+                    metadata={'context_used': False, 'hint_given': True}
+                )
+                
+        except Exception as e:
+            logging.error(f"Erreur génération réponse assistant: {e}")
+            # Réponse de fallback
+            AssistantMessage.objects.create(
+                conversation=conversation,
+                role='ASSISTANT',
+                contenu="Désolé, je n'ai pas pu traiter votre demande. Veuillez réessayer.",
+                metadata={'error': str(e)}
+            )
 
 
 @api_view(['POST'])
@@ -1455,14 +1559,17 @@ def _build_document_payload(document: Document, request=None) -> dict:
     categorie_nom = document.categorie.nom if document.categorie else None
     type_label = document.get_type_courrier_display() if document.type_courrier else None
 
-    # Essayer de r├®cup├®rer l'URL de fichier de la m├¬me fa├ºon que sur les autres ├®crans
+    # Construire l'URL de fichier directement depuis chemin_fichier
     fichier_url = None
-    if request is not None:
-        try:
-            serializer = DocumentSerializer(document, context={'request': request})
-            fichier_url = serializer.data.get('fichier_url')
-        except Exception:
-            fichier_url = None
+    if document.chemin_fichier:
+        # Toujours retourner une URL relative /media/... pour que le frontend puisse l'utiliser
+        chemin = str(document.chemin_fichier)
+        if chemin.startswith('/media/'):
+            fichier_url = chemin
+        elif chemin.startswith('media/'):
+            fichier_url = f'/{chemin}'
+        else:
+            fichier_url = f'/media/{chemin}'
 
     return {
         'id': str(document.id),
@@ -1702,6 +1809,17 @@ def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = 
         metadata['isFallback'] = True
     highlights = _build_document_highlights(metadata)
     content = _build_document_content(payload, metadata)
+    
+    # Ajouter le contexte documentaire pour l'assistant
+    document_context = {
+        'document_id': payload['id'],
+        'document_titre': payload['titre'],
+        'document_content': payload.get('description', ''),
+        'chunk_page': payload.get('chunk_page'),
+        'chunk_ordre': payload.get('chunk_ordre'),
+        'search_score': round(float(score), 6)
+    }
+    
     return {
         'id': payload['id'],
         'titre': payload['titre'],
@@ -1709,6 +1827,7 @@ def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = 
         'metadata': metadata,
         'highlights': highlights,
         'content': content,
+        'document_context': document_context,  # ← NOUVEAU
     }
 
 
@@ -1809,7 +1928,7 @@ def assistant_document_search_faiss_view(request):
     if doc_matrix.size == 0:
         return Response({'results': []})
 
-    faiss.normalize_L2(doc_matrix)
+    get_faiss().normalize_L2(doc_matrix)
 
     query_vector = vectorizer.transform([query]).astype(np.float32).toarray()
     if query_vector.size == 0 or not np.any(query_vector):
@@ -1820,9 +1939,9 @@ def assistant_document_search_faiss_view(request):
                 return Response({'results': [_build_assistant_result(payload, 0.0, is_fallback=True)]})
         return Response({'results': []})
 
-    faiss.normalize_L2(query_vector)
+    get_faiss().normalize_L2(query_vector)
 
-    index = faiss.IndexFlatIP(doc_matrix.shape[1])
+    index = get_faiss().IndexFlatIP(doc_matrix.shape[1])
     index.add(doc_matrix)
 
     distances, indices = index.search(query_vector, max(top_k, 1))
@@ -2013,7 +2132,7 @@ def assistant_semantic_search_view(request):
                 
                 # Créer l'index FAISS avec les embeddings sémantiques
                 dimension = doc_embeddings.shape[1]
-                index = faiss.IndexFlatIP(dimension)
+                index = get_faiss().IndexFlatIP(dimension)
                 index.add(doc_embeddings.astype(np.float32))
                 
                 # Rechercher les documents les plus similaires
@@ -2091,7 +2210,11 @@ def assistant_semantic_search_view(request):
     # Fallback sur TF-IDF si la recherche sémantique échoue ou n'est pas disponible.
     # On privilégie les chunks de documents (texte extrait des PDF) s'ils sont disponibles.
     try:
-        chunks_qs = DocumentChunk.objects.filter(document__in=documents)
+        chunks_qs = DocumentChunk.objects.filter(
+            document__in=documents
+        ).extra(
+            where=["LENGTH(texte) >= 50"]  # Ignorer les chunks trop petits (bruit)
+        )
         chunks = list(
             chunks_qs.select_related(
                 'document__categorie',
@@ -2201,6 +2324,196 @@ def assistant_semantic_search_view(request):
 
 
 setattr(assistant_semantic_search_view, 'ressource', 'documents')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_set_document_context_view(request):
+    """Définit le contexte documentaire courant pour l'assistant."""
+    try:
+        document_id = request.data.get('document_id')
+        document_content = request.data.get('document_content', '')
+        document_titre = request.data.get('document_titre', '')
+        
+        if not document_id:
+            return Response({'detail': 'document_id requis'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Mettre à jour la mémoire de conversation
+        conversation_id = request.data.get('conversation_id')
+        if conversation_id:
+            try:
+                conversation = AssistantConversation.objects.get(
+                    id=conversation_id, 
+                    utilisateur=request.user
+                )
+                # Sauvegarder le contexte dans la mémoire
+                conversation.memoire_etat['current_document'] = {
+                    'document_id': document_id,
+                    'document_titre': document_titre,
+                    'document_content': document_content[:1000],  # Limiter la taille
+                    'set_at': timezone.now().isoformat()
+                }
+                conversation.save(update_fields=['memoire_etat'])
+            except AssistantConversation.DoesNotExist:
+                pass
+        
+        return Response({
+            'document_id': document_id,
+            'document_titre': document_titre,
+            'context_set': True
+        })
+        
+    except Exception as e:
+        logging.error(f"Erreur set document context: {e}")
+        return Response(
+            {'detail': 'Erreur lors de la définition du contexte'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+setattr(assistant_set_document_context_view, 'ressource', 'documents')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_chat_view(request):
+    """Endpoint de chat avec contexte documentaire"""
+    try:
+        question = request.data.get('question', '').strip()
+        conversation_id = request.data.get('conversation_id')
+        
+        if not question:
+            return Response({'detail': 'question requise'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not conversation_id:
+            return Response({'detail': 'conversation_id requis'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Récupérer la conversation
+        try:
+            conversation = AssistantConversation.objects.get(
+                id=conversation_id,
+                utilisateur=request.user
+            )
+        except AssistantConversation.DoesNotExist:
+            return Response({'detail': 'Conversation non trouvée'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Créer le message utilisateur
+        user_message = AssistantMessage.objects.create(
+            conversation=conversation,
+            role='USER',
+            contenu=question,
+            metadata={'search_query': question}
+        )
+        
+        # Générer la réponse avec contexte
+        current_doc = conversation.memoire_etat.get('current_document')
+        
+        if current_doc:
+            # Utiliser le contexte documentaire
+            from .search_index import get_document_index
+            index = get_document_index()
+            
+            # Rechercher dans le document spécifique
+            search_results = index.search_tfidf(
+                question, 
+                top_k=3,
+                document_ids=[current_doc['document_id']]
+            )
+            
+            # Construire la réponse
+            response_content = f"Basé sur le document '{current_doc['document_titre']}', voici ce que je peux vous dire :\n\n"
+            
+            if search_results:
+                for payload, score in search_results[:2]:
+                    response_content += f"• {payload.get('titre', 'Section')} : {payload.get('description', '')[:300]}...\n\n"
+            else:
+                # Fallback : utiliser le contenu du document
+                doc_content = current_doc.get('document_content', '')
+                if doc_content:
+                    response_content += f"Contenu du document :\n{doc_content[:500]}...\n\n"
+                    response_content += "Je n'ai pas trouvé d'information spécifique pour votre question, mais voici le début du document."
+                else:
+                    response_content += "Je n'ai pas pu accéder au contenu détaillé de ce document."
+            
+            # Créer la réponse assistant
+            assistant_message = AssistantMessage.objects.create(
+                conversation=conversation,
+                role='ASSISTANT',
+                contenu=response_content,
+                metadata={
+                    'context_used': True,
+                    'document_id': current_doc['document_id'],
+                    'document_titre': current_doc['document_titre'],
+                    'search_results_count': len(search_results) if search_results else 0
+                }
+            )
+            
+            # Retourner les pièces justificatives
+            pieces = []
+            if search_results:
+                for payload, score in search_results:
+                    pieces.append({
+                        'id': payload.get('id', ''),
+                        'source': payload.get('titre', ''),
+                        'content': payload.get('description', ''),
+                        'metadata': {
+                            'titre': payload.get('titre', ''),
+                            'client': payload.get('client', ''),
+                            'exercice': payload.get('exercice', ''),
+                            'type': payload.get('type', ''),
+                            'date_document': payload.get('date_document', ''),
+                            'fichier_url': payload.get('fichier_url', '')
+                        },
+                        'score': float(score),
+                        'document_context': current_doc
+                    })
+            
+        else:
+            # Pas de contexte documentaire
+            user_content = question.lower()
+            response_content = "Je n'ai pas de contexte documentaire. "
+            
+            if any(phrase in user_content for phrase in ['3eme document', '3ème document', 'troisième document', 'document n°3']):
+                response_content += "Je vois que vous parlez du 3ème document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
+            elif any(phrase in user_content for phrase in ['premier document', '1er document', 'document n°1']):
+                response_content += "Je vois que vous parlez du premier document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
+            else:
+                response_content += "Veuillez d'abord sélectionner un document en cliquant dessus dans les résultats de recherche."
+            
+            assistant_message = AssistantMessage.objects.create(
+                conversation=conversation,
+                role='ASSISTANT',
+                contenu=response_content,
+                metadata={'context_used': False}
+            )
+            
+            pieces = []
+        
+        # Mettre à jour la conversation
+        conversation.dernier_message_le = assistant_message.cree_le
+        conversation.nombre_messages = (conversation.nombre_messages or 0) + 1
+        conversation.save(update_fields=['dernier_message_le', 'nombre_messages'])
+        
+        # Retourner la réponse
+        return Response({
+            'question': question,
+            'resume': assistant_message.contenu,
+            'pieces': pieces,
+            'narration': {
+                'texte': assistant_message.contenu,
+                'source': 'contextual' if current_doc else 'no_context'
+            }
+        })
+        
+    except Exception as e:
+        logging.error(f"Erreur assistant chat: {e}")
+        return Response(
+            {'detail': 'Erreur lors du traitement de votre demande'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+setattr(assistant_chat_view, 'ressource', 'documents')
 
 
 # ============================================================================

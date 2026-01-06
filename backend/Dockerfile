@@ -20,6 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     curl \
+    tesseract-ocr \
+    tesseract-ocr-fra \
+    poppler-utils \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgthread-2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copier les requirements et installer les dépendances Python

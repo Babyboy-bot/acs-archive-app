@@ -452,7 +452,7 @@ type DocumentDetail = {
 
 const API_BASE_URL = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
 const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
-const DEFAULT_TOP_K = 30 // Permet de remonter davantage de documents pertinents (ex: plusieurs avenants)
+const DEFAULT_TOP_K = 15 // Optimisé pour des recherches plus rapides tout en gardant assez de résultats pertinents
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000
 const USE_FAISS = process.env.NEXT_PUBLIC_ASSISTANT_USE_FAISS === 'true'
@@ -844,18 +844,18 @@ function classifierSimple(question: string, criteresExtraits: CriteresRecherche)
     return 'recherche_document'
   }
 
-  // 4. Assurance / courtage → LLM-only
-  if (estQuestionAssuranceCourtage(question)) {
-    return 'assurance_courtage'
-  }
-  
-  // 5. Questions sur les statistiques → recherche aussi
+  // 4. Questions sur les statistiques → recherche
   if (/\b(combien|statistique|stats|nombre|total|compte)\b/.test(lower)) {
     return 'recherche_document'
   }
   
-  // 7. Par défaut → clarification (éviter les faux "hors périmètre" sur des demandes implicites)
-  return 'clarification'
+  // 5. Mots-clés assurance/documents → recherche de documents (simplifié)
+  if (estQuestionAssuranceCourtage(question)) {
+    return 'recherche_document'
+  }
+  
+  // 6. Par défaut → recherche de documents (l'assistant est focalisé sur les archives)
+  return 'recherche_document'
 }
 
 function estReponseLlmFiller(content: string): boolean {
@@ -2077,7 +2077,7 @@ export async function POST(request: Request) {
       questionOriginale = choixClarif.reste
         ? `${clarif.questionBase}\n\nPrécision utilisateur: ${choixClarif.reste}`
         : clarif.questionBase
-      modeAssistantForce = choixClarif.choix === 'A' ? 'assurance_courtage' : 'recherche_document'
+      modeAssistantForce = 'recherche_document'
       clarificationResolue = true
     }
     
@@ -2161,7 +2161,7 @@ export async function POST(request: Request) {
     // =========================================================================
     if (modeAssistant === 'confirmation') {
       const narrationTexte =
-        "D'accord. Dis-moi ce que tu souhaites que je fasse (recherche de documents ACS, ou question assurance/courtage)."
+        "D'accord. Dis-moi ce que tu souhaites rechercher dans les archives ACS. Par exemple : 'Documents du client 3CB' ou 'Factures 2023'."
 
       const reponseConv: AssistantResponse = {
         question: questionOriginale,
@@ -2178,97 +2178,9 @@ export async function POST(request: Request) {
       return NextResponse.json(reponseConv)
     }
 
-    if (modeAssistant === 'clarification') {
-      const message =
-        "Je peux t'aider de deux façons. Réponds A pour une explication (assurance/courtage), ou B pour rechercher dans les archives."
-
-      const reponseClarification: AssistantResponse = {
-        question: questionOriginale,
-        type: 'documents',
-        resume: message,
-        pieces: [],
-        insights: [],
-        actions: [],
-        narration: { texte: message, source: 'heuristique' },
-      }
-
-      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
-      await addToConversationWithPersistence(sessionId, 'assistant', message, token)
-      return NextResponse.json(reponseClarification)
-    }
-
-    if (modeAssistant === 'assurance_courtage') {
-      const startedAtAssurance = Date.now()
-      incrementRequest('documents')
-
-      const criteresPourAmbiguite = extraireCriteresRecherche(questionOriginale)
-      const estAmbigue = clarificationResolue
-        ? false
-        : estQuestionAssuranceCourtageAmbigue(questionOriginale, criteresPourAmbiguite)
-
-      let narration: AssistantResponse['narration'] = {
-        texte:
-          "Je peux répondre aux questions d’assurance/courtage, mais le service LLM est momentanément indisponible. Réessaie dans quelques instants.",
-        source: 'heuristique',
-      }
-
-      if (isLlmConfigured()) {
-        try {
-          const { content, telemetry } = await generateLlmAnswer({
-            question: questionOriginale,
-            intent: 'documents',
-            sessionId,
-            token,
-            customSystemPrompt: estAmbigue ? buildClarificationSystemPrompt() : buildConversationSystemPrompt(),
-          })
-
-          if (estReponseLlmFiller(content)) {
-            throw new Error('Réponse LLM vide ou insuffisante')
-          }
-
-          narration = {
-            texte: content,
-            source: 'llm',
-            telemetry,
-          }
-          incrementLlmSuccess()
-          if (telemetry) {
-            await logLlmUsage(telemetry, 'answer', token)
-          }
-        } catch (llmError) {
-          console.warn('LLM indisponible (assurance/courtage).', llmError)
-          incrementLlmFallback()
-        }
-      } else {
-        console.warn('LLM non configuré côté front (assurance/courtage). Vérifie MISTRAL_API_KEY dans front/.env.local')
-      }
-
-      const reponseAssurance: AssistantResponse = {
-        question: questionOriginale,
-        type: 'documents',
-        resume: narration.texte,
-        pieces: [],
-        insights: [],
-        actions: [],
-        narration,
-      }
-
-      journaliserAssistant({
-        type: 'response',
-        intent: 'documents',
-        durationMs: Date.now() - startedAtAssurance,
-        pieces: 0,
-        llmUsed: narration.source === 'llm',
-      })
-
-      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
-      await addToConversationWithPersistence(sessionId, 'assistant', narration.texte, token)
-      return NextResponse.json(reponseAssurance)
-    }
-
     if (modeAssistant === 'hors_perimetre') {
       const message =
-        "Je peux uniquement (1) rechercher des documents liés à ACS et (2) répondre aux questions liées à l’assurance et au courtage. Reformule ta demande dans ce cadre."
+        "Je peux uniquement rechercher des documents dans les archives ACS. Reformule ta demande, par exemple : 'Documents du client 3CB' ou 'Factures 2023'."
       const reponseHorsPerimetre: AssistantResponse = {
         question: questionOriginale,
         type: 'documents',

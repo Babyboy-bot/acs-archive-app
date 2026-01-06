@@ -15,7 +15,7 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import Blob3D from "@/components/ui/Blob3D";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
-import { NotificationsDocuments } from "@/components/NotificationsDocuments";
+// PdfThumbnail retiré - on utilise iframe directement avec l'URL media
 
 // 🚀 PRO: Type pour les suggestions de clients
 type ClientSuggestion = {
@@ -107,13 +107,10 @@ function genererSuggestionsIntelligentes(messages: Message[]): string[] {
 
 const SUGGESTIONS_DEFAUT = [
   "Avenant N° 0529 2024 de 3CB risque MRP",
-  "Avenant divers 2025 de 3CB risque santé",
-  "divers 2025 de 3CB risque sante ",
-const SUGGESTIONS = [
-  "Recherche le document Avenant N° 0529 2024 de 3CB risque MRP",
-  "Donne moi le bilan du système",
-  "Qu'est ce qu'un risque dans notre contexte ?",
+  "Avenant N°0018 exercice 1998 du client ACS risque santé",
+  "Courriers ACS-Compagnie 1998 du client ACS risque santé",
 ];
+
 
 const LOCAL_STORAGE_KEY = "acs-assistant-conversation-v1";
 const ACTIVE_CONVERSATION_KEY = "acs-assistant-active-conversation-id";
@@ -396,6 +393,7 @@ export default function ConsultantChatPage() {
     };
   };
 
+  
   const envoyerMessage = async (e: FormEvent) => {
     e.preventDefault();
     const question = input.trim();
@@ -1036,15 +1034,6 @@ export default function ConsultantChatPage() {
           </button>
 
           <div className="flex items-center gap-4">
-            {/* 🔔 Notifications nouveaux documents */}
-            <NotificationsDocuments 
-              isDark={isDark} 
-              onDocumentClick={(doc) => {
-                // Insérer une recherche pour ce document
-                setInput(`document ${doc.titre || doc.id}`);
-              }}
-            />
-            
             <button
               onClick={() => setTheme(isDark ? "light" : "dark")}
               aria-label={isDark ? "Mode clair" : "Mode sombre"}
@@ -1289,12 +1278,18 @@ export default function ConsultantChatPage() {
                                             );
                                           }
 
-                                          if (isPdf && proxyUrl) {
+                                          if (isPdf && piece.metadata?.fichier_url) {
+                                            // Utiliser l'URL directe /media/ car nginx sert ces fichiers sans auth
+                                            const fichierUrl = piece.metadata.fichier_url as string;
+                                            const mediaUrl = fichierUrl.startsWith('/media/')
+                                              ? fichierUrl
+                                              : `/media/${fichierUrl.replace(/^\//, '')}`;
+                                            console.log('[PDF Thumbnail] fichier_url:', fichierUrl, '-> mediaUrl:', mediaUrl);
                                             return (
                                               <iframe
-                                                src={`${proxyUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                                                src={`${mediaUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
                                                 className="w-full h-full border-0 pointer-events-none"
-                                                title={piece.metadata?.titre || "PDF"}
+                                                title={(piece.metadata?.titre as string) || "PDF"}
                                               />
                                             );
                                           }

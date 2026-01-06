@@ -7,11 +7,14 @@ from datetime import timedelta
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables
+# - backend/.env (si présent)
+# - .env à la racine du repo (fallback), utile quand on lance runserver depuis backend/
+load_dotenv(BASE_DIR.parent / '.env', override=False)
+load_dotenv(BASE_DIR / '.env', override=False)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # La clé ne doit jamais avoir de valeur par défaut en clair dans le code.
@@ -158,7 +161,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'api.pagination.StandardResultsSetPagination',
     'PAGE_SIZE': 50,
     'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%S.%fZ',
     'DEFAULT_RENDERER_CLASSES': (
@@ -236,7 +239,7 @@ if DEBUG:
 else:
     CORS_ALLOWED_ORIGINS = os.getenv(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:3010,http://127.0.0.1:3010,http://localhost:3000,http://127.0.0.1:3000'
+        'http://localhost:3010,http://127.0.0.1:3010,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001'
     ).split(',')
 
 CORS_ALLOW_CREDENTIALS = True

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # Configuration du chunking
 DEFAULT_CHUNK_SIZE = 1500  # Taille cible en caractères
 DEFAULT_CHUNK_OVERLAP = 200  # Overlap entre chunks
-MIN_CHUNK_SIZE = 100  # Taille minimum d'un chunk
+MIN_CHUNK_SIZE = 200  # Taille minimum d'un chunk
 MAX_CHUNK_SIZE = 3000  # Taille maximum d'un chunk
 
 

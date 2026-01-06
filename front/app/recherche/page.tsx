@@ -237,12 +237,28 @@ const RISQUE_THEMES: Record<string, RisqueTheme> = {
 
 const normalizeRisqueKey = (value?: string | null) => {
   if (!value) return ''
-  return value
+  const sanitizedValue = value
+    .replace(/\?\?/g, 'E')
+    .replace(/\uFFFD/g, 'E')
+
+  return sanitizedValue
     .normalize('NFD')
     .replace(/[^0-9a-zA-Z\s-]/g, '')
     .replace(/[\s-]+/g, '_')
     .normalize('NFC')
     .toUpperCase()
+}
+
+const normalizeLooseText = (value?: string | null) => {
+  if (!value) return ''
+  return value
+    .replace(/\?\?/g, 'E')
+    .replace(/\uFFFD/g, 'E')
+    .normalize('NFD')
+    .replace(/[^0-9a-zA-Z\s-]/g, '')
+    .normalize('NFC')
+    .trim()
+    .toLowerCase()
 }
 
 const RISQUE_FALLBACK_TYPES = [
@@ -389,14 +405,19 @@ export default function PageRecherche() {
         const clientDoc = info?.client ?? ''
         const anneeDoc = info?.annee ? String(info.annee) : ''
         const risqueDoc = (doc.risque_detail?.type ?? '').toUpperCase()
-        const typeCourrierDoc = doc.type_courrier ?? ''
+        const typeCourrierDoc = (doc.type_courrier ?? '').trim().toUpperCase()
+
+        const risqueDocKey = normalizeRisqueKey(risqueDoc)
+        const risqueCritereKey = normalizeRisqueKey(criteres.risque)
 
         const matchClient = criteres.client
-          ? clientDoc.toLowerCase().includes(criteres.client.toLowerCase())
+          ? normalizeLooseText(clientDoc).includes(normalizeLooseText(criteres.client))
           : true
         const matchExercice = criteres.exercice ? anneeDoc === criteres.exercice : true
-        const matchRisque = criteres.risque ? risqueDoc === criteres.risque.toUpperCase() : true
-        const matchTypeCourrier = criteres.typeCourrier ? typeCourrierDoc === criteres.typeCourrier : true
+        const matchRisque = criteres.risque ? risqueDocKey === risqueCritereKey : true
+        const matchTypeCourrier = criteres.typeCourrier
+          ? typeCourrierDoc === (criteres.typeCourrier ?? '').trim().toUpperCase()
+          : true
 
         return matchClient && matchExercice && matchRisque && matchTypeCourrier
       })
@@ -536,138 +557,6 @@ export default function PageRecherche() {
     } finally {
       setChargement(false)
     }
-  }
-
-  const imprimerResultat = (doc: (typeof resultatsAffiches)[number]) => {
-    const url = extraireUrlDocument(doc)
-    if (!url) {
-      setErreurTelechargement("Document introuvable sur le serveur")
-      return
-    }
-
-    setErreurTelechargement(null)
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const resolvedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : buildApiUrl(url)
-    const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`
-
-    const startPrint = async () => {
-      try {
-        const headers = new Headers({ Accept: 'application/pdf,image/*' })
-        const token = getToken()
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`)
-        }
-
-        const response = await fetch(proxyUrl, {
-          credentials: 'include',
-          headers,
-        })
-
-        if (!response.ok) {
-          throw new Error(`Erreur ${response.status}`)
-        }
-
-        const blob = await response.blob()
-        const mime = blob.type || response.headers.get('content-type') || ''
-        const candidateUrl = doc.fichierUrl ?? resolvedUrl ?? ''
-        const isPdf =
-          mime.includes('pdf') ||
-          (!mime || mime === 'application/octet-stream') && /\.pdf(?:$|\?|#)/i.test(candidateUrl)
-
-        const blobUrl = URL.createObjectURL(blob)
-        const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700')
-
-        if (!printWindow) {
-          URL.revokeObjectURL(blobUrl)
-          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
-          return
-        }
-
-        const sanitize = (value: string) =>
-          value
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-
-        const titreNettoye = sanitize(doc.titre || 'Document')
-
-        const scriptContent = isPdf
-          ? `const iframe = document.querySelector('iframe');
-            const triggerPrint = () => {
-              try {
-                iframe.contentWindow?.focus?.();
-                iframe.contentWindow?.print?.();
-              } catch (e) {
-                window.focus();
-                window.print();
-              }
-              setTimeout(() => window.close(), 500);
-            };
-            if (iframe) {
-              iframe.addEventListener('load', triggerPrint);
-            } else {
-              triggerPrint();
-            }`
-          : `const image = document.querySelector('img');
-            const triggerPrint = () => {
-              try {
-                window.focus();
-                window.print();
-              } catch (e) {
-                window.print();
-              }
-              setTimeout(() => window.close(), 500);
-            };
-            if (!image) {
-              triggerPrint();
-            } else if (image.complete) {
-              triggerPrint();
-            } else {
-              image.addEventListener('load', triggerPrint);
-            }`
-
-        printWindow.document.open()
-        printWindow.document.write(`<!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="utf-8" />
-              <title>Impression - ${titreNettoye}</title>
-              <style>
-                html, body { margin: 0; padding: 0; height: 100%; }
-                iframe, img { width: 100%; height: 100%; border: 0; display: block; }
-                img { object-fit: contain; background: #fff; }
-              </style>
-            </head>
-            <body>
-              ${isPdf ? `<iframe src="${blobUrl}"></iframe>` : `<img src="${blobUrl}" alt="${titreNettoye}" />`}
-              <script>
-                ${scriptContent.replace(/<\//g, '<\\/')}
-              <\/script>
-            </body>
-          </html>`)
-        printWindow.document.close()
-
-        const cleanup = () => {
-          URL.revokeObjectURL(blobUrl)
-          printWindow.removeEventListener('beforeunload', cleanup)
-        }
-        printWindow.addEventListener('beforeunload', cleanup)
-      } catch (error: any) {
-        console.error('Impression recherche', error)
-        setErreurTelechargement(error?.message ?? "Impossible d'imprimer le document")
-        if (error instanceof Error && error.name === 'SecurityError') {
-          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
-          return
-        }
-        window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
-      }
-    }
-
-    void startPrint()
   }
 
   const reinitialiser = () => {
@@ -1186,13 +1075,6 @@ export default function PageRecherche() {
                       </div>
 
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        <button 
-                          className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-muted rounded-lg transition-colors" 
-                          title="Imprimer"
-                          onClick={(event) => { event.stopPropagation(); imprimerResultat(doc) }}
-                        >
-                          <Icon name="print" size="sm" />
-                        </button>
                         <button 
                           className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors" 
                           title="Voir"

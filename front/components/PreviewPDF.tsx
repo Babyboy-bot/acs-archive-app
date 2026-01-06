@@ -109,7 +109,7 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
 
   useEffect(() => {
     setZoom(40)
-    setResourceType('unknown')
+    // Ne pas réinitialiser resourceType ici car il est déjà défini correctement dans chargerPdf()
   }, [previewUrl])
 
   const hasDocument = Boolean(previewUrl)
@@ -310,18 +310,19 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
                         />
                       </div>
                     ) : (
-                      <div className="w-full h-full overflow-auto">
-                        <div style={viewerWrapperStyle}>
-                          <object
-                            data={previewUrl ?? undefined}
-                            type="application/pdf"
-                            className="w-full h-full rounded-lg border border-gray-200 shadow-sm"
-                          >
-                            <p className="p-6 text-center text-sm text-gray-500">
-                              Impossible d'afficher le PDF dans votre navigateur. Vous pouvez le télécharger ou l'ouvrir dans un nouvel onglet.
-                            </p>
-                          </object>
-                        </div>
+                      <div className="w-full h-full overflow-auto" style={{ minHeight: '500px' }}>
+                        <iframe
+                          src={previewUrl ?? undefined}
+                          title={titre}
+                          className="w-full rounded-lg border border-gray-200 shadow-sm"
+                          style={{
+                            height: `${100 / scale}%`,
+                            minHeight: '500px',
+                            transform: `scale(${scale})`,
+                            transformOrigin: 'top left',
+                            width: `${100 / scale}%`,
+                          }}
+                        />
                       </div>
                     )
                   ) : (

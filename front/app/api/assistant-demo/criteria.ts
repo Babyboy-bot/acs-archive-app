@@ -20,8 +20,6 @@ export type CriteresRecherche = {
 
 export type ModeAssistant =
   | 'recherche_document'
-  | 'assurance_courtage'
-  | 'clarification'
   | 'hors_perimetre'
   | 'salutation'
   | 'confirmation'
@@ -327,9 +325,9 @@ export function classifierSimple(question: string, criteresExtraits: CriteresRec
     return 'recherche_document'
   }
 
-  // 4. Assurance / courtage → LLM-only
+  // 4. Mots-clés assurance/documents → recherche de documents
   if (estQuestionAssuranceCourtage(question)) {
-    return 'assurance_courtage'
+    return 'recherche_document'
   }
   
   // 5. Questions sur les statistiques

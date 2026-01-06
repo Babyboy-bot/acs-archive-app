@@ -39,6 +39,8 @@ from .views import (
     health_check,
     ready_check,
     version_info,
+    assistant_set_document_context_view,  # Ajout de l'import
+    assistant_chat_view,
 )
 
 # Router pour les ViewSets
@@ -65,6 +67,8 @@ urlpatterns = [
     path('assistant/documents/search/tfidf/', assistant_document_search_view, name='assistant-document-search-tfidf'),
     path('assistant/documents/search/faiss/', assistant_document_search_faiss_view, name='assistant-document-search-faiss'),
     path('assistant/documents/search/semantic/', assistant_semantic_search_view, name='assistant-document-search-semantic'),
+    path('assistant/documents/context/', assistant_set_document_context_view, name='assistant-set-document-context'),
+    path('assistant/chat/', assistant_chat_view, name='assistant-chat'),
     path('assistant/llm/quota/consume/', llm_quota_consume, name='assistant-llm-quota-consume'),
     path('assistant/llm/usage/', llm_usage_log, name='assistant-llm-usage-log'),
     path('assistant/llm/quota/', llm_quota_status, name='assistant-llm-quota-status'),

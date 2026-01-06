@@ -6,18 +6,58 @@ function resolveTargetUrl(rawUrl: string): string {
   // Base URL du backend (sans /api) - utiliser INTERNAL_API_BASE_URL pour les appels serveur
   const apiBase = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
   const backendBase = apiBase.replace(/\/api\/?$/, '')
+  const dockerMediaBase = apiBase.includes('backend:') ? 'http://nginx' : backendBase
+
+  const rewriteMediaIfNeeded = (candidate: string) => {
+    // En Docker, on sert /media via nginx (alias /var/www/media) pour garder un content-type correct.
+    // Si on fetch /media via Django (backend), certains fichiers peuvent être renvoyés en octet-stream
+    // ou avec des headers qui empêchent l'aperçu.
+    try {
+      const u = new URL(candidate)
+      if (u.pathname.startsWith('/media/')) {
+        // Si candidate pointe vers le backend docker, le réécrire vers nginx.
+        if (u.hostname === 'backend' || u.host === 'backend:8000') {
+          return `${dockerMediaBase}${u.pathname}${u.search}${u.hash}`
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (candidate.startsWith(`${backendBase}/media/`)) {
+      return candidate.replace(backendBase, dockerMediaBase)
+    }
+
+    return candidate
+  }
 
   // Si l'URL est absolue avec localhost:8000, la réécrire pour utiliser le hostname Docker
   if (rawUrl.startsWith('http://localhost:8000')) {
-    return rawUrl.replace('http://localhost:8000', backendBase)
+    return rewriteMediaIfNeeded(rawUrl.replace('http://localhost:8000', backendBase))
+  }
+
+  // Dans Docker, "localhost" depuis ce route handler = le conteneur frontend.
+  // Or les URLs de fichiers peuvent être générées en http://localhost/media/... côté UI.
+  // On les réécrit vers le backend pour éviter les 502.
+  if (rawUrl.startsWith('http://localhost/')) {
+    const rewritten = rawUrl.replace('http://localhost', backendBase)
+    return rewriteMediaIfNeeded(rewritten)
+  }
+
+  if (rawUrl.startsWith('http://127.0.0.1/')) {
+    const rewritten = rawUrl.replace('http://127.0.0.1', backendBase)
+    return rewriteMediaIfNeeded(rewritten)
   }
   
   if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
-    return rawUrl
+    return rewriteMediaIfNeeded(rawUrl)
   }
   
   // Si l'URL commence par /media ou /api, utiliser la base du backend
   if (rawUrl.startsWith('/media/') || rawUrl.startsWith('/api/')) {
+    if (rawUrl.startsWith('/media/')) {
+      return `${dockerMediaBase}${rawUrl}`
+    }
     return `${backendBase}${rawUrl}`
   }
   

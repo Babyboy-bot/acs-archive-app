@@ -14,7 +14,9 @@ export type RoleUtilisateurCode = SessionUtilisateur['role']
 const TOKEN_KEY = 'authToken'
 const REFRESH_KEY = 'refreshToken'
 const UTILISATEUR_KEY = 'utilisateurActif'
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? (typeof window !== 'undefined' ? '/api' : 'http://localhost:8000/api')
+const DEFAULT_BROWSER_API_BASE_URL = process.env.NODE_ENV === 'development' ? 'http://localhost:8000/api' : '/api'
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? (typeof window !== 'undefined' ? DEFAULT_BROWSER_API_BASE_URL : 'http://localhost:8000/api')
 
 function isBrowser() {
   return typeof window !== 'undefined'
