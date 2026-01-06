@@ -12,7 +12,7 @@ import { supprimerSession } from '../lib/session'
 import { applyTheme, getStoredTheme, ThemeMode } from '../lib/theme'
 import { RoleUtilisateur } from '../types'
 // Import Next.js Image component for SVG handling
-import Image from 'next/image'
+// import Image from 'next/image'
 
 type MenuItem = {
   href: string
@@ -110,7 +110,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       <div className="p-4 border-b border-theme">
         <Link href="/tableau-de-bord" className="flex items-center gap-3">
           <div className="w-22 h-22 rounded-xl flex items-center justify-center text-white font-bold">
-            <Image src="/acs-logo.svg" alt="ACS Archive" width={40} height={40} />
+            <img src="/acs-logo.svg" alt="ACS Archive" width="40" height="40" />
           </div>
           <AnimatePresence>
             {!collapsed && (
