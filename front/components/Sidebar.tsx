@@ -11,7 +11,7 @@ import { canAccessSection, hasPermission, PermissionRessource } from '../lib/per
 import { supprimerSession } from '../lib/session'
 import { applyTheme, getStoredTheme, ThemeMode } from '../lib/theme'
 import { RoleUtilisateur } from '../types'
-import logo from '@/public/acs-logo.svg'
+import logo from '/acs-logo.svg'
 
 type MenuItem = {
   href: string
