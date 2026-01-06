@@ -11,6 +11,7 @@ import { canAccessSection, hasPermission, PermissionRessource } from '../lib/per
 import { supprimerSession } from '../lib/session'
 import { applyTheme, getStoredTheme, ThemeMode } from '../lib/theme'
 import { RoleUtilisateur } from '../types'
+// Import Next.js Image component for SVG handling
 import Image from 'next/image'
 
 type MenuItem = {
