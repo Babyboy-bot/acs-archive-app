@@ -33,7 +33,7 @@ class RoleBasedPermission(permissions.BasePermission):
             'assistant': ['voir', 'creer', 'modifier', 'supprimer'],
         },
         'ARCHIVISTE': {
-            'documents': ['voir', 'creer', 'modifier', 'supprimer'],
+            'documents': ['voir', 'creer', 'modifier'],
             'utilisateurs': ['voir'],
             'stats': ['voir'],
             'assistant': ['voir', 'creer', 'modifier', 'supprimer'],
