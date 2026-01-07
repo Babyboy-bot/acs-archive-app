@@ -87,7 +87,7 @@ const STATUTS_EXERCICE: { value: StatutExercice; label: string }[] = [
   { value: 'CLOTURE', label: 'Clôturé' }
 ]
 
-const ANNEE_MIN_EXERCICE = 2022
+const ANNEE_MIN_EXERCICE = 1900
 
 const SUGGESTIONS_RISQUES = [
   'Automobile',
