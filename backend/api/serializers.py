@@ -173,6 +173,14 @@ class ExerciceSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 
+    def validate_annee(self, value):
+        """Valider que l'année est raisonnable (à partir de 1900)"""
+        if value < 1900:
+            raise serializers.ValidationError("L'année doit être supérieure à 1900.")
+        if value > 2100:
+            raise serializers.ValidationError("L'année ne peut pas dépasser 2100.")
+        return value
+
     def get_risques(self, obj):
         risques = obj.risques.all().order_by('type')
         return RisqueSerializer(risques, many=True, context=self.context).data
