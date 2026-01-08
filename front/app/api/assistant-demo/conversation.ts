@@ -76,18 +76,25 @@ export type DocumentSelection = {
   metadata: Record<string, unknown>
 }
 
+/**
+ * Durée d'expiration du contexte (en millisecondes)
+ * Après ce délai, les références contextuelles ("même client", "lui", etc.) ne sont plus valides
+ */
+export const CONTEXT_EXPIRATION_MS = 10 * 60 * 1000 // 10 minutes
+
 export type StructuredMemory = {
   objectif_principal: string
   entites: {
-    client: { valeur: string | null; lock: boolean }
-    annee: { valeur: string | null; lock: boolean }
-    risque: { valeur: string | null; lock: boolean }
-    type_document: { valeur: string | null; lock: boolean }
+    client: { valeur: string | null; lock: boolean; timestamp?: number; confirmed?: boolean }
+    annee: { valeur: string | null; lock: boolean; timestamp?: number; confirmed?: boolean }
+    risque: { valeur: string | null; lock: boolean; timestamp?: number; confirmed?: boolean }
+    type_document: { valeur: string | null; lock: boolean; timestamp?: number; confirmed?: boolean }
   }
   focus_actuel: {
     type: 'documents' | 'client' | 'statistiques' | null
     valeur: string | null
     selection: DocumentSelection[] // Liste des documents affichés
+    timestamp?: number // Timestamp de la dernière mise à jour
   }
   documents: {
     mentionnes: string[]
@@ -103,12 +110,75 @@ export type StructuredMemory = {
   resultats: {
     documents_trouves: number // Nombre brut, pas de texte libre
     derniere_recherche: string | null
+    timestamp?: number // Timestamp de la dernière recherche
   }
   sujets_abordes: string[]
   dernieres_conclusions: string[]
   etat_conversation: 'salutation' | 'recherche_en_cours' | 'resultats_affiches' | 'question_generale' | 'hors_sujet'
   // Sprint 3: Pile de contextes pour return_subject
   contextStack: ContextSnapshot[]
+  // Timestamp de la dernière activité (pour expiration)
+  lastActivityTimestamp?: number
+}
+
+/**
+ * Vérifie si le contexte est expiré (plus de CONTEXT_EXPIRATION_MS depuis la dernière activité)
+ */
+export function isContextExpired(memory: StructuredMemory): boolean {
+  if (!memory.lastActivityTimestamp) return true
+  return Date.now() - memory.lastActivityTimestamp > CONTEXT_EXPIRATION_MS
+}
+
+/**
+ * Récupère une entité du contexte seulement si elle n'est pas expirée
+ * Retourne null si l'entité est expirée ou non confirmée
+ */
+export function getValidContextEntity(
+  memory: StructuredMemory,
+  entity: 'client' | 'annee' | 'risque' | 'type_document'
+): string | null {
+  const entite = memory.entites[entity]
+  if (!entite.valeur) return null
+  
+  // Vérifier l'expiration globale
+  if (isContextExpired(memory)) {
+    console.log(`Contexte expiré: ${entity} ignoré`)
+    return null
+  }
+  
+  // Vérifier l'expiration spécifique de l'entité
+  if (entite.timestamp && Date.now() - entite.timestamp > CONTEXT_EXPIRATION_MS) {
+    console.log(`Entité ${entity} expirée`)
+    return null
+  }
+  
+  return entite.valeur
+}
+
+/**
+ * Met à jour une entité en mémoire de manière protégée
+ * - Ne met à jour que si confirmed=true (valeur explicite ou issue d'une recherche réussie)
+ * - Ajoute le timestamp pour l'expiration
+ */
+export function updateEntityProtected(
+  memory: StructuredMemory,
+  entity: 'client' | 'annee' | 'risque' | 'type_document',
+  value: string | null,
+  confirmed: boolean = false
+): void {
+  if (!confirmed && value !== null) {
+    // Valeur devinée → ne pas écrire en mémoire
+    console.log(`Entité ${entity}="${value}" non confirmée → ignorée`)
+    return
+  }
+  
+  memory.entites[entity] = {
+    valeur: value,
+    lock: memory.entites[entity].lock,
+    timestamp: Date.now(),
+    confirmed,
+  }
+  memory.lastActivityTimestamp = Date.now()
 }
 
 /**
@@ -305,9 +375,12 @@ export function isDocumentFollowUpQuestion(question: string, memory: StructuredM
     /^explique[- ]le$/i,
     /^c'?est quoi\??$/i,
     /^de quoi (ca|ça) parle\??$/i,
-    // Patterns avec index (le 1er, le 2ème, le dernier)
+    // Patterns avec index (le 1er, le 2ème, le dernier, le premier document)
     /\b(resume|analyse|explique|montre|ouvre)\s+(le\s+)?(1er|2e|2eme|3e|3eme|premier|deuxieme|troisieme|dernier)\s*(document)?/i,
     /\b(le\s+)?(1er|2e|2eme|3e|3eme|premier|deuxieme|troisieme|dernier)\s*(document)?\s*,?\s*(resume|analyse|explique)/i,
+    // Patterns avec "le contenu du Xème document"
+    /\b(resume|analyse|explique)\s+(le\s+)?contenu\s+(du\s+)?(1er|2e|2eme|3e|3eme|premier|deuxieme|troisieme|dernier)\s*(document)?/i,
+    /\b(le\s+)?contenu\s+(du\s+)?(1er|2e|2eme|3e|3eme|premier|deuxieme|troisieme|dernier)\s*(document)?/i,
   ]
   
   return followUpPatterns.some(pattern => pattern.test(lower))
@@ -362,17 +435,14 @@ export function getDocumentFromSelection(
     return null
   }
   
-  // Si pas d'index spécifié et un seul document, le retourner
-  if (index === null && selection.length === 1) {
-    return selection[0]
-  }
-  
   // Si index spécifié, chercher le document
   if (index !== null && index > 0 && index <= selection.length) {
     return selection.find(doc => doc.numero === index) || selection[index - 1] || null
   }
   
-  return null
+  // Si pas d'index spécifié, retourner le premier document par défaut
+  // (comportement attendu: "resume le contenu" → premier document)
+  return selection[0]
 }
 
 /**

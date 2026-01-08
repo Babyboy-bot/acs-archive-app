@@ -9,7 +9,7 @@ import {
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, extractDocumentIndex, getDocumentFromSelection, CONFIDENCE_THRESHOLD, type DocumentSelection } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, extractDocumentIndex, getDocumentFromSelection, isContextExpired, getValidContextEntity, updateEntityProtected, CONFIDENCE_THRESHOLD, CONTEXT_EXPIRATION_MS, classifyIntention, convertLlmIndexToSystemIndex, calculerScoreQualiteOcr, SEUILS_CONFIANCE, type DocumentSelection, type ClassificationResult, type ClassificationContext, type OcrQualityResult, type CriteresExtraits } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -35,6 +35,7 @@ import {
   TYPES_RISQUES,
   REFERENCE_PATTERNS,
   extraireCriteresRecherche as extraireCriteresCriteria,
+  loadValidClients,
   classifierSimple as classifierSimpleCriteria,
   estQuestionAssuranceCourtage as estQuestionAssuranceCourtageCriteria,
   estQuestionComptageContextuel as estQuestionComptageContextuelCriteria,
@@ -2062,6 +2063,10 @@ export async function POST(request: Request) {
     const startedAt = Date.now()
     const sessionId = generateSessionId(token)
 
+    // Charger la liste des clients valides (liste blanche) pour éviter les faux positifs
+    // Cette liste est mise en cache pendant 5 minutes
+    await loadValidClients(token)
+
     // Hydrater l'historique depuis la persistance si nécessaire (utile en dev / hot-reload)
     // Important : on doit hydrater AVANT de traiter une réponse A/B, sinon on ne retrouve pas
     // la dernière question de clarification et on boucle.
@@ -2096,15 +2101,67 @@ export async function POST(request: Request) {
     }
     
     // =========================================================================
-    // MODE SUIVI DOCUMENT - Détecte les questions sur le document actif
+    // MODE SUIVI DOCUMENT - Classification LLM légère + fallback patterns
     // =========================================================================
     const currentMemory = getStructuredMemory(sessionId)
-    const isFollowUpOnDocument = isDocumentFollowUpQuestion(questionOriginale, currentMemory)
+    const selectionCount = currentMemory.focus_actuel.selection?.length || 0
+    
+    // Récupérer le contexte précédent (client, année, risque) depuis la mémoire
+    // Utilise getValidContextEntity pour vérifier l'expiration (10 min)
+    const lastClient = getValidContextEntity(currentMemory, 'client') || criteresQuestion.client || null
+    const lastAnnee = getValidContextEntity(currentMemory, 'annee') || criteresQuestion.annee || null
+    const lastRisque = getValidContextEntity(currentMemory, 'risque') || criteresQuestion.risque || null
+    
+    // Construire le contexte pour la classification
+    const classificationContext: ClassificationContext = {
+      hasDocumentsDisplayed: selectionCount > 0,
+      documentCount: selectionCount,
+      hasActiveDocument: !!currentMemory.document_actif,
+      lastSearchQuery: currentMemory.resultats.derniere_recherche || undefined,
+      lastClient: lastClient || undefined,
+      lastAnnee: lastAnnee || undefined,
+      lastRisque: lastRisque || undefined,
+    }
+    
+    // Classification LLM (toujours appelée pour détecter les références contextuelles)
+    let classification: ClassificationResult | null = null
+    let isFollowUpOnDocument = false
+    let requestedIndex: number | null = null
+    
+    // Tenter la classification LLM
+    classification = await classifyIntention(questionOriginale, classificationContext)
+    
+    if (classification) {
+      if (classification.intention === 'suivi_document') {
+        isFollowUpOnDocument = true
+        requestedIndex = convertLlmIndexToSystemIndex(classification.index_document ?? null, selectionCount)
+        console.log(`=== Classification LLM: suivi_document (index=${requestedIndex}, action=${classification.action}) ===`)
+      } else if (classification.intention === 'recherche_document' && classification.criteres) {
+        // Utiliser les critères extraits par le LLM (résout automatiquement "même client" → client réel)
+        if (classification.criteres.client) {
+          criteresQuestion.client = classification.criteres.client
+          console.log(`=== Classification LLM: client résolu → "${classification.criteres.client}" ===`)
+        }
+        if (classification.criteres.annee) {
+          criteresQuestion.annee = classification.criteres.annee
+        }
+        if (classification.criteres.type_document) {
+          criteresQuestion.typeDocument = classification.criteres.type_document
+        }
+        if (classification.criteres.risque) {
+          criteresQuestion.risque = classification.criteres.risque
+        }
+      }
+    } else if (classificationContext.hasDocumentsDisplayed || classificationContext.hasActiveDocument) {
+      // Fallback vers patterns regex si LLM échoue et qu'il y a des documents affichés
+      isFollowUpOnDocument = isDocumentFollowUpQuestion(questionOriginale, currentMemory)
+      requestedIndex = extractDocumentIndex(questionOriginale, selectionCount)
+      if (isFollowUpOnDocument) {
+        console.log(`=== Fallback patterns: suivi_document détecté ===`)
+      }
+    }
     
     if (isFollowUpOnDocument) {
-      // Extraire l'index du document si spécifié ("le 2ème", "le dernier")
-      const selectionCount = currentMemory.focus_actuel.selection?.length || 0
-      const requestedIndex = extractDocumentIndex(questionOriginale, selectionCount)
       
       // Chercher le document cible
       let targetDoc: { id: string; titre: string; contenu: string; metadata: Record<string, unknown> } | null = null
@@ -2153,6 +2210,10 @@ export async function POST(request: Request) {
           documentPrompt += `\nContenu du document:\n${contenuTronque}\n`
         }
         
+        // Calculer le score de qualité OCR du contenu
+        const ocrQuality = calculerScoreQualiteOcr(targetDoc.contenu)
+        console.log(`=== Qualité OCR: ${ocrQuality.score} (${ocrQuality.niveau}) ===`)
+        
         // Générer une réponse LLM basée sur le document
         const systemPromptDoc = `Tu es un assistant d'archivage ACS. L'utilisateur te pose une question sur un document qu'il vient de consulter.
 
@@ -2169,6 +2230,12 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
             customSystemPrompt: systemPromptDoc,
           })
           
+          // Ajouter l'avertissement OCR si nécessaire
+          let reponseFinale = llmResponse.content
+          if (ocrQuality.avertissement) {
+            reponseFinale = `${llmResponse.content}\n\n---\n${ocrQuality.avertissement}`
+          }
+          
           // Réutiliser le document comme pièce jointe
           const pieceActif: DocumentPiece = {
             id: targetDoc.id,
@@ -2181,18 +2248,18 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
           const reponseDoc: AssistantResponse = {
             question: questionOriginale,
             type: 'documents',
-            resume: llmResponse.content,
+            resume: reponseFinale,
             pieces: [], // Ne pas ré-afficher le document, juste le résumé
             insights: [],
             actions: [],
             narration: {
-              texte: llmResponse.content,
+              texte: reponseFinale,
               source: 'llm',
             },
           }
           
           await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
-          await addToConversationWithPersistence(sessionId, 'assistant', llmResponse.content, token)
+          await addToConversationWithPersistence(sessionId, 'assistant', reponseFinale, token)
           
           return NextResponse.json(reponseDoc)
         } catch (err) {

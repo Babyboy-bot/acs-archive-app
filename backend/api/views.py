@@ -1455,6 +1455,149 @@ setattr(stats_view, 'ressource', 'stats')
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def assistant_valid_clients_view(request):
+    """
+    Retourne la liste des codes/noms de clients valides pour validation.
+    Utilisé par le frontend pour éviter les faux positifs dans la détection de clients.
+    
+    Retourne:
+    - codes: Set de tous les identifiants valides (mots individuels) en majuscules
+    - clients: Liste des noms complets de clients pour la recherche floue
+    """
+    clients = Client.objects.all().values_list('nom', 'numeroClient')
+    
+    valid_codes = set()
+    full_names = []
+    
+    for nom, numero in clients:
+        if nom:
+            nom_upper = nom.upper()
+            full_names.append(nom_upper)
+            # Ajouter le nom complet
+            valid_codes.add(nom_upper)
+            # Ajouter aussi les mots individuels du nom (ex: "AFRICA RICE" → "AFRICA", "RICE")
+            # Nettoyer les caractères spéciaux comme - et _
+            cleaned = nom_upper.replace('-', ' ').replace('_', ' ')
+            for word in cleaned.split():
+                if len(word) >= 2:
+                    valid_codes.add(word)
+        if numero:
+            valid_codes.add(numero.upper())
+    
+    return Response({
+        'codes': sorted(list(valid_codes)),
+        'clients': sorted(full_names),
+        'count': len(valid_codes),
+    })
+
+
+setattr(assistant_valid_clients_view, 'ressource', 'documents')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def ocr_quality_report_view(request):
+    """
+    Génère un rapport de qualité OCR pour identifier les documents à re-scanner.
+    
+    Paramètres:
+    - limit: Nombre max de documents à analyser (défaut: 100)
+    - threshold: Seuil de score pour priorisation (défaut: 0.4)
+    - client: Filtrer par client (optionnel)
+    - exercice: Filtrer par année/exercice (optionnel)
+    
+    Retourne:
+    - documents_a_rescanner: Liste des documents avec score < threshold
+    - statistiques: Répartition par niveau de qualité
+    """
+    from .ocr import calculer_score_qualite_ocr
+    
+    limit = int(request.query_params.get('limit', 100))
+    threshold = float(request.query_params.get('threshold', 0.4))
+    client_filter = request.query_params.get('client')
+    exercice_filter = request.query_params.get('exercice')
+    
+    # Construire la requête de base
+    queryset = Document.objects.select_related(
+        'risque__exercice__client'
+    ).prefetch_related('chunks')
+    
+    # Appliquer les filtres
+    if client_filter:
+        queryset = queryset.filter(risque__exercice__client__nom__icontains=client_filter)
+    if exercice_filter:
+        queryset = queryset.filter(risque__exercice__annee=exercice_filter)
+    
+    # Limiter aux documents PDF (ceux qui ont potentiellement besoin d'OCR)
+    queryset = queryset.filter(
+        models.Q(type_fichier__icontains='pdf') | 
+        models.Q(chemin_fichier__iendswith='.pdf')
+    )
+    
+    # Analyser les documents
+    documents_analyses = []
+    stats = {'bon': 0, 'moyen': 0, 'faible': 0, 'sans_contenu': 0}
+    
+    for doc in queryset[:limit * 2]:  # Prendre plus pour avoir assez après filtrage
+        # Récupérer le contenu des chunks
+        chunks = doc.chunks.all().order_by('ordre')
+        contenu = '\n'.join([c.texte for c in chunks if c.texte])
+        
+        if not contenu or len(contenu) < 50:
+            stats['sans_contenu'] += 1
+            if len(documents_analyses) < limit:
+                documents_analyses.append({
+                    'id': doc.id,
+                    'titre': doc.titre,
+                    'client': doc.risque.exercice.client.nom if doc.risque and doc.risque.exercice else None,
+                    'exercice': doc.risque.exercice.annee if doc.risque and doc.risque.exercice else None,
+                    'score': 0,
+                    'niveau': 'sans_contenu',
+                    'priorite_rescan': True,
+                    'caracteres': 0,
+                })
+            continue
+        
+        # Calculer le score de qualité
+        qualite = calculer_score_qualite_ocr(contenu)
+        stats[qualite['niveau']] += 1
+        
+        # Ajouter si score < threshold ou si on n'a pas assez de documents
+        if qualite['score'] < threshold and len(documents_analyses) < limit:
+            documents_analyses.append({
+                'id': doc.id,
+                'titre': doc.titre,
+                'client': doc.risque.exercice.client.nom if doc.risque and doc.risque.exercice else None,
+                'exercice': doc.risque.exercice.annee if doc.risque and doc.risque.exercice else None,
+                'score': qualite['score'],
+                'niveau': qualite['niveau'],
+                'priorite_rescan': qualite['priorite_rescan'],
+                'caracteres': len(contenu),
+                'details': qualite['details'],
+            })
+    
+    # Trier par score croissant (les pires en premier)
+    documents_analyses.sort(key=lambda x: x['score'])
+    
+    return Response({
+        'documents_a_rescanner': documents_analyses[:limit],
+        'statistiques': {
+            'total_analyses': sum(stats.values()),
+            'repartition': stats,
+            'seuil_utilise': threshold,
+        },
+        'recommandations': {
+            'priorite_haute': len([d for d in documents_analyses if d['score'] < 0.3]),
+            'priorite_moyenne': len([d for d in documents_analyses if 0.3 <= d['score'] < 0.4]),
+        }
+    })
+
+
+setattr(ocr_quality_report_view, 'ressource', 'documents')
+
+
+@api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def assistant_stats_view(request):
     """Statistiques agr├®g├®es optimis├®es pour l'assistant IA"""
@@ -1571,10 +1714,21 @@ def _build_document_payload(document: Document, request=None) -> dict:
         else:
             fichier_url = f'/media/{chemin}'
 
+    # Récupérer le contenu OCR depuis les chunks si disponible
+    contenu_complet = document.description or ''
+    try:
+        chunks = document.chunks.all().order_by('ordre')
+        if chunks.exists():
+            textes_chunks = [chunk.texte for chunk in chunks if chunk.texte]
+            if textes_chunks:
+                contenu_complet = '\n'.join(textes_chunks)
+    except Exception as e:
+        logging.debug(f"Impossible de récupérer les chunks pour {document.id}: {e}")
+
     return {
         'id': str(document.id),
         'titre': document.titre,
-        'description': document.description,
+        'description': contenu_complet,
         'categorie': categorie_nom,
         'type_courrier': document.type_courrier,
         'type_courrier_label': type_label,

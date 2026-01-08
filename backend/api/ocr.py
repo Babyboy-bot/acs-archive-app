@@ -82,12 +82,13 @@ def is_preprocessing_available() -> bool:
     return OPENCV_AVAILABLE and is_ocr_available()
 
 
-def preprocess_image(image: Image.Image) -> Image.Image:
+def preprocess_image(image: Image.Image, aggressive: bool = False) -> Image.Image:
     """
     Applique un pré-traitement d'image pour améliorer la qualité OCR.
     
     Args:
         image: Image PIL à traiter
+        aggressive: Mode agressif pour documents très dégradés (anciens, mal scannés)
         
     Returns:
         Image PIL traitée
@@ -106,26 +107,102 @@ def preprocess_image(image: Image.Image) -> Image.Image:
         else:
             gray = img_array
         
-        # Augmenter le contraste avec CLAHE (Contrast Limited Adaptive Histogram Equalization)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # === ÉTAPE 1: Redimensionnement si résolution trop basse ===
+        height, width = gray.shape[:2]
+        min_dimension = min(height, width)
+        if min_dimension < 1000:
+            # Upscale pour améliorer la reconnaissance
+            scale_factor = 1500 / min_dimension
+            gray = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+            logger.debug(f"Image upscalée: {width}x{height} -> {gray.shape[1]}x{gray.shape[0]}")
+        
+        # === ÉTAPE 2: Suppression du bruit de fond (documents anciens) ===
+        if aggressive:
+            # Filtre bilatéral: préserve les bords tout en lissant
+            gray = cv2.bilateralFilter(gray, 9, 75, 75)
+        
+        # === ÉTAPE 3: Correction du contraste avec CLAHE ===
+        clahe_clip = 3.0 if aggressive else 2.0
+        clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
         
-        # Réduction du bruit avec filtre médian
-        denoised = cv2.medianBlur(enhanced, 3)
+        # === ÉTAPE 4: Débruitage ===
+        if aggressive:
+            # Débruitage non-local means (plus puissant mais plus lent)
+            denoised = cv2.fastNlMeansDenoising(enhanced, None, 10, 7, 21)
+        else:
+            # Filtre médian standard
+            denoised = cv2.medianBlur(enhanced, 3)
         
-        # Binarisation adaptative (meilleure que seuillage simple)
+        # === ÉTAPE 5: Amélioration de la netteté ===
+        # Kernel de sharpening
+        kernel_sharpen = np.array([[-1, -1, -1],
+                                   [-1,  9, -1],
+                                   [-1, -1, -1]])
+        sharpened = cv2.filter2D(denoised, -1, kernel_sharpen)
+        
+        # === ÉTAPE 6: Binarisation adaptative ===
+        block_size = 15 if aggressive else 11
         binary = cv2.adaptiveThreshold(
-            denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, 2
         )
         
-        # Redresser la page (deskew)
+        # === ÉTAPE 7: Nettoyage morphologique (suppression des petits artefacts) ===
+        if aggressive:
+            # Ouverture morphologique pour supprimer le bruit
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+            # Fermeture pour reconnecter les caractères fragmentés
+            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        
+        # === ÉTAPE 8: Redressement (deskew) ===
         deskewed = deskew_image(binary)
+        
+        # === ÉTAPE 9: Suppression des bordures noires ===
+        deskewed = remove_borders(deskewed)
         
         # Retourner en PIL Image
         return Image.fromarray(deskewed)
         
     except Exception as e:
         logger.warning(f"Erreur lors du pré-traitement d'image: {e}")
+        return image
+
+
+def remove_borders(image: np.ndarray, threshold: int = 10) -> np.ndarray:
+    """
+    Supprime les bordures noires autour de l'image (crop intelligent).
+    
+    Args:
+        image: Image numpy array
+        threshold: Seuil de détection des bordures
+        
+    Returns:
+        Image numpy array sans bordures
+    """
+    try:
+        # Trouver les lignes/colonnes non-noires
+        rows = np.any(image > threshold, axis=1)
+        cols = np.any(image > threshold, axis=0)
+        
+        if not rows.any() or not cols.any():
+            return image
+        
+        # Trouver les indices min/max
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+        
+        # Ajouter une petite marge
+        margin = 5
+        rmin = max(0, rmin - margin)
+        rmax = min(image.shape[0], rmax + margin)
+        cmin = max(0, cmin - margin)
+        cmax = min(image.shape[1], cmax + margin)
+        
+        return image[rmin:rmax, cmin:cmax]
+        
+    except Exception as e:
+        logger.warning(f"Erreur lors de la suppression des bordures: {e}")
         return image
 
 
@@ -577,3 +654,157 @@ def get_ocr_status() -> dict:
             'contrast_enhancement': OPENCV_AVAILABLE,
         }
     }
+
+
+# ============================================================================
+# SCORE QUALITÉ OCR - Détection de contenu mal reconnu
+# ============================================================================
+
+import re
+
+def calculer_score_qualite_ocr(contenu: str) -> dict:
+    """
+    Calcule un score de qualité OCR basé sur le contenu textuel.
+    
+    Indicateurs de mauvaise qualité OCR :
+    - Beaucoup de caractères spéciaux inhabituels
+    - Mots très courts ou tronqués
+    - Séquences de chiffres/lettres incohérentes
+    
+    Args:
+        contenu: Texte extrait par OCR
+        
+    Returns:
+        dict avec score (0-1), niveau ('bon'/'moyen'/'faible'), avertissement, details
+    """
+    if not contenu or len(contenu) < 50:
+        return {
+            'score': 0.5,
+            'niveau': 'moyen',
+            'avertissement': None,
+            'details': {
+                'ratio_caracteres_speciaux': 0,
+                'ratio_mots_tronques': 0,
+                'ratio_sequences_incorrectes': 0,
+                'longueur_moyenne_mots': 0
+            }
+        }
+
+    mots = contenu.split()
+    total_mots = len(mots)
+    total_caracteres = len(contenu)
+
+    # 1. Ratio de caractères spéciaux inhabituels (hors ponctuation normale)
+    caracteres_speciaux = re.findall(r'[^\w\s.,;:!?()\'"\-éèêëàâäùûüôöîïçÉÈÊËÀÂÄÙÛÜÔÖÎÏÇ€°]', contenu)
+    ratio_caracteres_speciaux = len(caracteres_speciaux) / max(total_caracteres, 1)
+
+    # 2. Ratio de mots "tronqués" (1-2 caractères qui ne sont pas des mots courants)
+    mots_courts_valides = {'a', 'à', 'y', 'n', 'de', 'du', 'le', 'la', 'un', 'en', 'et', 'ou', 'au', 'ce', 'sa', 'se', 'si', 'ne', 'ni', 'je', 'tu', 'il', 'on', 'ma', 'ta', 'me', 'te', 'vs', 'cf'}
+    mots_tronques = [m for m in mots if len(m) <= 2 and m.lower() not in mots_courts_valides]
+    ratio_mots_tronques = len(mots_tronques) / max(total_mots, 1)
+
+    # 3. Ratio de séquences incohérentes
+    sequences_incorrectes = []
+    for m in mots:
+        # Chiffres isolés (sauf dates et numéros courants)
+        if re.match(r'^\d{1,2}$', m) and not re.match(r'^(0[1-9]|[12]\d|3[01])$', m):
+            sequences_incorrectes.append(m)
+        # Majuscules au milieu du mot (sauf acronymes)
+        elif len(m) > 3 and re.search(r'[a-z][A-Z]', m) and not re.match(r'^[A-Z]+$', m):
+            sequences_incorrectes.append(m)
+        # Séquences de consonnes improbables
+        elif re.search(r'[bcdfghjklmnpqrstvwxz]{5,}', m, re.IGNORECASE):
+            sequences_incorrectes.append(m)
+    ratio_sequences_incorrectes = len(sequences_incorrectes) / max(total_mots, 1)
+
+    # 4. Longueur moyenne des mots
+    longueur_moyenne_mots = sum(len(m) for m in mots) / max(total_mots, 1)
+
+    # Calcul du score final (pondéré)
+    score = 1.0
+    score -= ratio_caracteres_speciaux * 3
+    score -= ratio_mots_tronques * 2
+    score -= ratio_sequences_incorrectes * 1.5
+    
+    if longueur_moyenne_mots < 3:
+        score -= 0.2
+    elif 4 < longueur_moyenne_mots < 8:
+        score += 0.1
+
+    # Borner le score entre 0 et 1
+    score = max(0, min(1, score))
+
+    # Déterminer le niveau et l'avertissement
+    if score >= 0.7:
+        niveau = 'bon'
+        avertissement = None
+    elif score >= 0.4:
+        niveau = 'moyen'
+        avertissement = 'Ce document présente quelques erreurs de numérisation. Certaines informations peuvent être incomplètes.'
+    else:
+        niveau = 'faible'
+        avertissement = 'Document ancien ou mal numérisé : certaines informations peuvent être incomplètes ou mal reconnues. Un re-scan pourrait améliorer la qualité.'
+
+    return {
+        'score': round(score, 2),
+        'niveau': niveau,
+        'avertissement': avertissement,
+        'priorite_rescan': score < 0.4,
+        'details': {
+            'ratio_caracteres_speciaux': round(ratio_caracteres_speciaux, 3),
+            'ratio_mots_tronques': round(ratio_mots_tronques, 3),
+            'ratio_sequences_incorrectes': round(ratio_sequences_incorrectes, 3),
+            'longueur_moyenne_mots': round(longueur_moyenne_mots, 1),
+        }
+    }
+
+
+def analyser_qualite_document(document_id: str) -> dict:
+    """
+    Analyse la qualité OCR d'un document spécifique.
+    
+    Args:
+        document_id: ID du document à analyser
+        
+    Returns:
+        dict avec score, niveau, avertissement, priorite_rescan
+    """
+    from .models import Document, DocumentChunk
+    
+    try:
+        document = Document.objects.get(id=document_id)
+        
+        # Récupérer le contenu des chunks
+        chunks = DocumentChunk.objects.filter(document=document).order_by('ordre')
+        contenu_complet = '\n'.join([c.texte for c in chunks if c.texte])
+        
+        if not contenu_complet:
+            return {
+                'document_id': document_id,
+                'titre': document.titre,
+                'score': 0,
+                'niveau': 'faible',
+                'avertissement': 'Aucun contenu textuel disponible pour ce document.',
+                'priorite_rescan': True,
+                'details': {}
+            }
+        
+        qualite = calculer_score_qualite_ocr(contenu_complet)
+        qualite['document_id'] = document_id
+        qualite['titre'] = document.titre
+        qualite['caracteres_total'] = len(contenu_complet)
+        qualite['chunks_count'] = chunks.count()
+        
+        return qualite
+        
+    except Document.DoesNotExist:
+        return {
+            'document_id': document_id,
+            'error': 'Document non trouvé'
+        }
+    except Exception as e:
+        logger.error(f"Erreur analyse qualité document {document_id}: {e}")
+        return {
+            'document_id': document_id,
+            'error': str(e)
+        }

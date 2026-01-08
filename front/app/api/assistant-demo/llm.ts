@@ -24,7 +24,11 @@ import {
   buildDocumentActivePrompt,
   extractDocumentIndex,
   getDocumentFromSelection,
+  isContextExpired,
+  getValidContextEntity,
+  updateEntityProtected,
   CONFIDENCE_THRESHOLD,
+  CONTEXT_EXPIRATION_MS,
   type StructuredMemory,
   type SubjectAnalysis,
   type SubjectTelemetry,
@@ -46,7 +50,11 @@ export {
   buildDocumentActivePrompt,
   extractDocumentIndex,
   getDocumentFromSelection,
+  isContextExpired,
+  getValidContextEntity,
+  updateEntityProtected,
   CONFIDENCE_THRESHOLD,
+  CONTEXT_EXPIRATION_MS,
   type StructuredMemory,
   type SubjectAnalysis,
   type SubjectTelemetry,
@@ -1029,5 +1037,353 @@ export function validateResponse(response: string, dbContext?: LlmPayload['dbCon
   return {
     isValid: warnings.length === 0,
     warnings
+  }
+}
+
+// ============================================================================
+// CLASSIFICATION LLM LÉGÈRE - Détection d'intention automatique
+// ============================================================================
+
+/**
+ * Types d'intentions supportées par le classificateur
+ */
+export type IntentionType = 
+  | 'recherche_document'  // Nouvelle recherche de documents
+  | 'suivi_document'      // Question sur un document affiché
+  | 'statistiques'        // Demande de statistiques
+  | 'suivi_general'       // Question de suivi générale (clarification, etc.)
+
+/**
+ * Critères de recherche extraits par le LLM
+ * Chaque critère a une valeur et un niveau de confiance
+ */
+export type CriteresExtraits = {
+  client: string | null       // Nom du client ou "CONTEXTE" si référence contextuelle
+  annee: string | null        // Année (ex: "2007")
+  type_document: string | null // Type de document (avenant, facture, etc.)
+  risque: string | null       // Type de risque (santé, auto, etc.)
+  confiance_criteres: number  // 0-1, confiance sur l'extraction des critères
+}
+
+/**
+ * Seuils de confiance pour les décisions
+ */
+export const SEUILS_CONFIANCE = {
+  UTILISER_LLM: 0.6,      // En dessous → fallback regex
+  DEMANDER_CLARIFICATION: 0.4,  // En dessous → demander clarification
+  ECRIRE_MEMOIRE: 0.8,    // En dessous → ne pas écrire en mémoire (valeur non confirmée)
+}
+
+/**
+ * Résultat de la classification d'intention
+ */
+export type ClassificationResult = {
+  intention: IntentionType
+  action?: 'resumer' | 'analyser' | 'expliquer' | 'lister' | 'comparer' | null
+  index_document?: number | null  // 0 = premier, 1 = deuxième, -1 = dernier, null = non spécifié
+  criteres?: CriteresExtraits     // Critères de recherche extraits (pour recherche_document)
+  confidence: number              // 0-1, niveau de confiance global
+  raison?: string                 // Explication courte (debug)
+  needsClarification?: boolean    // true si confiance trop basse → demander clarification
+}
+
+/**
+ * Contexte pour la classification (documents affichés, état conversation)
+ */
+export type ClassificationContext = {
+  hasDocumentsDisplayed: boolean
+  documentCount: number
+  hasActiveDocument: boolean
+  lastSearchQuery?: string
+  lastClient?: string        // Client du contexte précédent (pour résoudre "CONTEXTE")
+  lastAnnee?: string         // Année du contexte précédent
+  lastRisque?: string        // Risque du contexte précédent
+}
+
+const CLASSIFICATION_SYSTEM_PROMPT = `Tu es un classificateur d'intentions pour un assistant d'archivage.
+Analyse la requête utilisateur et retourne UNIQUEMENT un JSON valide (sans markdown, sans explication).
+
+INTENTIONS POSSIBLES:
+- "recherche_document": L'utilisateur veut chercher/trouver des documents (mots-clés: cherche, trouve, montre, liste, documents de, factures de, avenants, contrats...)
+- "suivi_document": L'utilisateur pose une question sur un document DÉJÀ affiché (mots-clés: résume, analyse, explique, c'est quoi, de quoi ça parle, le premier, le 2ème, ce document...)
+- "statistiques": L'utilisateur demande des chiffres/stats (mots-clés: combien, statistiques, nombre de, total, répartition...)
+- "suivi_general": Question de clarification ou continuation sans rapport direct avec un document spécifique
+
+ACTIONS (pour suivi_document uniquement):
+- "resumer": résumer le contenu
+- "analyser": analyser en détail
+- "expliquer": expliquer un point
+- "lister": lister les éléments
+- "comparer": comparer avec autre chose
+- null: autre action
+
+INDEX_DOCUMENT (pour suivi_document uniquement):
+- 0: premier document / "le premier" / "le 1er"
+- 1: deuxième document / "le 2ème" / "le second"
+- 2: troisième document
+- -1: dernier document / "le dernier"
+- null: pas d'index spécifié ou document actif par défaut
+
+CRITÈRES DE RECHERCHE (pour recherche_document):
+Extrais les critères explicites de la requête. IMPORTANT: Si l'utilisateur fait référence au contexte précédent (même client, ce client, lui, le même, pareil, idem...), mets "CONTEXTE" comme valeur.
+- client: nom/code du client OU "CONTEXTE" si référence au client précédent
+- annee: année (ex: "2007", "2024")
+- type_document: type de document (avenant, facture, contrat, sinistre, attestation, quittance, devis, police...)
+- risque: type de risque. ABRÉVIATIONS COURANTES (utilise le nom complet):
+  - "IA" = "individuel accident" (PAS incendie!)
+  - "RC" = "responsabilite civile"
+  - "MRH" = "multirisque habitation"
+  - "MRP" = "multirisque professionnel"
+  - "MRI" = "multirisque immeuble"
+  - "TRC" = "tous risques chantier"
+  - "TRI" = "tous risques informatiques"
+  - "IFC" = "indemnite fin de carriere"
+  - "FF" = "frais funeraires"
+  - "GD" = "global dommage"
+  - "GB" = "global banque"
+  - "BDM" = "bris de machine"
+  - "DDE" = "degats des eaux"
+  - Autres: santé, auto, automobile, deces, retraite, prevoyance, incendie, transport, caution, vol, voyage, divers
+
+EXEMPLES:
+- "avenants de 2007 du même client" → client: "CONTEXTE", annee: "2007", type_document: "avenant"
+- "factures de 3CB" → client: "3CB", type_document: "facture"
+- "ses contrats de 2020" → client: "CONTEXTE", annee: "2020", type_document: "contrat"
+
+FORMAT DE SORTIE (JSON strict, pas de markdown):
+{"intention":"...", "action":null, "index_document":null, "criteres":{"client":null,"annee":null,"type_document":null,"risque":null}, "confidence":0.95, "raison":"..."}`
+
+/**
+ * Classifie l'intention de l'utilisateur via un appel LLM léger.
+ * Retourne null en cas d'échec (fallback vers patterns regex).
+ */
+export async function classifyIntention(
+  question: string,
+  context: ClassificationContext
+): Promise<ClassificationResult | null> {
+  // Si LLM non configuré, retourner null pour fallback
+  if (!isLlmConfigured()) {
+    return null
+  }
+
+  const contextInfo = `
+CONTEXTE ACTUEL:
+- Documents affichés: ${context.hasDocumentsDisplayed ? `Oui (${context.documentCount} documents)` : 'Non'}
+- Document actif: ${context.hasActiveDocument ? 'Oui' : 'Non'}
+${context.lastSearchQuery ? `- Dernière recherche: "${context.lastSearchQuery}"` : ''}
+${context.lastClient ? `- Client précédent: "${context.lastClient}"` : ''}
+${context.lastAnnee ? `- Année précédente: "${context.lastAnnee}"` : ''}
+${context.lastRisque ? `- Risque précédent: "${context.lastRisque}"` : ''}`
+
+  const prompt = `${contextInfo}
+
+REQUÊTE UTILISATEUR: "${question}"
+
+Classifie cette requête en JSON:`
+
+  try {
+    const startTime = Date.now()
+    
+    const result = await callMistral(prompt, false, [], {
+      historyLimit: 0,
+      maxTokens: 150,  // Augmenté pour inclure les critères
+      systemPrompt: CLASSIFICATION_SYSTEM_PROMPT,
+      temperature: 0.1,  // Très déterministe
+    })
+
+    const durationMs = Date.now() - startTime
+    
+    // Parser le JSON de la réponse
+    const content = result.content.trim()
+    
+    // Extraire le JSON (peut être entouré de ```json ... ```)
+    let jsonStr = content
+    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      jsonStr = jsonMatch[0]
+    }
+
+    const parsed = JSON.parse(jsonStr) as ClassificationResult & { criteres?: any }
+    
+    // Validation basique
+    if (!parsed.intention || !['recherche_document', 'suivi_document', 'statistiques', 'suivi_general'].includes(parsed.intention)) {
+      console.warn(`Classification LLM: intention invalide "${parsed.intention}"`)
+      return null
+    }
+
+    // Calculer la confiance globale
+    const confidenceGlobale = parsed.confidence ?? 0.8
+    const confidenceCriteres = parsed.criteres?.confiance ?? confidenceGlobale
+    
+    // Déterminer si on doit demander clarification (confiance trop basse)
+    const needsClarification = confidenceGlobale < SEUILS_CONFIANCE.DEMANDER_CLARIFICATION
+    
+    // Si confiance < seuil d'utilisation LLM, retourner null pour fallback regex
+    if (confidenceGlobale < SEUILS_CONFIANCE.UTILISER_LLM) {
+      console.log(`=== Classification LLM: confiance trop basse (${confidenceGlobale}) → fallback regex ===`)
+      return null
+    }
+
+    // Résoudre les références contextuelles "CONTEXTE" vers les valeurs réelles
+    let criteres: CriteresExtraits | undefined = undefined
+    if (parsed.criteres) {
+      const clientResolu = parsed.criteres.client === 'CONTEXTE' ? (context.lastClient || null) : parsed.criteres.client
+      
+      criteres = {
+        client: clientResolu,
+        annee: parsed.criteres.annee,
+        type_document: parsed.criteres.type_document,
+        risque: parsed.criteres.risque,
+        confiance_criteres: confidenceCriteres,
+      }
+    }
+
+    // Log pour debug
+    console.log(`=== Classification LLM (${durationMs}ms) ===`)
+    console.log(`  Question: "${question.substring(0, 50)}..."`)
+    console.log(`  Intention: ${parsed.intention} (confiance: ${confidenceGlobale})`)
+    if (parsed.action) console.log(`  Action: ${parsed.action}`)
+    if (parsed.index_document !== null && parsed.index_document !== undefined) {
+      console.log(`  Index document: ${parsed.index_document}`)
+    }
+    if (criteres) {
+      console.log(`  Critères: client=${criteres.client}, annee=${criteres.annee}, type=${criteres.type_document}, risque=${criteres.risque} (confiance: ${criteres.confiance_criteres})`)
+    }
+    if (needsClarification) {
+      console.log(`  ⚠️ Confiance basse → demander clarification`)
+    }
+
+    return {
+      intention: parsed.intention,
+      action: parsed.action || null,
+      index_document: parsed.index_document ?? null,
+      criteres,
+      confidence: confidenceGlobale,
+      raison: parsed.raison,
+      needsClarification,
+    }
+
+  } catch (error) {
+    console.warn('Classification LLM échouée, fallback vers patterns:', error)
+    return null
+  }
+}
+
+/**
+ * Convertit l'index LLM (0-based, -1 pour dernier) en index 1-based pour le système
+ */
+export function convertLlmIndexToSystemIndex(llmIndex: number | null, totalDocuments: number): number | null {
+  if (llmIndex === null || llmIndex === undefined) {
+    return null
+  }
+  if (llmIndex === -1) {
+    return totalDocuments  // Dernier document
+  }
+  return llmIndex + 1  // Convertir 0-based en 1-based
+}
+
+// ============================================================================
+// SCORE QUALITÉ OCR - Détection de contenu mal reconnu
+// ============================================================================
+
+/**
+ * Résultat de l'analyse de qualité OCR
+ */
+export type OcrQualityResult = {
+  score: number           // 0-1, où 1 = parfait
+  niveau: 'bon' | 'moyen' | 'faible'
+  avertissement: string | null
+  details: {
+    ratioCaracteresSpeciaux: number
+    ratioMotsTronques: number
+    ratioChiffresIsoles: number
+    longueurMoyenneMots: number
+  }
+}
+
+/**
+ * Calcule un score de qualité OCR basé sur le contenu textuel.
+ * 
+ * Indicateurs de mauvaise qualité OCR :
+ * - Beaucoup de caractères spéciaux inhabituels (Ê, ï, ô, etc.)
+ * - Mots très courts ou tronqués
+ * - Séquences de chiffres/lettres incohérentes
+ * - Mots avec majuscules au milieu
+ */
+export function calculerScoreQualiteOcr(contenu: string): OcrQualityResult {
+  if (!contenu || contenu.length < 50) {
+    return {
+      score: 0.5,
+      niveau: 'moyen',
+      avertissement: null,
+      details: { ratioCaracteresSpeciaux: 0, ratioMotsTronques: 0, ratioChiffresIsoles: 0, longueurMoyenneMots: 0 }
+    }
+  }
+
+  const mots = contenu.split(/\s+/).filter(m => m.length > 0)
+  const totalMots = mots.length
+  const totalCaracteres = contenu.length
+
+  // 1. Ratio de caractères spéciaux inhabituels (hors ponctuation normale)
+  const caracteresSpeciaux = contenu.match(/[^\w\s.,;:!?()'\-éèêëàâäùûüôöîïç€°]/gi) || []
+  const ratioCaracteresSpeciaux = caracteresSpeciaux.length / totalCaracteres
+
+  // 2. Ratio de mots "tronqués" (1-2 caractères qui ne sont pas des mots courants)
+  const motsCourtsNonValides = ['a', 'à', 'y', 'n', 'de', 'du', 'le', 'la', 'un', 'en', 'et', 'ou', 'au', 'ce', 'sa', 'se', 'si', 'ne', 'ni', 'je', 'tu', 'il', 'on', 'ma', 'ta', 'me', 'te']
+  const motsTronques = mots.filter(m => m.length <= 2 && !motsCourtsNonValides.includes(m.toLowerCase()))
+  const ratioMotsTronques = motsTronques.length / Math.max(totalMots, 1)
+
+  // 3. Ratio de séquences incohérentes (chiffres isolés, lettres majuscules au milieu)
+  const sequencesIncorrectes = mots.filter(m => {
+    // Chiffres isolés (sauf années et numéros courants)
+    if (/^\d{1,2}$/.test(m) && !/^(0[1-9]|[12]\d|3[01])$/.test(m)) return true
+    // Majuscules au milieu du mot (sauf acronymes)
+    if (m.length > 3 && /[a-z][A-Z]/.test(m) && !/^[A-Z]+$/.test(m)) return true
+    // Séquences de consonnes improbables
+    if (/[bcdfghjklmnpqrstvwxz]{5,}/i.test(m)) return true
+    return false
+  })
+  const ratioChiffresIsoles = sequencesIncorrectes.length / Math.max(totalMots, 1)
+
+  // 4. Longueur moyenne des mots (trop court = OCR fragmenté)
+  const longueurMoyenneMots = mots.reduce((sum, m) => sum + m.length, 0) / Math.max(totalMots, 1)
+
+  // Calcul du score final (pondéré)
+  let score = 1.0
+  score -= ratioCaracteresSpeciaux * 3      // Pénalité forte pour caractères spéciaux
+  score -= ratioMotsTronques * 2            // Pénalité moyenne pour mots tronqués
+  score -= ratioChiffresIsoles * 1.5        // Pénalité pour séquences incohérentes
+  
+  // Bonus/malus pour longueur moyenne des mots
+  if (longueurMoyenneMots < 3) score -= 0.2
+  else if (longueurMoyenneMots > 4 && longueurMoyenneMots < 8) score += 0.1
+
+  // Borner le score entre 0 et 1
+  score = Math.max(0, Math.min(1, score))
+
+  // Déterminer le niveau et l'avertissement
+  let niveau: 'bon' | 'moyen' | 'faible'
+  let avertissement: string | null = null
+
+  if (score >= 0.7) {
+    niveau = 'bon'
+  } else if (score >= 0.4) {
+    niveau = 'moyen'
+    avertissement = '⚠️ Ce document présente quelques erreurs de numérisation. Certaines informations peuvent être incomplètes.'
+  } else {
+    niveau = 'faible'
+    avertissement = '⚠️ Document ancien ou mal numérisé : certaines informations peuvent être incomplètes ou mal reconnues. Un re-scan pourrait améliorer la qualité.'
+  }
+
+  return {
+    score: Math.round(score * 100) / 100,
+    niveau,
+    avertissement,
+    details: {
+      ratioCaracteresSpeciaux: Math.round(ratioCaracteresSpeciaux * 1000) / 1000,
+      ratioMotsTronques: Math.round(ratioMotsTronques * 1000) / 1000,
+      ratioChiffresIsoles: Math.round(ratioChiffresIsoles * 1000) / 1000,
+      longueurMoyenneMots: Math.round(longueurMoyenneMots * 10) / 10,
+    }
   }
 }

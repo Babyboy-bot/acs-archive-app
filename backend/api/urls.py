@@ -16,6 +16,7 @@ from .views import (
     DocumentUploadView,
     stats_view,
     assistant_stats_view,
+    assistant_valid_clients_view,
     assistant_document_search_view,
     assistant_document_search_faiss_view,
     assistant_semantic_search_view,
@@ -39,8 +40,9 @@ from .views import (
     health_check,
     ready_check,
     version_info,
-    assistant_set_document_context_view,  # Ajout de l'import
+    assistant_set_document_context_view,
     assistant_chat_view,
+    ocr_quality_report_view,
 )
 
 # Router pour les ViewSets
@@ -62,6 +64,7 @@ urlpatterns = [
     path('documents/search/', documents_search_view, name='documents-search'),
     path('stats/', stats_view, name='stats'),
     path('assistant/stats/', assistant_stats_view, name='assistant-stats'),
+    path('assistant/valid-clients/', assistant_valid_clients_view, name='assistant-valid-clients'),
     path('assistant/feedback/', assistant_feedback, name='assistant-feedback'),
     path('assistant/health/', assistant_health, name='assistant-health'),
     path('assistant/documents/search/tfidf/', assistant_document_search_view, name='assistant-document-search-tfidf'),
@@ -74,6 +77,9 @@ urlpatterns = [
     path('assistant/llm/quota/', llm_quota_status, name='assistant-llm-quota-status'),
     path('assistant/llm/admin/stats/', llm_admin_stats, name='assistant-llm-admin-stats'),
     path('assistant/llm/admin/history/', llm_admin_history, name='assistant-llm-admin-history'),
+    
+    # Rapport qualité OCR (priorisation re-scan)
+    path('ocr/quality-report/', ocr_quality_report_view, name='ocr-quality-report'),
     
     # Apprentissage assistant
     path('assistant/learning/record/', assistant_learning_record, name='assistant-learning-record'),
