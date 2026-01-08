@@ -22,9 +22,13 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
 
   // L'authentification est gérée côté backend via les cookies httpOnly (access_token).
 
-  // Créer un contrôleur d'abandon avec un timeout de 20 secondes
+  // Timeout plus long pour les uploads de fichiers (120s), sinon 20s
+  const isUpload = rest.body instanceof FormData
+  const timeoutMs = isUpload ? 120000 : 20000
+  
+  // Créer un contrôleur d'abandon avec timeout
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort('Request timeout'), 20000) // 20 secondes
+  const timeoutId = setTimeout(() => controller.abort('Request timeout'), timeoutMs)
 
   try {
     const init: RequestInit = {
@@ -41,8 +45,9 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
   } catch (error) {
     clearTimeout(timeoutId) // Nettoyer le timeout en cas d'erreur
     if (error instanceof Error && error.name === 'AbortError') {
-      console.error('La requête a expiré après 20 secondes', { path })
-      throw new Error('La requête a pris trop de temps. Veuillez réessayer avec des termes de recherche plus précis.')
+      const timeoutSec = timeoutMs / 1000
+      console.error(`La requête a expiré après ${timeoutSec} secondes`, { path })
+      throw new Error('La requête a pris trop de temps. Veuillez réessayer.')
     }
     throw error // Propager les autres erreurs
   }
