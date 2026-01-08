@@ -14,11 +14,23 @@ import {
   getStructuredMemory,
   structuredMemoryToPrompt,
   updateMemoryAfterExchange,
+  detectSubjectTransition,
+  applySubjectTransition,
+  setStructuredMemory,
   type StructuredMemory,
+  type SubjectAnalysis,
 } from './conversation'
 
 // Réexporter pour utilisation dans route.ts
-export { updateMemoryAfterExchange, getStructuredMemory, type StructuredMemory }
+export { 
+  updateMemoryAfterExchange, 
+  getStructuredMemory, 
+  detectSubjectTransition, 
+  applySubjectTransition,
+  setStructuredMemory,
+  type StructuredMemory,
+  type SubjectAnalysis,
+}
 
 try {
   setDefaultResultOrder('ipv4first')

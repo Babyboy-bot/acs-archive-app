@@ -266,6 +266,245 @@ export function structuredMemoryToPrompt(memory: StructuredMemory): string {
 }
 
 /**
+ * Type de transition de sujet détecté
+ */
+export type SubjectTransition = 
+  | 'continuity'      // Même sujet, question de suivi
+  | 'new_subject'     // Nouveau sujet, reset partiel nécessaire
+  | 'return_subject'  // Retour à un sujet précédent
+  | 'clarification'   // Demande de clarification sur le contexte actuel
+
+/**
+ * Résultat de l'analyse de transition de sujet
+ */
+export type SubjectAnalysis = {
+  transition: SubjectTransition
+  confidence: number // 0-1
+  newClient: string | null
+  shouldResetClient: boolean
+  shouldResetYear: boolean
+  shouldResetDocType: boolean
+  shouldResetRisk: boolean
+  reason: string
+}
+
+/**
+ * Détecte le type de transition de sujet dans la conversation
+ * C'est le "routeur de sujet" recommandé par ChatGPT
+ */
+export function detectSubjectTransition(
+  currentMemory: StructuredMemory,
+  newQuestion: string,
+  newCriteres: {
+    client?: string | null
+    annee?: string | null
+    type_document?: string | null
+    risque?: string | null
+  }
+): SubjectAnalysis {
+  const questionLower = newQuestion.toLowerCase()
+  
+  // Patterns de continuité (questions de suivi)
+  const continuityPatterns = [
+    /^(et|aussi|également|de plus|en plus)/i,
+    /\b(les autres|le reste|encore|d'autres)\b/i,
+    /\b(celui-ci|celle-ci|ceux-ci|ce document|ces documents)\b/i,
+    /\b(le même|la même|les mêmes)\b/i,
+    /\b(pour lui|pour eux|pour ce client)\b/i,
+    /^(montre|affiche|donne)(-moi)?\s+(les autres|plus|encore)/i,
+  ]
+  
+  // Patterns de nouveau sujet explicite
+  const newSubjectPatterns = [
+    /\b(maintenant|plutôt|sinon|autrement)\b.*\b(cherche|trouve|montre)/i,
+    /\b(change|passe|passons)\s+(à|au|aux)\b/i,
+    /\b(nouveau|autre)\s+(client|sujet|recherche)\b/i,
+    /\b(oublie|laisse tomber|annule)\b/i,
+  ]
+  
+  // Patterns de clarification
+  const clarificationPatterns = [
+    /\b(c'est quoi|qu'est-ce que|quel est|quelle est)\b/i,
+    /\b(explique|précise|détaille)\b/i,
+    /\b(je ne comprends pas|pas compris)\b/i,
+  ]
+  
+  // Vérifier les patterns de continuité
+  const isContinuity = continuityPatterns.some(p => p.test(questionLower))
+  
+  // Vérifier les patterns de nouveau sujet
+  const isExplicitNewSubject = newSubjectPatterns.some(p => p.test(questionLower))
+  
+  // Vérifier les patterns de clarification
+  const isClarification = clarificationPatterns.some(p => p.test(questionLower))
+  
+  // Analyser les changements d'entités
+  const currentClient = currentMemory.entites.client.valeur
+  const currentYear = currentMemory.entites.annee.valeur
+  const currentDocType = currentMemory.entites.type_document.valeur
+  
+  const hasNewClient = newCriteres.client && newCriteres.client !== currentClient
+  const hasNewYear = newCriteres.annee && newCriteres.annee !== currentYear
+  const hasNewDocType = newCriteres.type_document && newCriteres.type_document !== currentDocType
+  
+  // Cas 1: Clarification
+  if (isClarification && !hasNewClient && !hasNewYear && !hasNewDocType) {
+    return {
+      transition: 'clarification',
+      confidence: 0.9,
+      newClient: null,
+      shouldResetClient: false,
+      shouldResetYear: false,
+      shouldResetDocType: false,
+      shouldResetRisk: false,
+      reason: 'Demande de clarification détectée',
+    }
+  }
+  
+  // Cas 2: Continuité explicite
+  if (isContinuity && !hasNewClient) {
+    return {
+      transition: 'continuity',
+      confidence: 0.95,
+      newClient: null,
+      shouldResetClient: false,
+      shouldResetYear: false,
+      shouldResetDocType: false,
+      shouldResetRisk: false,
+      reason: 'Question de suivi sur le même contexte',
+    }
+  }
+  
+  // Cas 3: Nouveau sujet explicite
+  if (isExplicitNewSubject) {
+    return {
+      transition: 'new_subject',
+      confidence: 0.9,
+      newClient: newCriteres.client || null,
+      shouldResetClient: true,
+      shouldResetYear: true,
+      shouldResetDocType: true,
+      shouldResetRisk: true,
+      reason: 'Changement de sujet explicite détecté',
+    }
+  }
+  
+  // Cas 4: Nouveau client mentionné (changement implicite)
+  if (hasNewClient) {
+    return {
+      transition: 'new_subject',
+      confidence: 0.85,
+      newClient: newCriteres.client || null,
+      shouldResetClient: true,
+      shouldResetYear: !newCriteres.annee, // Reset si pas de nouvelle année spécifiée
+      shouldResetDocType: !newCriteres.type_document,
+      shouldResetRisk: !newCriteres.risque,
+      reason: `Nouveau client détecté: ${newCriteres.client}`,
+    }
+  }
+  
+  // Cas 5: Pas de client actuel et nouveau client
+  if (!currentClient && newCriteres.client) {
+    return {
+      transition: 'new_subject',
+      confidence: 0.8,
+      newClient: newCriteres.client,
+      shouldResetClient: false, // Pas de reset, c'est le premier
+      shouldResetYear: false,
+      shouldResetDocType: false,
+      shouldResetRisk: false,
+      reason: 'Premier client de la conversation',
+    }
+  }
+  
+  // Cas 6: Question vague sans changement → continuité par défaut
+  if (!hasNewClient && !hasNewYear && !hasNewDocType && currentClient) {
+    return {
+      transition: 'continuity',
+      confidence: 0.7,
+      newClient: null,
+      shouldResetClient: false,
+      shouldResetYear: false,
+      shouldResetDocType: false,
+      shouldResetRisk: false,
+      reason: 'Question vague, maintien du contexte actuel',
+    }
+  }
+  
+  // Cas par défaut: continuité avec faible confiance
+  return {
+    transition: 'continuity',
+    confidence: 0.5,
+    newClient: null,
+    shouldResetClient: false,
+    shouldResetYear: false,
+    shouldResetDocType: false,
+    shouldResetRisk: false,
+    reason: 'Aucun pattern clair détecté, maintien du contexte',
+  }
+}
+
+/**
+ * Applique un reset partiel de la mémoire selon l'analyse de transition
+ */
+export function applySubjectTransition(
+  memory: StructuredMemory,
+  analysis: SubjectAnalysis
+): StructuredMemory {
+  // Si continuité ou clarification, pas de changement
+  if (analysis.transition === 'continuity' || analysis.transition === 'clarification') {
+    return memory
+  }
+  
+  // Deep copy
+  const newMemory: StructuredMemory = {
+    ...memory,
+    entites: {
+      client: { ...memory.entites.client },
+      annee: { ...memory.entites.annee },
+      risque: { ...memory.entites.risque },
+      type_document: { ...memory.entites.type_document },
+    },
+    focus_actuel: { ...memory.focus_actuel },
+    documents: { ...memory.documents, mentionnes: [...memory.documents.mentionnes] },
+    resultats: { ...memory.resultats },
+    sujets_abordes: [...memory.sujets_abordes],
+    dernieres_conclusions: [...memory.dernieres_conclusions],
+  }
+  
+  // Appliquer les resets selon l'analyse
+  if (analysis.shouldResetClient) {
+    newMemory.entites.client = { valeur: analysis.newClient, lock: false }
+  }
+  if (analysis.shouldResetYear) {
+    newMemory.entites.annee = { valeur: null, lock: false }
+  }
+  if (analysis.shouldResetDocType) {
+    newMemory.entites.type_document = { valeur: null, lock: false }
+  }
+  if (analysis.shouldResetRisk) {
+    newMemory.entites.risque = { valeur: null, lock: false }
+  }
+  
+  // Reset du focus et des résultats si nouveau sujet
+  if (analysis.transition === 'new_subject') {
+    newMemory.focus_actuel = { type: null, valeur: null }
+    newMemory.resultats = { documents_trouves: 0, derniere_recherche: null }
+    newMemory.etat_conversation = 'recherche_en_cours'
+    
+    // Ajouter le nouveau sujet à l'historique
+    if (analysis.newClient) {
+      newMemory.sujets_abordes = [
+        ...newMemory.sujets_abordes,
+        `Nouveau: ${analysis.newClient}`
+      ].slice(-5)
+    }
+  }
+  
+  return newMemory
+}
+
+/**
  * Récupère ou crée une conversation pour un utilisateur
  */
 export async function getOrCreateConversation(token: string, sessionId: string): Promise<string | null> {

@@ -9,7 +9,7 @@ import {
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -2093,6 +2093,26 @@ export async function POST(request: Request) {
       if (validation === false) {
         clientQuestion = null
       }
+    }
+    
+    // =========================================================================
+    // ROUTEUR DE SUJET - Détecte continuité/nouveau sujet/clarification
+    // =========================================================================
+    const currentMemory = getStructuredMemory(sessionId)
+    const subjectAnalysis = detectSubjectTransition(currentMemory, questionOriginale, {
+      client: clientQuestion,
+      annee: criteresQuestion.annee,
+      type_document: criteresQuestion.typeDocument,
+      risque: criteresQuestion.risque,
+    })
+    
+    console.log(`=== Routeur de sujet: ${subjectAnalysis.transition} (${Math.round(subjectAnalysis.confidence * 100)}%) - ${subjectAnalysis.reason} ===`)
+    
+    // Appliquer la transition si nécessaire (reset partiel de la mémoire)
+    if (subjectAnalysis.transition === 'new_subject') {
+      const updatedMemory = applySubjectTransition(currentMemory, subjectAnalysis)
+      setStructuredMemory(sessionId, updatedMemory)
+      console.log(`=== Mémoire réinitialisée pour nouveau sujet ===`)
     }
     
     // Fusionner avec le contexte de conversation (critères explicites prioritaires)
