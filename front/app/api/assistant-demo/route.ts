@@ -9,7 +9,7 @@ import {
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, CONFIDENCE_THRESHOLD } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, CONFIDENCE_THRESHOLD } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -2096,9 +2096,68 @@ export async function POST(request: Request) {
     }
     
     // =========================================================================
-    // ROUTEUR DE SUJET - Détecte continuité/nouveau sujet/clarification
+    // MODE SUIVI DOCUMENT - Détecte les questions sur le document actif
     // =========================================================================
     const currentMemory = getStructuredMemory(sessionId)
+    const isFollowUpOnDocument = isDocumentFollowUpQuestion(questionOriginale, currentMemory)
+    
+    if (isFollowUpOnDocument && currentMemory.document_actif) {
+      console.log(`=== Mode suivi_document: Question sur le document actif "${currentMemory.document_actif.titre}" ===`)
+      
+      // Construire le prompt avec le contenu du document
+      const documentPrompt = buildDocumentActivePrompt(currentMemory)
+      
+      // Générer une réponse LLM basée sur le document actif
+      const systemPromptDoc = `Tu es un assistant d'archivage ACS. L'utilisateur te pose une question sur un document qu'il vient de consulter.
+
+${documentPrompt}
+
+Réponds de manière concise et précise en te basant UNIQUEMENT sur les informations du document ci-dessus.`
+
+      try {
+        const llmResponse = await generateLlmAnswer({
+          question: questionOriginale,
+          intent: 'documents',
+          sessionId,
+          token,
+          customSystemPrompt: systemPromptDoc,
+        })
+        
+        // Réutiliser le document actif comme pièce jointe
+        const pieceActif: DocumentPiece = {
+          id: currentMemory.document_actif.id || 'doc-actif',
+          source: currentMemory.document_actif.titre || 'Document actif',
+          content: currentMemory.document_actif.contenu || '',
+          metadata: currentMemory.document_actif.metadata || {},
+          score: 1.0,
+        }
+        
+        const reponseDoc: AssistantResponse = {
+          question: questionOriginale,
+          type: 'documents',
+          resume: llmResponse.content,
+          pieces: [pieceActif],
+          insights: [],
+          actions: [],
+          narration: {
+            texte: llmResponse.content,
+            source: 'llm',
+          },
+        }
+        
+        await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+        await addToConversationWithPersistence(sessionId, 'assistant', llmResponse.content, token)
+        
+        return NextResponse.json(reponseDoc)
+      } catch (err) {
+        console.warn('Erreur LLM pour suivi document:', err)
+        // Continuer avec le flux normal si erreur
+      }
+    }
+    
+    // =========================================================================
+    // ROUTEUR DE SUJET - Détecte continuité/nouveau sujet/clarification
+    // =========================================================================
     const subjectAnalysis = detectSubjectTransition(currentMemory, questionOriginale, {
       client: clientQuestion,
       annee: criteresQuestion.annee,
@@ -2998,6 +3057,14 @@ export async function POST(request: Request) {
         ? ((pieces[0].metadata?.titre as string) || (pieces[0].metadata?.reference as string) || pieces[0].source || null)
         : null
       
+      // Stocker le document actif complet si un seul document trouvé
+      const documentActif = pieces.length === 1 ? {
+        id: pieces[0].id,
+        titre: pieces[0].source || (pieces[0].metadata?.titre as string) || 'Document',
+        contenu: pieces[0].content || '',
+        metadata: pieces[0].metadata || {},
+      } : null
+      
       updateMemoryAfterExchange(token, sessionId, questionOriginale, narration.texte, {
         client: clientContexte || undefined,
         annee: anneeContexte || undefined,
@@ -3005,6 +3072,7 @@ export async function POST(request: Request) {
         type_document: typeDocumentContexte || undefined,
         documents_trouves: pieces.length,
         document_selectionne: documentSelectionne,
+        document_actif: documentActif,
         etat: pieces.length > 0 ? 'resultats_affiches' : 'recherche_en_cours',
       }).catch(err => {
         console.warn('Échec mise à jour mémoire structurée:', err)

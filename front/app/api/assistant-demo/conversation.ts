@@ -81,6 +81,13 @@ export type StructuredMemory = {
     mentionnes: string[]
     selectionne: string | null
   }
+  // Document actif pour les questions de suivi (résume, analyse, etc.)
+  document_actif: {
+    id: string | null
+    titre: string | null
+    contenu: string | null // Texte extrait du document
+    metadata: Record<string, unknown> | null
+  } | null
   resultats: {
     documents_trouves: number // Nombre brut, pas de texte libre
     derniere_recherche: string | null
@@ -112,6 +119,7 @@ export function createEmptyStructuredMemory(): StructuredMemory {
       mentionnes: [],
       selectionne: null,
     },
+    document_actif: null, // Pas de document actif au départ
     resultats: {
       documents_trouves: 0,
       derniere_recherche: null,
@@ -135,6 +143,12 @@ export function updateStructuredMemory(
     type_document?: string | null
     document_mentionne?: string
     document_selectionne?: string | null
+    document_actif?: {
+      id: string
+      titre: string
+      contenu: string
+      metadata: Record<string, unknown>
+    } | null
     documents_trouves?: number
     derniere_recherche?: string | null
     focus_type?: StructuredMemory['focus_actuel']['type']
@@ -157,6 +171,7 @@ export function updateStructuredMemory(
     },
     focus_actuel: { ...current.focus_actuel },
     documents: { ...current.documents, mentionnes: [...current.documents.mentionnes] },
+    document_actif: current.document_actif ? { ...current.document_actif } : null,
     resultats: { ...current.resultats },
     sujets_abordes: [...current.sujets_abordes],
     dernieres_conclusions: [...current.dernieres_conclusions],
@@ -211,6 +226,11 @@ export function updateStructuredMemory(
     newMemory.resultats.derniere_recherche = update.derniere_recherche
   }
   
+  // Mise à jour du document actif (pour les questions de suivi)
+  if (update.document_actif !== undefined) {
+    newMemory.document_actif = update.document_actif
+  }
+  
   // Mise à jour des sujets (limité à 5 derniers)
   if (update.sujet) {
     newMemory.sujets_abordes = [
@@ -232,6 +252,76 @@ export function updateStructuredMemory(
   if (update.objectif) newMemory.objectif_principal = update.objectif
   
   return newMemory
+}
+
+/**
+ * Détecte si la question est une demande de suivi sur le document actif
+ * (résume, analyse, explique, etc.)
+ */
+export function isDocumentFollowUpQuestion(question: string, memory: StructuredMemory): boolean {
+  // Pas de document actif → pas de suivi possible
+  if (!memory.document_actif && !memory.documents.selectionne) {
+    return false
+  }
+  
+  const lower = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+  
+  // Patterns de questions de suivi sur un document
+  const followUpPatterns = [
+    /\b(resume|resumer|resumes?)\s+(son|le|ce|du)\s*(contenu|document)?/i,
+    /\b(analyse|analyser|analyses?)\s+(son|le|ce|du)\s*(contenu|document)?/i,
+    /\b(explique|expliquer|expliques?)\s+(son|le|ce|du)\s*(contenu|document)?/i,
+    /\b(son contenu|le contenu|ce contenu)\b/i,
+    /\b(qu'?est[- ]ce qu'?il (contient|dit|montre|indique))\b/i,
+    /\b(de quoi (parle|traite|s'?agit))\b/i,
+    /\b(lis|lire|lecture)\s+(le|ce|moi)\b/i,
+    /\b(c'?est quoi ce document)\b/i,
+    /\b(donne[- ]moi (un resume|les details|plus d'?infos?))\b/i,
+    /\b(que dit (ce|le) document)\b/i,
+    /\b(quelles? (sont|informations?))\b.*\b(document|contenu)\b/i,
+    /^resume[- ]le$/i,
+    /^analyse[- ]le$/i,
+    /^explique[- ]le$/i,
+    /^c'?est quoi\??$/i,
+    /^de quoi (ca|ça) parle\??$/i,
+  ]
+  
+  return followUpPatterns.some(pattern => pattern.test(lower))
+}
+
+/**
+ * Génère le prompt pour le document actif (à injecter dans le system prompt)
+ */
+export function buildDocumentActivePrompt(memory: StructuredMemory): string | null {
+  if (!memory.document_actif) {
+    return null
+  }
+  
+  const doc = memory.document_actif
+  let prompt = `[DOCUMENT ACTIF]\n`
+  prompt += `Titre: ${doc.titre || 'Non spécifié'}\n`
+  
+  if (doc.metadata) {
+    const meta = doc.metadata
+    if (meta.client) prompt += `Client: ${meta.client}\n`
+    if (meta.exercice) prompt += `Exercice: ${meta.exercice}\n`
+    if (meta.type_courrier) prompt += `Type: ${meta.type_courrier}\n`
+    if (meta.risque) prompt += `Risque: ${meta.risque}\n`
+    if (meta.reference) prompt += `Référence: ${meta.reference}\n`
+    if (meta.date_ajout) prompt += `Date: ${meta.date_ajout}\n`
+  }
+  
+  if (doc.contenu) {
+    // Limiter le contenu à 2000 caractères pour ne pas surcharger le prompt
+    const contenuTronque = doc.contenu.length > 2000 
+      ? doc.contenu.substring(0, 2000) + '...[tronqué]'
+      : doc.contenu
+    prompt += `\nContenu du document:\n${contenuTronque}\n`
+  }
+  
+  prompt += `\nIMPORTANT: Réponds UNIQUEMENT en te basant sur le contenu ci-dessus. Ne déduis pas d'informations supplémentaires.`
+  
+  return prompt
 }
 
 /**
@@ -1108,6 +1198,12 @@ export async function updateMemoryAfterExchange(
     type_document?: string | null
     documents_trouves?: number
     document_selectionne?: string | null // Titre/référence du document affiché
+    document_actif?: {
+      id: string
+      titre: string
+      contenu: string
+      metadata: Record<string, unknown>
+    } | null
     etat?: StructuredMemory['etat_conversation']
   }
 ): Promise<void> {
@@ -1149,6 +1245,7 @@ export async function updateMemoryAfterExchange(
     focus_type: context.documents_trouves && context.documents_trouves > 0 ? 'documents' : undefined,
     focus_valeur: context.document_selectionne || context.client || undefined,
     document_selectionne: context.document_selectionne, // Sauvegarder le document affiché
+    document_actif: context.document_actif, // Sauvegarder le contenu complet du document
     lock_entites: context.documents_trouves !== undefined && context.documents_trouves > 0, // Lock si résultats trouvés
   })
   
