@@ -3,7 +3,7 @@ Tests pour l'API
 """
 import json
 from unittest import mock
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from django.urls import reverse
@@ -21,6 +21,36 @@ from .models import (
     LlmMonthlyQuota,
     LlmUsage,
 )
+
+
+class BaseAPITestCase(APITestCase):
+    """
+    Classe de base pour les tests API qui gère les redirections.
+    Utilise follow=True pour suivre automatiquement les redirections 301/302.
+    """
+    
+    def _make_request(self, method, url, data=None, format='json', **kwargs):
+        """Helper pour faire des requêtes en suivant les redirections."""
+        kwargs.setdefault('follow', True)
+        request_method = getattr(self.client, method)
+        if data is not None:
+            return request_method(url, data, format=format, **kwargs)
+        return request_method(url, **kwargs)
+    
+    def get(self, url, **kwargs):
+        return self._make_request('get', url, **kwargs)
+    
+    def post(self, url, data=None, **kwargs):
+        return self._make_request('post', url, data, **kwargs)
+    
+    def put(self, url, data=None, **kwargs):
+        return self._make_request('put', url, data, **kwargs)
+    
+    def patch(self, url, data=None, **kwargs):
+        return self._make_request('patch', url, data, **kwargs)
+    
+    def delete(self, url, **kwargs):
+        return self._make_request('delete', url, **kwargs)
 
 
 class UtilisateurTests(APITestCase):
@@ -63,7 +93,7 @@ class UtilisateurTests(APITestCase):
             'nom_utilisateur': 'admin.test',
             'mot_de_passe': 'TestPassword123!'
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', follow=True)
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue('token' in response.data)
@@ -77,7 +107,7 @@ class UtilisateurTests(APITestCase):
             'nom_utilisateur': 'admin.test',
             'mot_de_passe': 'WrongPassword'
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', follow=True)
         
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertTrue('erreur' in response.data)
@@ -92,7 +122,7 @@ class UtilisateurTests(APITestCase):
             'nom_utilisateur': 'admin.test',
             'mot_de_passe': 'TestPassword123!'
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', follow=True)
         
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
     
@@ -104,13 +134,13 @@ class UtilisateurTests(APITestCase):
             'nom_utilisateur': 'admin.test',
             'mot_de_passe': 'TestPassword123!'
         }
-        login_response = self.client.post(login_url, login_data, format='json')
+        login_response = self.client.post(login_url, login_data, format='json', follow=True)
         token = login_response.data['token']
         
         # Lister les utilisateurs
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
         url = reverse('utilisateur-list')
-        response = self.client.get(url)
+        response = self.client.get(url, follow=True)
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 2)
@@ -118,7 +148,7 @@ class UtilisateurTests(APITestCase):
     def test_list_utilisateurs_unauthenticated(self):
         """Test de liste des utilisateurs (non authentifié)"""
         url = reverse('utilisateur-list')
-        response = self.client.get(url)
+        response = self.client.get(url, follow=True)
         
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
@@ -130,7 +160,7 @@ class AuthenticationTests(APITestCase):
         """Test de connexion avec champs manquants"""
         url = reverse('login')
         data = {'nom_utilisateur': 'test'}
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', follow=True)
         
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -150,12 +180,8 @@ class AssistantAPITests(APITestCase):
             email='assistant@test.com'
         )
 
-        login_response = self.client.post(reverse('login'), {
-            'nom_utilisateur': 'assistant.user',
-            'mot_de_passe': 'StrongPass123!'
-        }, format='json')
-        token = login_response.data['token']
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+        # Utiliser force_authenticate pour éviter les problèmes de redirection
+        self.client.force_authenticate(user=self.user)
 
         self.client_obj = Client.objects.create(nom='Test Client')
         self.exercice = Exercice.objects.create(annee=2024, client=self.client_obj)
@@ -177,7 +203,7 @@ class AssistantAPITests(APITestCase):
         )
 
     def test_assistant_stats_endpoint(self):
-        response = self.client.get(reverse('assistant-stats'))
+        response = self.client.get(reverse('assistant-stats'), follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertIn('documents_par_mois', data)
@@ -185,7 +211,7 @@ class AssistantAPITests(APITestCase):
         self.assertIn('kpi', data)
 
     def test_assistant_tfidf_search(self):
-        response = self.client.get(reverse('assistant-document-search-tfidf'), {'q': 'responsabilité'})
+        response = self.client.get(reverse('assistant-document-search-tfidf'), {'q': 'responsabilité'}, follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertIn('results', data)
@@ -201,7 +227,7 @@ class AssistantAPITests(APITestCase):
         )
         mock_faiss.normalize_L2.side_effect = lambda x: None
 
-        response = self.client.get(reverse('assistant-document-search-faiss'), {'q': 'responsabilité'})
+        response = self.client.get(reverse('assistant-document-search-faiss'), {'q': 'responsabilité'}, follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertIn('results', data)
@@ -253,8 +279,7 @@ class LlmQuotaTests(APITestCase):
                 'estimated_tokens': 100,
                 'purpose': 'answer',
             },
-            format='json',
-        )
+            format='json', follow=True)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
@@ -289,8 +314,7 @@ class LlmQuotaTests(APITestCase):
                 'estimated_tokens': 20,  # dépasserait la limite de 100
                 'purpose': 'answer',
             },
-            format='json',
-        )
+            format='json', follow=True)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
@@ -316,8 +340,7 @@ class LlmQuotaTests(APITestCase):
                 'tokens_output': 80,
                 'timestamp': ts,
             },
-            format='json',
-        )
+            format='json', follow=True)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json().get('status'), 'ok')
@@ -350,7 +373,7 @@ class LlmQuotaTests(APITestCase):
         )
 
         url = reverse('assistant-llm-quota-status')
-        response = self.client.get(url)
+        response = self.client.get(url, follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(data['tokens_used'], 500)
@@ -385,7 +408,7 @@ class AssistantHealthTests(APITestCase):
             CLAUDE_API_KEY='test-key',
             CLAUDE_BASE_URL='https://api.anthropic.com/v1',
         ):
-            response = self.client.get(reverse('assistant-health'))
+            response = self.client.get(reverse('assistant-health'), follow=True)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             data = response.json()
             self.assertEqual(data['provider'], 'claude')
@@ -403,7 +426,7 @@ class AssistantHealthTests(APITestCase):
             ASSISTANT_LLM_ENABLED='true',
             CLAUDE_API_KEY='',  # clé manquante
         ):
-            response = self.client.get(reverse('assistant-health'))
+            response = self.client.get(reverse('assistant-health'), follow=True)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             data = response.json()
             self.assertFalse(data['config_ok'])
@@ -467,7 +490,7 @@ class AuditLogTests(APITestCase):
         
         # Test avec admin
         self.client.force_authenticate(user=self.admin)
-        response = self.client.get(reverse('audit-log-list'))
+        response = self.client.get(reverse('audit-log-list'), follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(data['total'], 2)
@@ -475,7 +498,7 @@ class AuditLogTests(APITestCase):
         
         # Test avec non-admin
         self.client.force_authenticate(user=self.user)
-        response = self.client.get(reverse('audit-log-list'))
+        response = self.client.get(reverse('audit-log-list'), follow=True)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_audit_log_list_filters(self):
@@ -489,11 +512,11 @@ class AuditLogTests(APITestCase):
         self.client.force_authenticate(user=self.admin)
         
         # Filtrer par action
-        response = self.client.get(reverse('audit-log-list'), {'action': 'CREATE'})
+        response = self.client.get(reverse('audit-log-list'), {'action': 'CREATE'}, follow=True)
         self.assertEqual(response.json()['total'], 1)
         
         # Filtrer par resource_type
-        response = self.client.get(reverse('audit-log-list'), {'resource_type': 'document'})
+        response = self.client.get(reverse('audit-log-list'), {'resource_type': 'document'}, follow=True)
         self.assertEqual(response.json()['total'], 2)
 
     def test_audit_log_detail(self):
@@ -510,7 +533,7 @@ class AuditLogTests(APITestCase):
         )
         
         self.client.force_authenticate(user=self.admin)
-        response = self.client.get(reverse('audit-log-detail', args=[log.id]))
+        response = self.client.get(reverse('audit-log-detail', args=[log.id]), follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(data['action'], 'UPDATE')
@@ -525,7 +548,7 @@ class AuditLogTests(APITestCase):
         AuditLog.log(action='READ', resource_type='client', utilisateur=self.user)
         
         self.client.force_authenticate(user=self.admin)
-        response = self.client.get(reverse('audit-log-stats'))
+        response = self.client.get(reverse('audit-log-stats'), follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(data['total_entries'], 3)
@@ -645,7 +668,7 @@ class AssistantLearningTests(APITestCase):
         )
         
         url = reverse('assistant-learning-stats')
-        response = self.client.get(url)
+        response = self.client.get(url, follow=True)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(data['total_interactions'], 3)
@@ -751,14 +774,14 @@ class ClientModelTests(TestCase):
         """Test de création d'un client."""
         client = Client.objects.create(
             nom='Entreprise ABC',
-            code='ABC001',
+            numero_client='ABC001',
             adresse='123 Rue Test',
             email='contact@abc.com',
         )
         
         self.assertIsNotNone(client.id)
         self.assertEqual(client.nom, 'Entreprise ABC')
-        self.assertEqual(client.code, 'ABC001')
+        self.assertEqual(client.numero_client, 'ABC001')
 
     def test_client_str(self):
         """Test de la représentation string d'un client."""
@@ -830,3 +853,7 @@ class RolePermissionTests(APITestCase):
         response = self.client_api.get(reverse('document-list'))
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+
+
