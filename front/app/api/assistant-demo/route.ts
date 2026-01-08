@@ -2182,7 +2182,7 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
             question: questionOriginale,
             type: 'documents',
             resume: llmResponse.content,
-            pieces: [pieceActif],
+            pieces: [], // Ne pas ré-afficher le document, juste le résumé
             insights: [],
             actions: [],
             narration: {
@@ -2227,7 +2227,7 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
             question: questionOriginale,
             type: 'documents',
             resume: fallbackResume,
-            pieces: [pieceActif],
+            pieces: [], // Ne pas ré-afficher le document, juste le résumé
             insights: [],
             actions: [],
             narration: {
