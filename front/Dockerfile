@@ -3,11 +3,13 @@
 # ============================================================================
 
 # Stage 1: Builder (installe tout et build)
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 
-# Installer les dépendances système pour les binaires natifs (lightningcss, etc.)
-RUN apk add --no-cache libc6-compat
+# Installer les dépendances système pour les binaires natifs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libc6 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copier les fichiers de dépendances
 COPY package.json package-lock.json* ./
@@ -30,7 +32,7 @@ ENV NEXT_PUBLIC_API_BASE_URL=/api
 RUN npm run build
 
 # Stage 3: Runner (production)
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
 
 # Métadonnées
@@ -41,8 +43,8 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Créer un utilisateur non-root
-RUN addgroup --system --gid 1001 nodejs \
-    && adduser --system --uid 1001 nextjs
+RUN groupadd --system --gid 1001 nodejs \
+    && useradd --system --uid 1001 --gid nodejs nextjs
 
 # Copier les fichiers nécessaires
 COPY --from=builder /app/public ./public
