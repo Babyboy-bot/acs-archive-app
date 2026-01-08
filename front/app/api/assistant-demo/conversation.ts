@@ -43,18 +43,22 @@ const MEMORY_TTL_MS = 2 * 60 * 1000 // 2 minutes
 export type StructuredMemory = {
   objectif_principal: string
   entites: {
-    client: string | null
-    annee: string | null
-    risque: string | null
-    type_document: string | null
+    client: { valeur: string | null; lock: boolean }
+    annee: { valeur: string | null; lock: boolean }
+    risque: { valeur: string | null; lock: boolean }
+    type_document: { valeur: string | null; lock: boolean }
+  }
+  focus_actuel: {
+    type: 'documents' | 'client' | 'statistiques' | null
+    valeur: string | null
   }
   documents: {
     mentionnes: string[]
     selectionne: string | null
   }
   resultats: {
-    trouves: string[]
-    absents: string[]
+    documents_trouves: number // Nombre brut, pas de texte libre
+    derniere_recherche: string | null
   }
   sujets_abordes: string[]
   dernieres_conclusions: string[]
@@ -68,18 +72,22 @@ export function createEmptyStructuredMemory(): StructuredMemory {
   return {
     objectif_principal: '',
     entites: {
-      client: null,
-      annee: null,
-      risque: null,
-      type_document: null,
+      client: { valeur: null, lock: false },
+      annee: { valeur: null, lock: false },
+      risque: { valeur: null, lock: false },
+      type_document: { valeur: null, lock: false },
+    },
+    focus_actuel: {
+      type: null,
+      valeur: null,
     },
     documents: {
       mentionnes: [],
       selectionne: null,
     },
     resultats: {
-      trouves: [],
-      absents: [],
+      documents_trouves: 0,
+      derniere_recherche: null,
     },
     sujets_abordes: [],
     dernieres_conclusions: [],
@@ -99,21 +107,62 @@ export function updateStructuredMemory(
     type_document?: string | null
     document_mentionne?: string
     document_selectionne?: string | null
-    resultat_trouve?: string
-    resultat_absent?: string
+    documents_trouves?: number
+    derniere_recherche?: string | null
+    focus_type?: StructuredMemory['focus_actuel']['type']
+    focus_valeur?: string | null
     sujet?: string
     conclusion?: string
     etat?: StructuredMemory['etat_conversation']
     objectif?: string
+    lock_entites?: boolean // Si true, verrouille les entités actuelles
   }
 ): StructuredMemory {
-  const newMemory = { ...current }
+  // Deep copy pour éviter les mutations
+  const newMemory: StructuredMemory = {
+    ...current,
+    entites: {
+      client: { ...current.entites.client },
+      annee: { ...current.entites.annee },
+      risque: { ...current.entites.risque },
+      type_document: { ...current.entites.type_document },
+    },
+    focus_actuel: { ...current.focus_actuel },
+    documents: { ...current.documents, mentionnes: [...current.documents.mentionnes] },
+    resultats: { ...current.resultats },
+    sujets_abordes: [...current.sujets_abordes],
+    dernieres_conclusions: [...current.dernieres_conclusions],
+  }
   
-  // Mise à jour des entités (garde les anciennes si pas de nouvelle valeur)
-  if (update.client !== undefined) newMemory.entites.client = update.client
-  if (update.annee !== undefined) newMemory.entites.annee = update.annee
-  if (update.risque !== undefined) newMemory.entites.risque = update.risque
-  if (update.type_document !== undefined) newMemory.entites.type_document = update.type_document
+  // Mise à jour des entités (respecte le lock si activé)
+  if (update.client !== undefined && !current.entites.client.lock) {
+    newMemory.entites.client = { valeur: update.client, lock: update.lock_entites ?? false }
+  }
+  if (update.annee !== undefined && !current.entites.annee.lock) {
+    newMemory.entites.annee = { valeur: update.annee, lock: update.lock_entites ?? false }
+  }
+  if (update.risque !== undefined && !current.entites.risque.lock) {
+    newMemory.entites.risque = { valeur: update.risque, lock: update.lock_entites ?? false }
+  }
+  if (update.type_document !== undefined && !current.entites.type_document.lock) {
+    newMemory.entites.type_document = { valeur: update.type_document, lock: update.lock_entites ?? false }
+  }
+  
+  // Verrouiller les entités si demandé
+  if (update.lock_entites) {
+    if (newMemory.entites.client.valeur) newMemory.entites.client.lock = true
+    if (newMemory.entites.annee.valeur) newMemory.entites.annee.lock = true
+    if (newMemory.entites.risque.valeur) newMemory.entites.risque.lock = true
+    if (newMemory.entites.type_document.valeur) newMemory.entites.type_document.lock = true
+  }
+  
+  // Mise à jour du focus actuel
+  if (update.focus_type !== undefined) {
+    newMemory.focus_actuel.type = update.focus_type
+  }
+  if (update.focus_valeur !== undefined) {
+    newMemory.focus_actuel.valeur = update.focus_valeur
+  }
   
   // Mise à jour des documents (limité à 5 derniers)
   if (update.document_mentionne) {
@@ -126,18 +175,12 @@ export function updateStructuredMemory(
     newMemory.documents.selectionne = update.document_selectionne
   }
   
-  // Mise à jour des résultats (limité à 3 derniers)
-  if (update.resultat_trouve) {
-    newMemory.resultats.trouves = [
-      ...newMemory.resultats.trouves.filter(r => r !== update.resultat_trouve),
-      update.resultat_trouve
-    ].slice(-3)
+  // Mise à jour des résultats (nombre brut, pas de texte)
+  if (update.documents_trouves !== undefined) {
+    newMemory.resultats.documents_trouves = update.documents_trouves
   }
-  if (update.resultat_absent) {
-    newMemory.resultats.absents = [
-      ...newMemory.resultats.absents.filter(r => r !== update.resultat_absent),
-      update.resultat_absent
-    ].slice(-3)
+  if (update.derniere_recherche !== undefined) {
+    newMemory.resultats.derniere_recherche = update.derniere_recherche
   }
   
   // Mise à jour des sujets (limité à 5 derniers)
@@ -173,14 +216,32 @@ export function structuredMemoryToPrompt(memory: StructuredMemory): string {
     parts.push(`Objectif: ${memory.objectif_principal}`)
   }
   
-  // Entités actives
+  // Entités actives (avec indication de lock)
   const entites: string[] = []
-  if (memory.entites.client) entites.push(`Client: ${memory.entites.client}`)
-  if (memory.entites.annee) entites.push(`Année: ${memory.entites.annee}`)
-  if (memory.entites.risque) entites.push(`Risque: ${memory.entites.risque}`)
-  if (memory.entites.type_document) entites.push(`Type doc: ${memory.entites.type_document}`)
+  if (memory.entites.client.valeur) {
+    entites.push(`Client: ${memory.entites.client.valeur}${memory.entites.client.lock ? ' [fixé]' : ''}`)
+  }
+  if (memory.entites.annee.valeur) {
+    entites.push(`Année: ${memory.entites.annee.valeur}${memory.entites.annee.lock ? ' [fixé]' : ''}`)
+  }
+  if (memory.entites.risque.valeur) {
+    entites.push(`Risque: ${memory.entites.risque.valeur}${memory.entites.risque.lock ? ' [fixé]' : ''}`)
+  }
+  if (memory.entites.type_document.valeur) {
+    entites.push(`Type doc: ${memory.entites.type_document.valeur}${memory.entites.type_document.lock ? ' [fixé]' : ''}`)
+  }
   if (entites.length > 0) {
     parts.push(`Contexte actuel: ${entites.join(', ')}`)
+  }
+  
+  // Focus actuel
+  if (memory.focus_actuel.type && memory.focus_actuel.valeur) {
+    parts.push(`Focus: ${memory.focus_actuel.type} - ${memory.focus_actuel.valeur}`)
+  }
+  
+  // Résultats (nombre brut)
+  if (memory.resultats.documents_trouves > 0) {
+    parts.push(`Dernière recherche: ${memory.resultats.documents_trouves} document(s) trouvé(s)`)
   }
   
   // Document sélectionné
@@ -549,12 +610,13 @@ export async function updateMemoryAfterExchange(
     conclusion: conclusion || undefined,
     etat: context.etat,
     objectif: context.client ? `Recherche documentaire ${context.client}` : currentMemory.objectif_principal,
-    resultat_trouve: context.documents_trouves && context.documents_trouves > 0 
-      ? `${context.documents_trouves} documents` 
+    documents_trouves: context.documents_trouves,
+    derniere_recherche: context.client || context.type_document 
+      ? `${context.type_document || 'documents'} ${context.client || ''}`.trim()
       : undefined,
-    resultat_absent: context.documents_trouves === 0 
-      ? (context.type_document || 'documents') 
-      : undefined,
+    focus_type: context.documents_trouves && context.documents_trouves > 0 ? 'documents' : undefined,
+    focus_valeur: context.client || undefined,
+    lock_entites: context.documents_trouves !== undefined && context.documents_trouves > 0, // Lock si résultats trouvés
   })
   
   // 5. Sauvegarder en cache local
