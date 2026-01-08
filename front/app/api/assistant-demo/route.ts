@@ -9,7 +9,7 @@ import {
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, CONFIDENCE_THRESHOLD } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, extractDocumentIndex, getDocumentFromSelection, CONFIDENCE_THRESHOLD, type DocumentSelection } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -2101,57 +2101,104 @@ export async function POST(request: Request) {
     const currentMemory = getStructuredMemory(sessionId)
     const isFollowUpOnDocument = isDocumentFollowUpQuestion(questionOriginale, currentMemory)
     
-    if (isFollowUpOnDocument && currentMemory.document_actif) {
-      console.log(`=== Mode suivi_document: Question sur le document actif "${currentMemory.document_actif.titre}" ===`)
+    if (isFollowUpOnDocument) {
+      // Extraire l'index du document si spécifié ("le 2ème", "le dernier")
+      const selectionCount = currentMemory.focus_actuel.selection?.length || 0
+      const requestedIndex = extractDocumentIndex(questionOriginale, selectionCount)
       
-      // Construire le prompt avec le contenu du document
-      const documentPrompt = buildDocumentActivePrompt(currentMemory)
+      // Chercher le document cible
+      let targetDoc: { id: string; titre: string; contenu: string; metadata: Record<string, unknown> } | null = null
       
-      // Générer une réponse LLM basée sur le document actif
-      const systemPromptDoc = `Tu es un assistant d'archivage ACS. L'utilisateur te pose une question sur un document qu'il vient de consulter.
+      // Priorité 1: Document depuis la sélection (multi-documents)
+      if (selectionCount > 0) {
+        const docFromSelection = getDocumentFromSelection(currentMemory, requestedIndex)
+        if (docFromSelection) {
+          targetDoc = {
+            id: docFromSelection.id,
+            titre: docFromSelection.label,
+            contenu: docFromSelection.contenu || '',
+            metadata: docFromSelection.metadata,
+          }
+          console.log(`=== Mode suivi_document: Document ${docFromSelection.numero}/${selectionCount} "${docFromSelection.label}" ===`)
+        }
+      }
+      
+      // Priorité 2: Document actif unique
+      if (!targetDoc && currentMemory.document_actif) {
+        targetDoc = {
+          id: currentMemory.document_actif.id || 'doc-actif',
+          titre: currentMemory.document_actif.titre || 'Document',
+          contenu: currentMemory.document_actif.contenu || '',
+          metadata: currentMemory.document_actif.metadata || {},
+        }
+        console.log(`=== Mode suivi_document: Document actif "${targetDoc.titre}" ===`)
+      }
+      
+      if (targetDoc) {
+        // Construire le prompt avec le contenu du document
+        let documentPrompt = `[DOCUMENT SELECTIONNE]\n`
+        documentPrompt += `Titre: ${targetDoc.titre}\n`
+        
+        const meta = targetDoc.metadata
+        if (meta.client) documentPrompt += `Client: ${meta.client}\n`
+        if (meta.exercice) documentPrompt += `Exercice: ${meta.exercice}\n`
+        if (meta.type_courrier) documentPrompt += `Type: ${meta.type_courrier}\n`
+        if (meta.risque) documentPrompt += `Risque: ${meta.risque}\n`
+        if (meta.reference) documentPrompt += `Référence: ${meta.reference}\n`
+        
+        if (targetDoc.contenu) {
+          const contenuTronque = targetDoc.contenu.length > 2000 
+            ? targetDoc.contenu.substring(0, 2000) + '...[tronqué]'
+            : targetDoc.contenu
+          documentPrompt += `\nContenu du document:\n${contenuTronque}\n`
+        }
+        
+        // Générer une réponse LLM basée sur le document
+        const systemPromptDoc = `Tu es un assistant d'archivage ACS. L'utilisateur te pose une question sur un document qu'il vient de consulter.
 
 ${documentPrompt}
 
-Réponds de manière concise et précise en te basant UNIQUEMENT sur les informations du document ci-dessus.`
+IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur les informations du document ci-dessus. Ne déduis pas d'informations supplémentaires.`
 
-      try {
-        const llmResponse = await generateLlmAnswer({
-          question: questionOriginale,
-          intent: 'documents',
-          sessionId,
-          token,
-          customSystemPrompt: systemPromptDoc,
-        })
-        
-        // Réutiliser le document actif comme pièce jointe
-        const pieceActif: DocumentPiece = {
-          id: currentMemory.document_actif.id || 'doc-actif',
-          source: currentMemory.document_actif.titre || 'Document actif',
-          content: currentMemory.document_actif.contenu || '',
-          metadata: currentMemory.document_actif.metadata || {},
-          score: 1.0,
+        try {
+          const llmResponse = await generateLlmAnswer({
+            question: questionOriginale,
+            intent: 'documents',
+            sessionId,
+            token,
+            customSystemPrompt: systemPromptDoc,
+          })
+          
+          // Réutiliser le document comme pièce jointe
+          const pieceActif: DocumentPiece = {
+            id: targetDoc.id,
+            source: targetDoc.titre,
+            content: targetDoc.contenu,
+            metadata: targetDoc.metadata,
+            score: 1.0,
+          }
+          
+          const reponseDoc: AssistantResponse = {
+            question: questionOriginale,
+            type: 'documents',
+            resume: llmResponse.content,
+            pieces: [pieceActif],
+            insights: [],
+            actions: [],
+            narration: {
+              texte: llmResponse.content,
+              source: 'llm',
+            },
+          }
+          
+          await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+          await addToConversationWithPersistence(sessionId, 'assistant', llmResponse.content, token)
+          
+          return NextResponse.json(reponseDoc)
+        } catch (err) {
+          console.warn('Erreur LLM pour suivi document:', err)
+          // Continuer avec le flux normal si erreur
         }
-        
-        const reponseDoc: AssistantResponse = {
-          question: questionOriginale,
-          type: 'documents',
-          resume: llmResponse.content,
-          pieces: [pieceActif],
-          insights: [],
-          actions: [],
-          narration: {
-            texte: llmResponse.content,
-            source: 'llm',
-          },
-        }
-        
-        await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
-        await addToConversationWithPersistence(sessionId, 'assistant', llmResponse.content, token)
-        
-        return NextResponse.json(reponseDoc)
-      } catch (err) {
-        console.warn('Erreur LLM pour suivi document:', err)
-        // Continuer avec le flux normal si erreur
       }
     }
     
@@ -3065,6 +3112,15 @@ Réponds de manière concise et précise en te basant UNIQUEMENT sur les informa
         metadata: pieces[0].metadata || {},
       } : null
       
+      // Stocker la liste des documents affichés (pour multi-documents)
+      const focusSelection: DocumentSelection[] = pieces.slice(0, 10).map((piece, index) => ({
+        id: piece.id,
+        numero: index + 1,
+        label: piece.source || (piece.metadata?.titre as string) || `Document ${index + 1}`,
+        contenu: piece.content || null,
+        metadata: piece.metadata || {},
+      }))
+      
       updateMemoryAfterExchange(token, sessionId, questionOriginale, narration.texte, {
         client: clientContexte || undefined,
         annee: anneeContexte || undefined,
@@ -3073,6 +3129,7 @@ Réponds de manière concise et précise en te basant UNIQUEMENT sur les informa
         documents_trouves: pieces.length,
         document_selectionne: documentSelectionne,
         document_actif: documentActif,
+        focus_selection: focusSelection.length > 0 ? focusSelection : undefined,
         etat: pieces.length > 0 ? 'resultats_affiches' : 'recherche_en_cours',
       }).catch(err => {
         console.warn('Échec mise à jour mémoire structurée:', err)

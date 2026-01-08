@@ -22,11 +22,14 @@ import {
   getTelemetryStats,
   isDocumentFollowUpQuestion,
   buildDocumentActivePrompt,
+  extractDocumentIndex,
+  getDocumentFromSelection,
   CONFIDENCE_THRESHOLD,
   type StructuredMemory,
   type SubjectAnalysis,
   type SubjectTelemetry,
   type ContextSnapshot,
+  type DocumentSelection,
 } from './conversation'
 
 // Réexporter pour utilisation dans route.ts
@@ -41,11 +44,14 @@ export {
   getTelemetryStats,
   isDocumentFollowUpQuestion,
   buildDocumentActivePrompt,
+  extractDocumentIndex,
+  getDocumentFromSelection,
   CONFIDENCE_THRESHOLD,
   type StructuredMemory,
   type SubjectAnalysis,
   type SubjectTelemetry,
   type ContextSnapshot,
+  type DocumentSelection,
 }
 
 try {

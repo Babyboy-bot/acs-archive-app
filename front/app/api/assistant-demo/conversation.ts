@@ -65,6 +65,17 @@ export type SubjectTelemetry = {
  * Structure de mémoire enrichie pour ACS Archive
  * Basée sur les recommandations ChatGPT pour un système de contexte robuste
  */
+/**
+ * Document dans la sélection (pour multi-documents)
+ */
+export type DocumentSelection = {
+  id: string
+  numero: number // 1, 2, 3... pour "le 1er", "le 2ème"
+  label: string // Titre court pour affichage
+  contenu: string | null
+  metadata: Record<string, unknown>
+}
+
 export type StructuredMemory = {
   objectif_principal: string
   entites: {
@@ -76,6 +87,7 @@ export type StructuredMemory = {
   focus_actuel: {
     type: 'documents' | 'client' | 'statistiques' | null
     valeur: string | null
+    selection: DocumentSelection[] // Liste des documents affichés
   }
   documents: {
     mentionnes: string[]
@@ -114,6 +126,7 @@ export function createEmptyStructuredMemory(): StructuredMemory {
     focus_actuel: {
       type: null,
       valeur: null,
+      selection: [], // Liste des documents affichés
     },
     documents: {
       mentionnes: [],
@@ -153,6 +166,7 @@ export function updateStructuredMemory(
     derniere_recherche?: string | null
     focus_type?: StructuredMemory['focus_actuel']['type']
     focus_valeur?: string | null
+    focus_selection?: DocumentSelection[] // Liste des documents affichés
     sujet?: string
     conclusion?: string
     etat?: StructuredMemory['etat_conversation']
@@ -169,7 +183,7 @@ export function updateStructuredMemory(
       risque: { ...current.entites.risque },
       type_document: { ...current.entites.type_document },
     },
-    focus_actuel: { ...current.focus_actuel },
+    focus_actuel: { ...current.focus_actuel, selection: [...(current.focus_actuel.selection || [])] },
     documents: { ...current.documents, mentionnes: [...current.documents.mentionnes] },
     document_actif: current.document_actif ? { ...current.document_actif } : null,
     resultats: { ...current.resultats },
@@ -205,6 +219,9 @@ export function updateStructuredMemory(
   }
   if (update.focus_valeur !== undefined) {
     newMemory.focus_actuel.valeur = update.focus_valeur
+  }
+  if (update.focus_selection !== undefined) {
+    newMemory.focus_actuel.selection = update.focus_selection
   }
   
   // Mise à jour des documents (limité à 5 derniers)
@@ -259,8 +276,12 @@ export function updateStructuredMemory(
  * (résume, analyse, explique, etc.)
  */
 export function isDocumentFollowUpQuestion(question: string, memory: StructuredMemory): boolean {
-  // Pas de document actif → pas de suivi possible
-  if (!memory.document_actif && !memory.documents.selectionne) {
+  // Pas de document actif ni de sélection → pas de suivi possible
+  const hasDocumentContext = memory.document_actif || 
+    memory.documents.selectionne || 
+    (memory.focus_actuel.selection && memory.focus_actuel.selection.length > 0)
+  
+  if (!hasDocumentContext) {
     return false
   }
   
@@ -284,9 +305,74 @@ export function isDocumentFollowUpQuestion(question: string, memory: StructuredM
     /^explique[- ]le$/i,
     /^c'?est quoi\??$/i,
     /^de quoi (ca|ça) parle\??$/i,
+    // Patterns avec index (le 1er, le 2ème, le dernier)
+    /\b(resume|analyse|explique|montre|ouvre)\s+(le\s+)?(1er|2e|2eme|3e|3eme|premier|deuxieme|troisieme|dernier)\s*(document)?/i,
+    /\b(le\s+)?(1er|2e|2eme|3e|3eme|premier|deuxieme|troisieme|dernier)\s*(document)?\s*,?\s*(resume|analyse|explique)/i,
   ]
   
   return followUpPatterns.some(pattern => pattern.test(lower))
+}
+
+/**
+ * Extrait l'index du document référencé dans la question
+ * Retourne null si pas d'index spécifique, ou le numéro (1-based)
+ */
+export function extractDocumentIndex(question: string, totalDocuments: number): number | null {
+  const lower = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+  
+  // Patterns pour extraire l'index
+  const indexPatterns: { pattern: RegExp; index: number | 'last' }[] = [
+    { pattern: /\b(1er|premier)\b/i, index: 1 },
+    { pattern: /\b(2e|2eme|deuxieme|second)\b/i, index: 2 },
+    { pattern: /\b(3e|3eme|troisieme)\b/i, index: 3 },
+    { pattern: /\b(4e|4eme|quatrieme)\b/i, index: 4 },
+    { pattern: /\b(5e|5eme|cinquieme)\b/i, index: 5 },
+    { pattern: /\b(dernier|derniere)\b/i, index: 'last' },
+  ]
+  
+  for (const { pattern, index } of indexPatterns) {
+    if (pattern.test(lower)) {
+      if (index === 'last') {
+        return totalDocuments > 0 ? totalDocuments : null
+      }
+      return index <= totalDocuments ? index : null
+    }
+  }
+  
+  // Chercher un nombre explicite (ex: "document 2", "le 3")
+  const numberMatch = lower.match(/\b(document|doc)\s*(\d+)\b|\ble\s+(\d+)\b/)
+  if (numberMatch) {
+    const num = parseInt(numberMatch[2] || numberMatch[3], 10)
+    return num > 0 && num <= totalDocuments ? num : null
+  }
+  
+  return null
+}
+
+/**
+ * Récupère le document depuis la sélection par son index
+ */
+export function getDocumentFromSelection(
+  memory: StructuredMemory, 
+  index: number | null
+): DocumentSelection | null {
+  const selection = memory.focus_actuel.selection || []
+  
+  if (selection.length === 0) {
+    return null
+  }
+  
+  // Si pas d'index spécifié et un seul document, le retourner
+  if (index === null && selection.length === 1) {
+    return selection[0]
+  }
+  
+  // Si index spécifié, chercher le document
+  if (index !== null && index > 0 && index <= selection.length) {
+    return selection.find(doc => doc.numero === index) || selection[index - 1] || null
+  }
+  
+  return null
 }
 
 /**
@@ -701,7 +787,7 @@ export function applySubjectTransition(
       newMemory.contextStack = memory.contextStack.slice(0, analysis.returnToIndex)
       
       // Reset du focus et des résultats
-      newMemory.focus_actuel = { type: null, valeur: null }
+      newMemory.focus_actuel = { type: null, valeur: null, selection: [] }
       newMemory.resultats = { documents_trouves: 0, derniere_recherche: null }
       newMemory.etat_conversation = 'recherche_en_cours'
       
@@ -740,7 +826,7 @@ export function applySubjectTransition(
     }
     
     // Reset du focus et des résultats
-    newMemory.focus_actuel = { type: null, valeur: null }
+    newMemory.focus_actuel = { type: null, valeur: null, selection: [] }
     newMemory.resultats = { documents_trouves: 0, derniere_recherche: null }
     newMemory.etat_conversation = 'recherche_en_cours'
     
@@ -1204,6 +1290,7 @@ export async function updateMemoryAfterExchange(
       contenu: string
       metadata: Record<string, unknown>
     } | null
+    focus_selection?: DocumentSelection[] // Liste des documents affichés (multi-documents)
     etat?: StructuredMemory['etat_conversation']
   }
 ): Promise<void> {
@@ -1244,6 +1331,7 @@ export async function updateMemoryAfterExchange(
       : undefined,
     focus_type: context.documents_trouves && context.documents_trouves > 0 ? 'documents' : undefined,
     focus_valeur: context.document_selectionne || context.client || undefined,
+    focus_selection: context.focus_selection, // Liste des documents affichés
     document_selectionne: context.document_selectionne, // Sauvegarder le document affiché
     document_actif: context.document_actif, // Sauvegarder le contenu complet du document
     lock_entites: context.documents_trouves !== undefined && context.documents_trouves > 0, // Lock si résultats trouvés
