@@ -188,15 +188,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: backend/requirements-ci.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip --no-cache-dir
           pip install --no-cache-dir -r requirements-ci.txt
-          # Nettoyer le cache pip pour libérer de l'espace
-          pip cache purge
 
       - name: Run Django checks
         run: python manage.py check
