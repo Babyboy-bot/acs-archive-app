@@ -2993,12 +2993,18 @@ export async function POST(request: Request) {
     // Permet au LLM de garder le contexte sur les longues conversations
     // =========================================================================
     if (token) {
+      // Extraire le titre du premier document si un seul résultat
+      const documentSelectionne = pieces.length === 1 
+        ? ((pieces[0].metadata?.titre as string) || (pieces[0].metadata?.reference as string) || pieces[0].source || null)
+        : null
+      
       updateMemoryAfterExchange(token, sessionId, questionOriginale, narration.texte, {
         client: clientContexte || undefined,
         annee: anneeContexte || undefined,
         risque: risqueContexte || undefined,
         type_document: typeDocumentContexte || undefined,
         documents_trouves: pieces.length,
+        document_selectionne: documentSelectionne,
         etat: pieces.length > 0 ? 'resultats_affiches' : 'recherche_en_cours',
       }).catch(err => {
         console.warn('Échec mise à jour mémoire structurée:', err)

@@ -346,6 +346,14 @@ export function detectSubjectTransition(
     /\b(le même|la même|les mêmes)\b/i,
     /\b(pour lui|pour eux|pour ce client)\b/i,
     /^(montre|affiche|donne)(-moi)?\s+(les autres|plus|encore)/i,
+    // Questions sur le document affiché
+    /\b(résume|résumer|résumé)\s+(son|le|ce)\s+(contenu|document)/i,
+    /\b(analyse|analyser|analyser)\s+(son|le|ce)\s+(contenu|document)/i,
+    /\b(son contenu|le contenu|ce contenu)\b/i,
+    /\b(qu'est-ce qu'il (contient|dit|montre))\b/i,
+    /\b(de quoi (parle|traite))\b/i,
+    /\b(lis|lire|lecture)\s+(le|ce|moi)\b/i,
+    /\b(ouvre|ouvrir|télécharge|télécharger)\s+(le|ce)\b/i,
   ]
   
   // Patterns de nouveau sujet explicite
@@ -1099,6 +1107,7 @@ export async function updateMemoryAfterExchange(
     risque?: string | null
     type_document?: string | null
     documents_trouves?: number
+    document_selectionne?: string | null // Titre/référence du document affiché
     etat?: StructuredMemory['etat_conversation']
   }
 ): Promise<void> {
@@ -1138,7 +1147,8 @@ export async function updateMemoryAfterExchange(
       ? `${context.type_document || 'documents'} ${context.client || ''}`.trim()
       : undefined,
     focus_type: context.documents_trouves && context.documents_trouves > 0 ? 'documents' : undefined,
-    focus_valeur: context.client || undefined,
+    focus_valeur: context.document_selectionne || context.client || undefined,
+    document_selectionne: context.document_selectionne, // Sauvegarder le document affiché
     lock_entites: context.documents_trouves !== undefined && context.documents_trouves > 0, // Lock si résultats trouvés
   })
   
