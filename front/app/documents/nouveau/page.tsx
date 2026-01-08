@@ -4,7 +4,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { apiFetchJson } from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useRequireAuth'
@@ -39,6 +39,30 @@ export default function PageNouveauDocument() {
     }[]
   }[]>([])
   const [chargementClients, setChargementClients] = useState(false)
+  const [rechercheClient, setRechercheClient] = useState('')
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false)
+  const clientDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Fermer le dropdown client quand on clique ailleurs
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
+        setClientDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const clientsFiltres = useMemo(() => {
+    if (!rechercheClient.trim()) {
+      return clients.slice(0, 50)
+    }
+    const rechercheLower = rechercheClient.toLowerCase()
+    return clients.filter(client => 
+      client.nom.toLowerCase().includes(rechercheLower)
+    ).slice(0, 50)
+  }, [clients, rechercheClient])
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFichiers(prev => [...prev, ...acceptedFiles])
@@ -428,18 +452,46 @@ export default function PageNouveauDocument() {
 
                 <div>
                   <label className="block text-xs font-medium text-theme-secondary mb-1.5">Client *</label>
-                  <select
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
-                    required
-                    disabled={chargementClients}
-                  >
-                    <option value="">Sélectionner</option>
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.id}>{client.nom}</option>
-                    ))}
-                  </select>
+                  <div className="relative" ref={clientDropdownRef}>
+                    <input
+                      type="text"
+                      value={rechercheClient}
+                      onChange={(e) => {
+                        setRechercheClient(e.target.value)
+                        setClientDropdownOpen(true)
+                      }}
+                      onFocus={() => setClientDropdownOpen(true)}
+                      className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
+                      placeholder="Tapez pour rechercher un client..."
+                      disabled={chargementClients}
+                    />
+                    {clientDropdownOpen && (
+                      <div className="absolute z-50 w-full mt-1 bg-theme-card border border-theme rounded-lg shadow-lg max-h-60 overflow-auto">
+                        {clientsFiltres.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-theme-secondary">Aucun client trouvé</div>
+                        ) : (
+                          clientsFiltres.map((client) => (
+                            <button
+                              key={client.id}
+                              type="button"
+                              onClick={() => {
+                                setClientId(client.id)
+                                setRechercheClient(client.nom)
+                                setClientDropdownOpen(false)
+                                setExerciceId('')
+                                setRisqueId('')
+                              }}
+                              className={`w-full px-3 py-2 text-left text-sm hover:bg-theme-muted transition-colors ${
+                                clientId === client.id ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400' : 'text-theme-primary'
+                              }`}
+                            >
+                              {client.nom}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                   {clients.length === 0 && !chargementClients && (
                     <p className="text-xs text-amber-600 mt-1">Aucun client disponible</p>
                   )}
