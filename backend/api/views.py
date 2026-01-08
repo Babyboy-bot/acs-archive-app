@@ -2730,20 +2730,20 @@ def version_info(request):
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def audit_log_list(request):
     """Liste des logs d'audit."""
-    from .models import HistoriqueActivite
+    from .models import AuditLog
     
-    logs = HistoriqueActivite.objects.all().order_by('-date_action')[:100]
+    logs = AuditLog.objects.all().order_by('-timestamp')[:100]
     data = [
         {
             'id': log.id,
-            'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else None,
+            'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else log.utilisateur_nom,
             'action': log.action,
             'details': log.details,
-            'date': log.date_action.isoformat(),
+            'date': log.timestamp.isoformat(),
         }
         for log in logs
     ]
-    return Response({'logs': data})
+    return Response({'logs': data, 'total': AuditLog.objects.count()})
 
 
 setattr(audit_log_list, 'ressource', 'audit')
@@ -2753,18 +2753,18 @@ setattr(audit_log_list, 'ressource', 'audit')
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def audit_log_detail(request, log_id):
     """Détail d'un log d'audit."""
-    from .models import HistoriqueActivite
+    from .models import AuditLog
     
     try:
-        log = HistoriqueActivite.objects.get(id=log_id)
+        log = AuditLog.objects.get(id=log_id)
         return Response({
             'id': log.id,
-            'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else None,
+            'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else log.utilisateur_nom,
             'action': log.action,
             'details': log.details,
-            'date': log.date_action.isoformat(),
+            'date': log.timestamp.isoformat(),
         })
-    except HistoriqueActivite.DoesNotExist:
+    except AuditLog.DoesNotExist:
         return Response({'error': 'Log non trouvé'}, status=status.HTTP_404_NOT_FOUND)
 
 
@@ -2775,9 +2775,9 @@ setattr(audit_log_detail, 'ressource', 'audit')
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def audit_log_stats(request):
     """Statistiques des logs d'audit."""
-    from .models import HistoriqueActivite
+    from .models import AuditLog
     
-    total = HistoriqueActivite.objects.count()
+    total = AuditLog.objects.count()
     return Response({
         'total_logs': total,
     })
