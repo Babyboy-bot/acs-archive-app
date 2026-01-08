@@ -37,6 +37,174 @@ const memoryCache = new Map<string, { value: ConversationMemory; updatedAt: numb
 const MEMORY_TTL_MS = 2 * 60 * 1000 // 2 minutes
 
 /**
+ * Structure de mémoire enrichie pour ACS Archive
+ * Basée sur les recommandations ChatGPT pour un système de contexte robuste
+ */
+export type StructuredMemory = {
+  objectif_principal: string
+  entites: {
+    client: string | null
+    annee: string | null
+    risque: string | null
+    type_document: string | null
+  }
+  documents: {
+    mentionnes: string[]
+    selectionne: string | null
+  }
+  resultats: {
+    trouves: string[]
+    absents: string[]
+  }
+  sujets_abordes: string[]
+  dernieres_conclusions: string[]
+  etat_conversation: 'salutation' | 'recherche_en_cours' | 'resultats_affiches' | 'question_generale' | 'hors_sujet'
+}
+
+/**
+ * Crée une mémoire structurée vide
+ */
+export function createEmptyStructuredMemory(): StructuredMemory {
+  return {
+    objectif_principal: '',
+    entites: {
+      client: null,
+      annee: null,
+      risque: null,
+      type_document: null,
+    },
+    documents: {
+      mentionnes: [],
+      selectionne: null,
+    },
+    resultats: {
+      trouves: [],
+      absents: [],
+    },
+    sujets_abordes: [],
+    dernieres_conclusions: [],
+    etat_conversation: 'salutation',
+  }
+}
+
+/**
+ * Met à jour la mémoire structurée avec les nouvelles informations
+ */
+export function updateStructuredMemory(
+  current: StructuredMemory,
+  update: {
+    client?: string | null
+    annee?: string | null
+    risque?: string | null
+    type_document?: string | null
+    document_mentionne?: string
+    document_selectionne?: string | null
+    resultat_trouve?: string
+    resultat_absent?: string
+    sujet?: string
+    conclusion?: string
+    etat?: StructuredMemory['etat_conversation']
+    objectif?: string
+  }
+): StructuredMemory {
+  const newMemory = { ...current }
+  
+  // Mise à jour des entités (garde les anciennes si pas de nouvelle valeur)
+  if (update.client !== undefined) newMemory.entites.client = update.client
+  if (update.annee !== undefined) newMemory.entites.annee = update.annee
+  if (update.risque !== undefined) newMemory.entites.risque = update.risque
+  if (update.type_document !== undefined) newMemory.entites.type_document = update.type_document
+  
+  // Mise à jour des documents (limité à 5 derniers)
+  if (update.document_mentionne) {
+    newMemory.documents.mentionnes = [
+      ...newMemory.documents.mentionnes.filter(d => d !== update.document_mentionne),
+      update.document_mentionne
+    ].slice(-5)
+  }
+  if (update.document_selectionne !== undefined) {
+    newMemory.documents.selectionne = update.document_selectionne
+  }
+  
+  // Mise à jour des résultats (limité à 3 derniers)
+  if (update.resultat_trouve) {
+    newMemory.resultats.trouves = [
+      ...newMemory.resultats.trouves.filter(r => r !== update.resultat_trouve),
+      update.resultat_trouve
+    ].slice(-3)
+  }
+  if (update.resultat_absent) {
+    newMemory.resultats.absents = [
+      ...newMemory.resultats.absents.filter(r => r !== update.resultat_absent),
+      update.resultat_absent
+    ].slice(-3)
+  }
+  
+  // Mise à jour des sujets (limité à 5 derniers)
+  if (update.sujet) {
+    newMemory.sujets_abordes = [
+      ...newMemory.sujets_abordes.filter(s => s !== update.sujet),
+      update.sujet
+    ].slice(-5)
+  }
+  
+  // Mise à jour des conclusions (limité à 3 dernières)
+  if (update.conclusion) {
+    newMemory.dernieres_conclusions = [
+      ...newMemory.dernieres_conclusions,
+      update.conclusion
+    ].slice(-3)
+  }
+  
+  // Mise à jour de l'état et objectif
+  if (update.etat) newMemory.etat_conversation = update.etat
+  if (update.objectif) newMemory.objectif_principal = update.objectif
+  
+  return newMemory
+}
+
+/**
+ * Convertit la mémoire structurée en texte pour injection dans le prompt
+ */
+export function structuredMemoryToPrompt(memory: StructuredMemory): string {
+  const parts: string[] = []
+  
+  if (memory.objectif_principal) {
+    parts.push(`Objectif: ${memory.objectif_principal}`)
+  }
+  
+  // Entités actives
+  const entites: string[] = []
+  if (memory.entites.client) entites.push(`Client: ${memory.entites.client}`)
+  if (memory.entites.annee) entites.push(`Année: ${memory.entites.annee}`)
+  if (memory.entites.risque) entites.push(`Risque: ${memory.entites.risque}`)
+  if (memory.entites.type_document) entites.push(`Type doc: ${memory.entites.type_document}`)
+  if (entites.length > 0) {
+    parts.push(`Contexte actuel: ${entites.join(', ')}`)
+  }
+  
+  // Document sélectionné
+  if (memory.documents.selectionne) {
+    parts.push(`Document en cours: ${memory.documents.selectionne}`)
+  }
+  
+  // Sujets abordés
+  if (memory.sujets_abordes.length > 0) {
+    parts.push(`Sujets abordés: ${memory.sujets_abordes.join(', ')}`)
+  }
+  
+  // Dernières conclusions
+  if (memory.dernieres_conclusions.length > 0) {
+    parts.push(`Points clés: ${memory.dernieres_conclusions.join(' | ')}`)
+  }
+  
+  // État
+  parts.push(`État: ${memory.etat_conversation}`)
+  
+  return parts.join('\n')
+}
+
+/**
  * Récupère ou crée une conversation pour un utilisateur
  */
 export async function getOrCreateConversation(token: string, sessionId: string): Promise<string | null> {
@@ -313,4 +481,93 @@ export async function addMessagePersistent(
 export function clearLocalCache(sessionId: string): void {
   localCache.delete(sessionId)
   conversationIdCache.delete(sessionId)
+}
+
+// Cache local pour la mémoire structurée
+const structuredMemoryCache = new Map<string, StructuredMemory>()
+
+/**
+ * Récupère la mémoire structurée d'une session
+ */
+export function getStructuredMemory(sessionId: string): StructuredMemory {
+  return structuredMemoryCache.get(sessionId) ?? createEmptyStructuredMemory()
+}
+
+/**
+ * Sauvegarde la mémoire structurée d'une session
+ */
+export function setStructuredMemory(sessionId: string, memory: StructuredMemory): void {
+  structuredMemoryCache.set(sessionId, memory)
+}
+
+/**
+ * Met à jour la mémoire après un échange complet (question + réponse)
+ * C'est la fonction clé pour le résumé incrémental
+ */
+export async function updateMemoryAfterExchange(
+  token: string,
+  sessionId: string,
+  userMessage: string,
+  assistantMessage: string,
+  context: {
+    client?: string | null
+    annee?: string | null
+    risque?: string | null
+    type_document?: string | null
+    documents_trouves?: number
+    etat?: StructuredMemory['etat_conversation']
+  }
+): Promise<void> {
+  // 1. Récupérer la mémoire structurée actuelle
+  const currentMemory = getStructuredMemory(sessionId)
+  
+  // 2. Déterminer le sujet de la question
+  let sujet = ''
+  if (context.client) sujet = `Recherche ${context.client}`
+  else if (context.type_document) sujet = `Documents ${context.type_document}`
+  else if (userMessage.length < 50) sujet = userMessage.substring(0, 30)
+  
+  // 3. Déterminer la conclusion de l'échange
+  let conclusion = ''
+  if (context.documents_trouves !== undefined) {
+    if (context.documents_trouves > 0) {
+      conclusion = `${context.documents_trouves} doc(s) trouvé(s)`
+      if (context.client) conclusion += ` pour ${context.client}`
+    } else {
+      conclusion = 'Aucun document trouvé'
+      if (context.client) conclusion += ` pour ${context.client}`
+    }
+  }
+  
+  // 4. Mettre à jour la mémoire structurée
+  const updatedMemory = updateStructuredMemory(currentMemory, {
+    client: context.client,
+    annee: context.annee,
+    risque: context.risque,
+    type_document: context.type_document,
+    sujet: sujet || undefined,
+    conclusion: conclusion || undefined,
+    etat: context.etat,
+    objectif: context.client ? `Recherche documentaire ${context.client}` : currentMemory.objectif_principal,
+    resultat_trouve: context.documents_trouves && context.documents_trouves > 0 
+      ? `${context.documents_trouves} documents` 
+      : undefined,
+    resultat_absent: context.documents_trouves === 0 
+      ? (context.type_document || 'documents') 
+      : undefined,
+  })
+  
+  // 5. Sauvegarder en cache local
+  setStructuredMemory(sessionId, updatedMemory)
+  
+  // 6. Persister en base de données (en arrière-plan)
+  if (token) {
+    const memoryPrompt = structuredMemoryToPrompt(updatedMemory)
+    updateConversationMemoryPersistent(token, sessionId, {
+      memoire_resume: memoryPrompt,
+      memoire_etat: updatedMemory as unknown as Record<string, unknown>,
+    }).catch(err => {
+      console.warn('Échec de la mise à jour de la mémoire:', err)
+    })
+  }
 }

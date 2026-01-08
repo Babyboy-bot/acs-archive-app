@@ -9,7 +9,7 @@ import {
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -2952,6 +2952,23 @@ export async function POST(request: Request) {
     // =========================================================================
     await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
     await addToConversationWithPersistence(sessionId, 'assistant', narration.texte, token)
+
+    // =========================================================================
+    // MISE À JOUR DE LA MÉMOIRE STRUCTURÉE (résumé incrémental)
+    // Permet au LLM de garder le contexte sur les longues conversations
+    // =========================================================================
+    if (token) {
+      updateMemoryAfterExchange(token, sessionId, questionOriginale, narration.texte, {
+        client: clientContexte || undefined,
+        annee: anneeContexte || undefined,
+        risque: risqueContexte || undefined,
+        type_document: typeDocumentContexte || undefined,
+        documents_trouves: pieces.length,
+        etat: pieces.length > 0 ? 'resultats_affiches' : 'recherche_en_cours',
+      }).catch(err => {
+        console.warn('Échec mise à jour mémoire structurée:', err)
+      })
+    }
 
     console.info('assistant-demo', {
       intent,

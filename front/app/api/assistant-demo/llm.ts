@@ -11,7 +11,14 @@ import {
   getConversationHistoryPersistent,
   addMessagePersistent,
   clearLocalCache,
+  getStructuredMemory,
+  structuredMemoryToPrompt,
+  updateMemoryAfterExchange,
+  type StructuredMemory,
 } from './conversation'
+
+// Réexporter pour utilisation dans route.ts
+export { updateMemoryAfterExchange, getStructuredMemory, type StructuredMemory }
 
 try {
   setDefaultResultOrder('ipv4first')
@@ -425,7 +432,17 @@ function sanitizeText(value: string | undefined | null): string {
 export function buildPrompt(payload: LlmPayload): string {
   const parts: string[] = []
 
-  if (payload.conversationSummary) {
+  // PRIORITÉ 1: Mémoire structurée (source de vérité pour le contexte)
+  if (payload.sessionId) {
+    const structuredMemory = getStructuredMemory(payload.sessionId)
+    const memoryPrompt = structuredMemoryToPrompt(structuredMemory)
+    if (memoryPrompt && structuredMemory.etat_conversation !== 'salutation') {
+      parts.push(`[MÉMOIRE CONVERSATION]\n${memoryPrompt}`)
+    }
+  }
+
+  // PRIORITÉ 2: Résumé textuel (fallback si pas de mémoire structurée)
+  if (payload.conversationSummary && parts.length === 0) {
     parts.push(`[MEMOIRE CONVERSATION]\n${sanitizeText(payload.conversationSummary)}`)
   }
 
