@@ -2197,7 +2197,49 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
           return NextResponse.json(reponseDoc)
         } catch (err) {
           console.warn('Erreur LLM pour suivi document:', err)
-          // Continuer avec le flux normal si erreur
+          
+          // Fallback: retourner une réponse basée sur les métadonnées du document
+          // au lieu de déclencher une nouvelle recherche
+          const meta = targetDoc.metadata
+          let fallbackResume = `Voici les informations disponibles sur le document **${targetDoc.titre}** :\n\n`
+          if (meta.client) fallbackResume += `- **Client** : ${meta.client}\n`
+          if (meta.exercice) fallbackResume += `- **Exercice** : ${meta.exercice}\n`
+          if (meta.type_courrier) fallbackResume += `- **Type** : ${meta.type_courrier}\n`
+          if (meta.risque) fallbackResume += `- **Risque** : ${meta.risque}\n`
+          if (meta.reference) fallbackResume += `- **Référence** : ${meta.reference}\n`
+          
+          if (targetDoc.contenu && targetDoc.contenu.length > 100) {
+            const extrait = targetDoc.contenu.substring(0, 300).trim()
+            fallbackResume += `\n**Extrait du contenu** :\n${extrait}...`
+          } else {
+            fallbackResume += `\n*Le contenu détaillé n'est pas disponible pour ce document.*`
+          }
+          
+          const pieceActif: DocumentPiece = {
+            id: targetDoc.id,
+            source: targetDoc.titre,
+            content: targetDoc.contenu,
+            metadata: targetDoc.metadata,
+            score: 1.0,
+          }
+          
+          const reponseFallback: AssistantResponse = {
+            question: questionOriginale,
+            type: 'documents',
+            resume: fallbackResume,
+            pieces: [pieceActif],
+            insights: [],
+            actions: [],
+            narration: {
+              texte: fallbackResume,
+              source: 'heuristique',
+            },
+          }
+          
+          await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
+          await addToConversationWithPersistence(sessionId, 'assistant', fallbackResume, token)
+          
+          return NextResponse.json(reponseFallback)
         }
       }
     }
