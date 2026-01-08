@@ -37,6 +37,31 @@ const memoryCache = new Map<string, { value: ConversationMemory; updatedAt: numb
 const MEMORY_TTL_MS = 2 * 60 * 1000 // 2 minutes
 
 /**
+ * Snapshot d'un contexte pour la pile (return_subject)
+ */
+export type ContextSnapshot = {
+  client: string | null
+  annee: string | null
+  risque: string | null
+  type_document: string | null
+  timestamp: number
+  label: string // Ex: "SONATEL 2024"
+}
+
+/**
+ * Télémétrie pour le routeur de sujet
+ */
+export type SubjectTelemetry = {
+  timestamp: number
+  question: string
+  transition: SubjectTransition
+  confidence: number
+  contextBefore: ContextSnapshot
+  contextAfter: ContextSnapshot
+  wasOverridden: boolean // Si l'utilisateur a corrigé immédiatement après
+}
+
+/**
  * Structure de mémoire enrichie pour ACS Archive
  * Basée sur les recommandations ChatGPT pour un système de contexte robuste
  */
@@ -63,6 +88,8 @@ export type StructuredMemory = {
   sujets_abordes: string[]
   dernieres_conclusions: string[]
   etat_conversation: 'salutation' | 'recherche_en_cours' | 'resultats_affiches' | 'question_generale' | 'hors_sujet'
+  // Sprint 3: Pile de contextes pour return_subject
+  contextStack: ContextSnapshot[]
 }
 
 /**
@@ -92,6 +119,7 @@ export function createEmptyStructuredMemory(): StructuredMemory {
     sujets_abordes: [],
     dernieres_conclusions: [],
     etat_conversation: 'salutation',
+    contextStack: [], // Pile de contextes pour return_subject
   }
 }
 
@@ -273,6 +301,7 @@ export type SubjectTransition =
   | 'new_subject'     // Nouveau sujet, reset partiel nécessaire
   | 'return_subject'  // Retour à un sujet précédent
   | 'clarification'   // Demande de clarification sur le contexte actuel
+  | 'low_confidence'  // Confiance trop basse, demander clarification
 
 /**
  * Résultat de l'analyse de transition de sujet
@@ -281,12 +310,17 @@ export type SubjectAnalysis = {
   transition: SubjectTransition
   confidence: number // 0-1
   newClient: string | null
+  returnToIndex: number | null // Index dans contextStack pour return_subject
   shouldResetClient: boolean
   shouldResetYear: boolean
   shouldResetDocType: boolean
   shouldResetRisk: boolean
   reason: string
+  needsClarification: boolean // Si true, demander confirmation à l'utilisateur
 }
+
+// Seuil de confiance minimum pour appliquer une transition automatiquement
+export const CONFIDENCE_THRESHOLD = 0.7
 
 /**
  * Détecte le type de transition de sujet dans la conversation
@@ -329,14 +363,20 @@ export function detectSubjectTransition(
     /\b(je ne comprends pas|pas compris)\b/i,
   ]
   
-  // Vérifier les patterns de continuité
+  // Patterns de retour à un sujet précédent (return_subject)
+  const returnSubjectPatterns = [
+    /\b(reviens?|retourne?|retournons?)\s+(au?|sur)\s+(sujet|client|contexte)\s+(précédent|d'avant|avant)/i,
+    /\b(le client|celui)\s+(d'avant|précédent)/i,
+    /\b(comme (tout à l'heure|avant|tantôt))\b/i,
+    /\b(reprends?|reprendre)\s+(le sujet|où on en était)/i,
+    /\b(on parlait de|on cherchait)\s+(\w+)\s+(avant|tout à l'heure)/i,
+  ]
+  
+  // Vérifier les patterns
   const isContinuity = continuityPatterns.some(p => p.test(questionLower))
-  
-  // Vérifier les patterns de nouveau sujet
   const isExplicitNewSubject = newSubjectPatterns.some(p => p.test(questionLower))
-  
-  // Vérifier les patterns de clarification
   const isClarification = clarificationPatterns.some(p => p.test(questionLower))
+  const isReturnSubject = returnSubjectPatterns.some(p => p.test(questionLower))
   
   // Analyser les changements d'entités
   const currentClient = currentMemory.entites.client.valeur
@@ -347,17 +387,62 @@ export function detectSubjectTransition(
   const hasNewYear = newCriteres.annee && newCriteres.annee !== currentYear
   const hasNewDocType = newCriteres.type_document && newCriteres.type_document !== currentDocType
   
+  // Vérifier si le client mentionné est dans la pile de contextes (return_subject implicite)
+  let returnToIndex: number | null = null
+  if (newCriteres.client && currentMemory.contextStack.length > 0) {
+    const clientLower = newCriteres.client.toLowerCase()
+    returnToIndex = currentMemory.contextStack.findIndex(
+      ctx => ctx.client?.toLowerCase() === clientLower
+    )
+    if (returnToIndex === -1) returnToIndex = null
+  }
+  
+  // Cas 0: Retour explicite à un sujet précédent
+  if (isReturnSubject && currentMemory.contextStack.length > 0) {
+    const lastIndex = currentMemory.contextStack.length - 1
+    return {
+      transition: 'return_subject',
+      confidence: 0.95,
+      newClient: currentMemory.contextStack[lastIndex]?.client || null,
+      returnToIndex: lastIndex,
+      shouldResetClient: false,
+      shouldResetYear: false,
+      shouldResetDocType: false,
+      shouldResetRisk: false,
+      reason: 'Retour explicite au sujet précédent',
+      needsClarification: false,
+    }
+  }
+  
+  // Cas 0b: Client mentionné est dans la pile (return_subject implicite)
+  if (returnToIndex !== null && !isExplicitNewSubject) {
+    return {
+      transition: 'return_subject',
+      confidence: 0.85,
+      newClient: newCriteres.client || null,
+      returnToIndex,
+      shouldResetClient: false,
+      shouldResetYear: false,
+      shouldResetDocType: false,
+      shouldResetRisk: false,
+      reason: `Retour au client précédent: ${newCriteres.client}`,
+      needsClarification: false,
+    }
+  }
+  
   // Cas 1: Clarification
   if (isClarification && !hasNewClient && !hasNewYear && !hasNewDocType) {
     return {
       transition: 'clarification',
       confidence: 0.9,
       newClient: null,
+      returnToIndex: null,
       shouldResetClient: false,
       shouldResetYear: false,
       shouldResetDocType: false,
       shouldResetRisk: false,
       reason: 'Demande de clarification détectée',
+      needsClarification: false,
     }
   }
   
@@ -367,11 +452,13 @@ export function detectSubjectTransition(
       transition: 'continuity',
       confidence: 0.95,
       newClient: null,
+      returnToIndex: null,
       shouldResetClient: false,
       shouldResetYear: false,
       shouldResetDocType: false,
       shouldResetRisk: false,
       reason: 'Question de suivi sur le même contexte',
+      needsClarification: false,
     }
   }
   
@@ -381,25 +468,30 @@ export function detectSubjectTransition(
       transition: 'new_subject',
       confidence: 0.9,
       newClient: newCriteres.client || null,
+      returnToIndex: null,
       shouldResetClient: true,
       shouldResetYear: true,
       shouldResetDocType: true,
       shouldResetRisk: true,
       reason: 'Changement de sujet explicite détecté',
+      needsClarification: false,
     }
   }
   
-  // Cas 4: Nouveau client mentionné (changement implicite)
+  // Cas 4: Nouveau client mentionné (changement implicite) - confiance moyenne
   if (hasNewClient) {
+    const confidence = 0.65 // Confiance réduite car implicite
     return {
-      transition: 'new_subject',
-      confidence: 0.85,
+      transition: confidence >= CONFIDENCE_THRESHOLD ? 'new_subject' : 'low_confidence',
+      confidence,
       newClient: newCriteres.client || null,
+      returnToIndex: null,
       shouldResetClient: true,
-      shouldResetYear: !newCriteres.annee, // Reset si pas de nouvelle année spécifiée
+      shouldResetYear: !newCriteres.annee,
       shouldResetDocType: !newCriteres.type_document,
       shouldResetRisk: !newCriteres.risque,
       reason: `Nouveau client détecté: ${newCriteres.client}`,
+      needsClarification: confidence < CONFIDENCE_THRESHOLD,
     }
   }
   
@@ -409,11 +501,13 @@ export function detectSubjectTransition(
       transition: 'new_subject',
       confidence: 0.8,
       newClient: newCriteres.client,
-      shouldResetClient: false, // Pas de reset, c'est le premier
+      returnToIndex: null,
+      shouldResetClient: false,
       shouldResetYear: false,
       shouldResetDocType: false,
       shouldResetRisk: false,
       reason: 'Premier client de la conversation',
+      needsClarification: false,
     }
   }
   
@@ -423,24 +517,44 @@ export function detectSubjectTransition(
       transition: 'continuity',
       confidence: 0.7,
       newClient: null,
+      returnToIndex: null,
       shouldResetClient: false,
       shouldResetYear: false,
       shouldResetDocType: false,
       shouldResetRisk: false,
       reason: 'Question vague, maintien du contexte actuel',
+      needsClarification: false,
     }
   }
   
-  // Cas par défaut: continuité avec faible confiance
+  // Cas par défaut: confiance trop basse, demander clarification
   return {
-    transition: 'continuity',
+    transition: 'low_confidence',
     confidence: 0.5,
     newClient: null,
+    returnToIndex: null,
     shouldResetClient: false,
     shouldResetYear: false,
     shouldResetDocType: false,
     shouldResetRisk: false,
-    reason: 'Aucun pattern clair détecté, maintien du contexte',
+    reason: 'Aucun pattern clair détecté, clarification recommandée',
+    needsClarification: true,
+  }
+}
+
+/**
+ * Crée un snapshot du contexte actuel pour la pile
+ */
+export function createContextSnapshot(memory: StructuredMemory): ContextSnapshot {
+  const client = memory.entites.client.valeur
+  const annee = memory.entites.annee.valeur
+  return {
+    client,
+    annee,
+    risque: memory.entites.risque.valeur,
+    type_document: memory.entites.type_document.valeur,
+    timestamp: Date.now(),
+    label: [client, annee].filter(Boolean).join(' ') || 'Contexte vide',
   }
 }
 
@@ -451,12 +565,14 @@ export function applySubjectTransition(
   memory: StructuredMemory,
   analysis: SubjectAnalysis
 ): StructuredMemory {
-  // Si continuité ou clarification, pas de changement
-  if (analysis.transition === 'continuity' || analysis.transition === 'clarification') {
+  // Si continuité, clarification ou low_confidence, pas de changement
+  if (analysis.transition === 'continuity' || 
+      analysis.transition === 'clarification' ||
+      analysis.transition === 'low_confidence') {
     return memory
   }
   
-  // Deep copy
+  // Deep copy avec contextStack
   const newMemory: StructuredMemory = {
     ...memory,
     entites: {
@@ -470,24 +586,62 @@ export function applySubjectTransition(
     resultats: { ...memory.resultats },
     sujets_abordes: [...memory.sujets_abordes],
     dernieres_conclusions: [...memory.dernieres_conclusions],
+    contextStack: [...memory.contextStack],
   }
   
-  // Appliquer les resets selon l'analyse
-  if (analysis.shouldResetClient) {
-    newMemory.entites.client = { valeur: analysis.newClient, lock: false }
-  }
-  if (analysis.shouldResetYear) {
-    newMemory.entites.annee = { valeur: null, lock: false }
-  }
-  if (analysis.shouldResetDocType) {
-    newMemory.entites.type_document = { valeur: null, lock: false }
-  }
-  if (analysis.shouldResetRisk) {
-    newMemory.entites.risque = { valeur: null, lock: false }
+  // Cas return_subject: restaurer un contexte précédent
+  if (analysis.transition === 'return_subject' && analysis.returnToIndex !== null) {
+    const restoredContext = memory.contextStack[analysis.returnToIndex]
+    if (restoredContext) {
+      // Restaurer les entités du contexte précédent
+      newMemory.entites.client = { valeur: restoredContext.client, lock: false }
+      newMemory.entites.annee = { valeur: restoredContext.annee, lock: false }
+      newMemory.entites.risque = { valeur: restoredContext.risque, lock: false }
+      newMemory.entites.type_document = { valeur: restoredContext.type_document, lock: false }
+      
+      // Retirer ce contexte et tous ceux après de la pile
+      newMemory.contextStack = memory.contextStack.slice(0, analysis.returnToIndex)
+      
+      // Reset du focus et des résultats
+      newMemory.focus_actuel = { type: null, valeur: null }
+      newMemory.resultats = { documents_trouves: 0, derniere_recherche: null }
+      newMemory.etat_conversation = 'recherche_en_cours'
+      
+      // Ajouter à l'historique des sujets
+      newMemory.sujets_abordes = [
+        ...newMemory.sujets_abordes,
+        `Retour: ${restoredContext.label}`
+      ].slice(-5)
+    }
+    return newMemory
   }
   
-  // Reset du focus et des résultats si nouveau sujet
+  // Cas new_subject: sauvegarder le contexte actuel avant de changer
   if (analysis.transition === 'new_subject') {
+    // Sauvegarder le contexte actuel dans la pile (si on a un client)
+    if (memory.entites.client.valeur) {
+      const currentSnapshot = createContextSnapshot(memory)
+      newMemory.contextStack = [
+        ...memory.contextStack,
+        currentSnapshot
+      ].slice(-5) // Garder max 5 contextes
+    }
+    
+    // Appliquer les resets
+    if (analysis.shouldResetClient) {
+      newMemory.entites.client = { valeur: analysis.newClient, lock: false }
+    }
+    if (analysis.shouldResetYear) {
+      newMemory.entites.annee = { valeur: null, lock: false }
+    }
+    if (analysis.shouldResetDocType) {
+      newMemory.entites.type_document = { valeur: null, lock: false }
+    }
+    if (analysis.shouldResetRisk) {
+      newMemory.entites.risque = { valeur: null, lock: false }
+    }
+    
+    // Reset du focus et des résultats
     newMemory.focus_actuel = { type: null, valeur: null }
     newMemory.resultats = { documents_trouves: 0, derniere_recherche: null }
     newMemory.etat_conversation = 'recherche_en_cours'
@@ -502,6 +656,136 @@ export function applySubjectTransition(
   }
   
   return newMemory
+}
+
+// ============================================================================
+// TÉLÉMÉTRIE DU ROUTEUR DE SUJET
+// ============================================================================
+
+// Cache pour stocker les événements de télémétrie (en mémoire)
+const telemetryCache = new Map<string, SubjectTelemetry[]>()
+const MAX_TELEMETRY_EVENTS = 50 // Par session
+
+/**
+ * Enregistre un événement de télémétrie pour le routeur de sujet
+ */
+export function logSubjectTransition(
+  sessionId: string,
+  question: string,
+  analysis: SubjectAnalysis,
+  contextBefore: StructuredMemory,
+  contextAfter: StructuredMemory
+): void {
+  const events = telemetryCache.get(sessionId) ?? []
+  
+  const event: SubjectTelemetry = {
+    timestamp: Date.now(),
+    question,
+    transition: analysis.transition,
+    confidence: analysis.confidence,
+    contextBefore: createContextSnapshot(contextBefore),
+    contextAfter: createContextSnapshot(contextAfter),
+    wasOverridden: false,
+  }
+  
+  events.push(event)
+  
+  // Garder seulement les derniers événements
+  if (events.length > MAX_TELEMETRY_EVENTS) {
+    events.splice(0, events.length - MAX_TELEMETRY_EVENTS)
+  }
+  
+  telemetryCache.set(sessionId, events)
+  
+  // Log console pour debug
+  console.log(`[TELEMETRY] ${analysis.transition} (${Math.round(analysis.confidence * 100)}%) - ${analysis.reason}`)
+}
+
+/**
+ * Marque le dernier événement comme corrigé par l'utilisateur
+ * Appelé si l'utilisateur change immédiatement de contexte après une transition
+ */
+export function markLastTransitionAsOverridden(sessionId: string): void {
+  const events = telemetryCache.get(sessionId)
+  if (events && events.length > 0) {
+    const lastEvent = events[events.length - 1]
+    // Si l'événement est récent (< 30 secondes), le marquer comme corrigé
+    if (Date.now() - lastEvent.timestamp < 30000) {
+      lastEvent.wasOverridden = true
+      console.log(`[TELEMETRY] Dernière transition marquée comme corrigée`)
+    }
+  }
+}
+
+/**
+ * Calcule les statistiques de télémétrie pour une session
+ */
+export function getTelemetryStats(sessionId: string): {
+  totalTransitions: number
+  overriddenCount: number
+  overrideRate: number
+  byTransitionType: Record<SubjectTransition, { count: number; avgConfidence: number; overridden: number }>
+  lowConfidenceCount: number
+} {
+  const events = telemetryCache.get(sessionId) ?? []
+  
+  const stats = {
+    totalTransitions: events.length,
+    overriddenCount: events.filter(e => e.wasOverridden).length,
+    overrideRate: 0,
+    byTransitionType: {} as Record<SubjectTransition, { count: number; avgConfidence: number; overridden: number }>,
+    lowConfidenceCount: events.filter(e => e.confidence < CONFIDENCE_THRESHOLD).length,
+  }
+  
+  if (events.length > 0) {
+    stats.overrideRate = stats.overriddenCount / events.length
+  }
+  
+  // Grouper par type de transition
+  const types: SubjectTransition[] = ['continuity', 'new_subject', 'return_subject', 'clarification', 'low_confidence']
+  for (const type of types) {
+    const typeEvents = events.filter(e => e.transition === type)
+    stats.byTransitionType[type] = {
+      count: typeEvents.length,
+      avgConfidence: typeEvents.length > 0 
+        ? typeEvents.reduce((sum, e) => sum + e.confidence, 0) / typeEvents.length 
+        : 0,
+      overridden: typeEvents.filter(e => e.wasOverridden).length,
+    }
+  }
+  
+  return stats
+}
+
+/**
+ * Détecte si l'utilisateur vient de corriger une mauvaise détection
+ * Retourne true si la question actuelle semble être une correction
+ */
+export function detectUserCorrection(
+  sessionId: string,
+  currentAnalysis: SubjectAnalysis
+): boolean {
+  const events = telemetryCache.get(sessionId)
+  if (!events || events.length === 0) return false
+  
+  const lastEvent = events[events.length - 1]
+  const timeSinceLastEvent = Date.now() - lastEvent.timestamp
+  
+  // Si moins de 30 secondes et changement de direction
+  if (timeSinceLastEvent < 30000) {
+    // Si on avait fait un new_subject et maintenant return_subject → correction probable
+    if (lastEvent.transition === 'new_subject' && currentAnalysis.transition === 'return_subject') {
+      markLastTransitionAsOverridden(sessionId)
+      return true
+    }
+    // Si on avait maintenu continuité et maintenant new_subject explicite → correction probable
+    if (lastEvent.transition === 'continuity' && currentAnalysis.transition === 'new_subject' && currentAnalysis.confidence > 0.85) {
+      markLastTransitionAsOverridden(sessionId)
+      return true
+    }
+  }
+  
+  return false
 }
 
 /**

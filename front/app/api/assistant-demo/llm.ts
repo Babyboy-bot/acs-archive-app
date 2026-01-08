@@ -17,8 +17,14 @@ import {
   detectSubjectTransition,
   applySubjectTransition,
   setStructuredMemory,
+  logSubjectTransition,
+  detectUserCorrection,
+  getTelemetryStats,
+  CONFIDENCE_THRESHOLD,
   type StructuredMemory,
   type SubjectAnalysis,
+  type SubjectTelemetry,
+  type ContextSnapshot,
 } from './conversation'
 
 // Réexporter pour utilisation dans route.ts
@@ -28,8 +34,14 @@ export {
   detectSubjectTransition, 
   applySubjectTransition,
   setStructuredMemory,
+  logSubjectTransition,
+  detectUserCorrection,
+  getTelemetryStats,
+  CONFIDENCE_THRESHOLD,
   type StructuredMemory,
   type SubjectAnalysis,
+  type SubjectTelemetry,
+  type ContextSnapshot,
 }
 
 try {

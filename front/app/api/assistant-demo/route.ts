@@ -9,7 +9,7 @@ import {
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, CONFIDENCE_THRESHOLD } from './llm'
 import { 
   recordInteraction, 
   getSimilarGoodResponse, 
@@ -2106,14 +2106,29 @@ export async function POST(request: Request) {
       risque: criteresQuestion.risque,
     })
     
+    // Détecter si l'utilisateur corrige une mauvaise détection précédente
+    const isUserCorrection = detectUserCorrection(sessionId, subjectAnalysis)
+    if (isUserCorrection) {
+      console.log(`=== [TELEMETRY] Correction utilisateur détectée ===`)
+    }
+    
     console.log(`=== Routeur de sujet: ${subjectAnalysis.transition} (${Math.round(subjectAnalysis.confidence * 100)}%) - ${subjectAnalysis.reason} ===`)
     
-    // Appliquer la transition si nécessaire (reset partiel de la mémoire)
-    if (subjectAnalysis.transition === 'new_subject') {
-      const updatedMemory = applySubjectTransition(currentMemory, subjectAnalysis)
-      setStructuredMemory(sessionId, updatedMemory)
-      console.log(`=== Mémoire réinitialisée pour nouveau sujet ===`)
+    // Appliquer la transition selon le type et la confiance
+    let updatedMemory = currentMemory
+    if (subjectAnalysis.transition === 'new_subject' || subjectAnalysis.transition === 'return_subject') {
+      // Appliquer seulement si confiance suffisante
+      if (subjectAnalysis.confidence >= CONFIDENCE_THRESHOLD) {
+        updatedMemory = applySubjectTransition(currentMemory, subjectAnalysis)
+        setStructuredMemory(sessionId, updatedMemory)
+        console.log(`=== Mémoire ${subjectAnalysis.transition === 'return_subject' ? 'restaurée' : 'réinitialisée'} (confiance: ${Math.round(subjectAnalysis.confidence * 100)}%) ===`)
+      } else {
+        console.log(`=== Transition non appliquée (confiance ${Math.round(subjectAnalysis.confidence * 100)}% < seuil ${Math.round(CONFIDENCE_THRESHOLD * 100)}%) ===`)
+      }
     }
+    
+    // Logger la télémétrie
+    logSubjectTransition(sessionId, questionOriginale, subjectAnalysis, currentMemory, updatedMemory)
     
     // Fusionner avec le contexte de conversation (critères explicites prioritaires)
     const criteresFinal: CriteresRecherche = {
