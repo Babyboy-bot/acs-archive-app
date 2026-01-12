@@ -100,8 +100,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: backend/requirements-ci.txt
 
       - name: Install backend dependencies
         run: |
