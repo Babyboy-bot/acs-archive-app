@@ -49,6 +49,9 @@ backend/*.log
 backend/backups/
 backend/scripts/
 
+# Backups SQL (archivés)
+backups/
+
 # Node/Next.js
 node_modules/
 front/node_modules/

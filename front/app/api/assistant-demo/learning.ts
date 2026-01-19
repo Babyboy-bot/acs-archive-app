@@ -64,7 +64,7 @@ const MIN_FREQUENCY_FOR_PATTERN = 3
 const PATTERN_SIMILARITY_THRESHOLD = 0.7
 
 // Configuration API Backend
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://backend:8000/api'
 const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
 
 // ============================================================================

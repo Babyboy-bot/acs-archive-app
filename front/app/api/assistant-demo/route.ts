@@ -3,6 +3,7 @@ import {
   verifierRateLimit, 
   extraireUserIdDepuisToken,
   extraireTokenDepuisCookies,
+  generateSessionId,
   RATE_LIMIT_WINDOW_MS,
   RATE_LIMIT_MAX_REQUESTS,
   rateLimitStore
@@ -241,14 +242,6 @@ function enrichirQuestionAvecContexte(question: string, sessionId: string | null
   }
 }
 
-// Génère un ID de session stable à partir du token
-function generateSessionId(token: string | null): string {
-  if (!token) return 'anonymous'
-  // Utiliser les 16 premiers caractères du token comme ID de session
-  const cleaned = token.replace(/^Bearer\s+/i, '')
-  return cleaned.substring(0, 16)
-}
-
 import {
   incrementRequest,
   incrementLlmSuccess,
@@ -261,6 +254,7 @@ type QueryPayload = {
   question?: string
   topK?: number
   tone?: 'amical' | 'formel' | 'concis' | 'premium'
+  conversationId?: string | null
 }
 
 // Configuration des tons de réponse
@@ -451,7 +445,7 @@ type DocumentDetail = {
   }
 }
 
-const API_BASE_URL = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000/api'
+const API_BASE_URL = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://backend:8000/api'
 const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
 const DEFAULT_TOP_K = 15 // Optimisé pour des recherches plus rapides tout en gardant assez de résultats pertinents
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
@@ -1424,6 +1418,7 @@ type FiltresRecherche = {
   client?: string | null
   exercice?: string | null
   risque?: string | null
+  typeDocument?: string | null
 }
 
 // Recherche sémantique avancée (utilise des embeddings multilingues)
@@ -1447,6 +1442,9 @@ async function rechercherDocumentsSemantic(
   }
   if (filtres?.risque) {
     url.searchParams.set('risque', filtres.risque)
+  }
+  if (filtres?.typeDocument) {
+    url.searchParams.set('type_document', filtres.typeDocument)
   }
 
   try {
@@ -1474,6 +1472,76 @@ async function rechercherDocumentsSemantic(
     }))
   } catch (error) {
     console.warn('Recherche sémantique indisponible, fallback TF-IDF.', error)
+    return null
+  }
+}
+
+// Recherche avec filtres multiples (client, exercice, risque, type_document)
+async function rechercherDocumentsFiltered(
+  question: string,
+  token: string | null,
+  topK: number,
+  filtres?: FiltresRecherche
+): Promise<DocumentPiece[] | null> {
+  const url = buildBackendUrl('assistant/documents/search/filtered/')
+  if (question) {
+    url.searchParams.set('q', question)
+  }
+  url.searchParams.set('top_k', String(topK))
+
+  // Ajouter les filtres
+  if (filtres?.client) {
+    url.searchParams.set('client', filtres.client)
+  }
+  if (filtres?.exercice) {
+    url.searchParams.set('exercice', filtres.exercice)
+  }
+  if (filtres?.risque) {
+    url.searchParams.set('risque', filtres.risque)
+  }
+  if (filtres?.typeDocument) {
+    url.searchParams.set('type_document', filtres.typeDocument)
+  }
+
+  try {
+    const data = await fetchJson<{ results?: Array<{
+      id: string
+      titre: string
+      reference: string
+      type_courrier: string
+      client: string
+      exercice: string | number
+      risque: string
+      chemin_fichier: string
+      fichier_url: string | null
+    }>; method?: string }>(url, token)
+
+    const results = data?.results ?? []
+    console.log(`=== Recherche filtrée: ${results.length} résultats, méthode=${data?.method} ===`)
+
+    if (!results.length) {
+      return null
+    }
+
+    return results.map((doc) => ({
+      id: doc.id,
+      source: doc.titre,
+      content: '',
+      metadata: {
+        client: doc.client,
+        exercice: doc.exercice,
+        risque: doc.risque,
+        type_courrier: doc.type_courrier,
+        reference: doc.reference,
+        chemin_fichier: doc.chemin_fichier,
+        fichier_url: doc.fichier_url,
+        titre: doc.titre,
+      },
+      score: 1.0,
+      isFallback: false,
+    }))
+  } catch (error) {
+    console.warn('Recherche filtrée indisponible.', error)
     return null
   }
 }
@@ -1523,37 +1591,126 @@ async function rechercherDocuments(
     throw new BackendError('Authentification requise pour interroger les documents.', 401)
   }
 
+  // S'assurer que le cache des clients est chargé avant l'extraction des critères
+  await loadValidClients(token)
+
   const criteres = extraireCriteresRecherche(question)
   const referenceDemandee = criteres.reference
 
   // Extraire le client mentionné dans la question pour filtrer les résultats
-  const clientMentionne = extraireClientMentionne(question)
-  if (clientMentionne) {
-    console.log(`=== Filtrage par client: ${clientMentionne} ===`)
+  // MAIS ignorer si c'est en fait une référence (ex: N93 n'est pas un client)
+  let clientMentionne = extraireClientMentionne(question) || criteres.client
+  if (referenceDemandee && clientMentionne) {
+    // Si le client détecté ressemble à une référence (N + chiffres), l'ignorer
+    if (/^N\d+$/i.test(clientMentionne)) {
+      console.log(`=== Client ${clientMentionne} ignoré car c'est une référence ===`)
+      clientMentionne = null
+    }
   }
-  
+
+  // Utiliser les critères extraits de la question
+  const anneeMentionnee = criteres.annee
+  const risqueMentionne = criteres.risque
+  const typeDocumentMentionne = criteres.typeDocument
+
+  console.log(`=== Critères extraits: client=${clientMentionne}, annee=${anneeMentionnee}, risque=${risqueMentionne}, typeDoc=${typeDocumentMentionne} ===`)
+
   // Construire les filtres pour la recherche backend
   const filtresBackend: FiltresRecherche = {
     client: filtres?.client || clientMentionne || null,
-    exercice: filtres?.exercice || null,
-    risque: filtres?.risque || null,
+    exercice: filtres?.exercice || anneeMentionnee || null,
+    risque: filtres?.risque || risqueMentionne || null,
+    typeDocument: typeDocumentMentionne || null,
   }
-  
+
   if (filtresBackend.client || filtresBackend.exercice || filtresBackend.risque) {
     console.log(`=== Filtres backend: client=${filtresBackend.client}, exercice=${filtresBackend.exercice}, risque=${filtresBackend.risque} ===`)
   }
 
   let pieces: DocumentPiece[] = []
 
-  // 1. Essayer d'abord la recherche sémantique avec filtres (plus intelligente)
-  const semanticPieces = await rechercherDocumentsSemantic(question, token, topK * 3, filtresBackend)
-  if (semanticPieces && semanticPieces.length > 0) {
-    pieces = semanticPieces
-    console.log(`=== Recherche sémantique: ${pieces.length} résultats ===`)
+  // 0. PRIORITÉ ABSOLUE: Si une référence est demandée, recherche exacte par référence
+  if (referenceDemandee) {
+    console.log(`=== Recherche exacte par référence: ${referenceDemandee} ===`)
+    try {
+      const refUrl = buildBackendUrl('assistant/documents/search/by-reference/')
+      refUrl.searchParams.set('reference', referenceDemandee)
+
+      const data = await fetchJson<{ resultats?: Array<{
+        id: string
+        titre: string
+        reference: string
+        type_courrier: string
+        client: string
+        exercice: string | number
+        risque: string
+        chemin_fichier: string
+        metadata: Record<string, unknown>
+      }> }>(refUrl, token)
+
+      const resultats = data?.resultats ?? []
+      if (resultats.length > 0) {
+        console.log(`=== Recherche par référence: ${resultats.length} document(s) exact(s) trouvé(s) ===`)
+        pieces = resultats.map((doc) => ({
+          id: doc.id,
+          source: doc.titre,
+          content: '',
+          metadata: {
+            ...doc.metadata,
+            client: doc.client,
+            exercice: doc.exercice,
+            risque: doc.risque,
+            type_courrier: doc.type_courrier,
+            reference: doc.reference,
+            chemin_fichier: doc.chemin_fichier,
+            fichier_url: doc.chemin_fichier ? `/media/${doc.chemin_fichier}` : null,
+            titre: doc.titre,
+          },
+          score: 1.0,
+          isFallback: false,
+        }))
+        // Retourner directement les résultats exacts sans autres recherches
+        return pieces
+      }
+      console.log(`=== Aucun document trouvé pour la référence ${referenceDemandee} ===`)
+      // Pas de fallback - retourner tableau vide si référence explicite non trouvée
+      return []
+    } catch (err) {
+      console.log(`=== Erreur recherche par référence: ${err} ===`)
+      // RÈGLE MÉTIER: Jamais de fallback si référence explicite détectée
+      // Retourner tableau vide plutôt que des résultats TF-IDF incorrects
+      return []
+    }
+  }
+
+  // 1. Si des filtres sont présents, utiliser la recherche filtrée en priorité
+  const hasSpecificFilters = filtresBackend.client || filtresBackend.exercice || filtresBackend.risque || filtresBackend.typeDocument
+  if (hasSpecificFilters) {
+    console.log(`=== Utilisation de la recherche filtrée ===`)
+    const filteredPieces = await rechercherDocumentsFiltered(question, token, topK * 3, filtresBackend)
+    if (filteredPieces && filteredPieces.length > 0) {
+      pieces = filteredPieces
+      console.log(`=== Recherche filtrée: ${pieces.length} résultats ===`)
+    } else {
+      // RÈGLE MÉTIER (mode strict): si des filtres explicites sont présents et qu'aucun résultat
+      // n'est trouvé, ne pas faire de fallback avec des documents non pertinents
+      const typeInfo = filtresBackend.typeDocument ? ` type="${filtresBackend.typeDocument}"` : ''
+      console.log(`=== Aucun document trouvé (filtres explicites${typeInfo}), pas de fallback ===`)
+      return []
+    }
   }
   
-  // 2. Fallback sur FAISS si la recherche sémantique échoue
-  if (!pieces.length && USE_FAISS) {
+  // 2. Sinon, essayer la recherche sémantique (seulement si pas de filtres spécifiques ou si filtres sans typeDocument)
+  if (!pieces.length && !filtresBackend.typeDocument) {
+    const semanticPieces = await rechercherDocumentsSemantic(question, token, topK * 3, filtresBackend)
+    if (semanticPieces && semanticPieces.length > 0) {
+      pieces = semanticPieces
+      console.log(`=== Recherche sémantique: ${pieces.length} résultats ===`)
+    }
+  }
+
+  // 3. Fallback sur FAISS si la recherche sémantique échoue (seulement si pas de typeDocument spécifique)
+  if (!pieces.length && USE_FAISS && !filtresBackend.typeDocument) {
     const faissPieces = await rechercherDocumentsFaiss(question, token, topK * 3)
     if (faissPieces && faissPieces.length > 0) {
       pieces = faissPieces
@@ -1561,10 +1718,11 @@ async function rechercherDocuments(
     }
   }
 
-  if (!pieces.length) {
+  // 4. Fallback TF-IDF (seulement si pas de typeDocument spécifique demandé)
+  if (!pieces.length && !filtresBackend.typeDocument) {
     const searchUrl = buildBackendUrl('assistant/documents/search/tfidf/')
     searchUrl.searchParams.set('q', question)
-    searchUrl.searchParams.set('top_k', String(topK * 3)) // demander plus pour filtrer ensuite
+    searchUrl.searchParams.set('top_k', String(topK * 3))
 
     const data = await fetchJson<{ results?: AssistantSearchResult[] }>(searchUrl, token)
     const results = data?.results ?? []
@@ -2061,7 +2219,8 @@ export async function POST(request: Request) {
     // =========================================================================
     
     const startedAt = Date.now()
-    const sessionId = generateSessionId(token)
+    // IMPORTANT: isoler le contexte par discussion (conversationId)
+    const sessionId = generateSessionId(token, payload.conversationId)
 
     // Charger la liste des clients valides (liste blanche) pour éviter les faux positifs
     // Cette liste est mise en cache pendant 5 minutes

@@ -3,7 +3,7 @@
  * Utilise le backend Django pour sauvegarder les messages.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://backend:8000/api'
 
 type ConversationMessage = {
   id?: string
@@ -1046,6 +1046,16 @@ export function detectUserCorrection(
  * Récupère ou crée une conversation pour un utilisateur
  */
 export async function getOrCreateConversation(token: string, sessionId: string): Promise<string | null> {
+  // Si le sessionId est déjà dérivé d'un conversationId (conv-<id>),
+  // on l'utilise directement pour éviter de créer des conversations fantômes.
+  if (sessionId && sessionId.startsWith('conv-')) {
+    const conversationId = sessionId.slice('conv-'.length).trim()
+    if (conversationId) {
+      conversationIdCache.set(sessionId, conversationId)
+      return conversationId
+    }
+  }
+
   // Vérifier le cache local d'abord
   const cachedConversationId = conversationIdCache.get(sessionId)
   if (cachedConversationId) {

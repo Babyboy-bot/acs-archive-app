@@ -177,20 +177,24 @@ const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
  */
 export async function loadValidClients(token: string | null): Promise<Set<string>> {
   const now = Date.now()
-  
+
   // Retourner le cache s'il est encore valide
   if (_validClientsCache && now < _validClientsCacheExpiry) {
     return _validClientsCache
   }
-  
+
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api'
+    // En contexte serveur (API routes), utiliser l'URL interne Docker
+    // Hardcodé car les variables d'environnement ne sont pas toujours disponibles au runtime
+    const url = 'http://backend:8000/api/assistant/valid-clients/'
+    console.log(`[loadValidClients] Fetching from: ${url}`)
+
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
-    
-    const response = await fetch(`${baseUrl}/assistant/valid-clients/`, { headers })
+
+    const response = await fetch(url, { headers })
     if (response.ok) {
       const data = await response.json()
       _validClientsCache = new Set(data.codes || [])
@@ -201,7 +205,7 @@ export async function loadValidClients(token: string | null): Promise<Set<string
   } catch (error) {
     console.warn('Impossible de charger la liste des clients valides:', error)
   }
-  
+
   // Fallback: retourner un Set vide (la liste noire sera utilisée)
   return new Set()
 }
@@ -217,24 +221,24 @@ export async function loadValidClients(token: string | null): Promise<Set<string
  */
 export function fuzzyMatchClient(candidat: string): string | null {
   const upper = candidat.toUpperCase()
-  
+
   // 0. Exclure les mots réservés (références contextuelles comme "MEME", "MÊME", etc.)
   if (MOTS_RESERVES.includes(upper)) {
     return null
   }
-  
+
   // 1. Match exact dans les codes
   if (_validClientsCache?.has(upper)) {
     // Chercher le nom complet correspondant
     const exactMatch = _fullClientNamesCache.find(name => name === upper)
     if (exactMatch) return exactMatch
-    
+
     // Le candidat est un mot d'un nom composé, chercher le nom complet
     const containingNames = _fullClientNamesCache.filter(name => {
       const cleaned = name.replace(/-/g, ' ').replace(/_/g, ' ')
       return cleaned.split(/\s+/).some(word => word === upper)
     })
-    
+
     if (containingNames.length === 1) {
       return containingNames[0]
     }
@@ -382,12 +386,26 @@ export function extraireCriteresRecherche(question: string): CriteresRecherche {
   } else if (/acs\s*(vers|pour|a|à)\s*compagnie/i.test(lower)) {
     typeCourrier = 'acs vers compagnie'
   }
-  
-  // 6. Référence / Numéro
+
+  // 6. Référence / Numéro - Détection robuste de différents formats
   let reference: string | null = null
-  const refMatch = question.match(/(?:ref|référence|reference|n°|numero|numéro)\s*[:.]?\s*([A-Z0-9\-\/]+)/i)
-  if (refMatch) {
-    reference = refMatch[1].toUpperCase()
+
+  // Format explicite: "ref N°96", "référence 96", "numero 96"
+  const refExplicite = question.match(/(?:ref|référence|reference|numero|numéro)\s*[:.]?\s*(?:N[°o]?\s*)?([0-9]+)/i)
+  if (refExplicite) {
+    reference = refExplicite[1]
+  } else {
+    // Format N°96, N96, N° 96 (avec ou sans espace, avec ou sans °)
+    const refN = question.match(/\bN[°oº]?\s*([0-9]+)\b/i)
+    if (refN) {
+      reference = refN[1]
+    } else {
+      // Format "document 96", "doc 96" suivi d'un numéro seul
+      const refDoc = question.match(/\b(?:document|doc)\s+([0-9]+)\b/i)
+      if (refDoc) {
+        reference = refDoc[1]
+      }
+    }
   }
   
   return { typeDocument, client, annee, risque, typeCourrier, reference }

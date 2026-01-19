@@ -25,10 +25,7 @@ export { SplashScreen } from './SplashScreen'
 export { AvecSplashScreen } from './AvecSplashScreen'
 export { RechercheGlobale } from './RechercheGlobale'
 export { StatsTempsReel } from './StatsTempsReel'
-export { Timeline } from './Timeline'
 export { ThemeInitializer } from './ThemeInitializer'
-export { OnboardingGuide } from './OnboardingGuide'
-export { LlmQuotaIndicator } from './LlmQuotaIndicator'
 
 // Routes
 export { PrivateRoute } from './PrivateRoute'

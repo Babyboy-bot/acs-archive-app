@@ -1454,12 +1454,13 @@ def stats_view(request):
 setattr(stats_view, 'ressource', 'stats')
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
+from django.http import JsonResponse
+
 def assistant_valid_clients_view(request):
     """
     Retourne la liste des codes/noms de clients valides pour validation.
     Utilisé par le frontend pour éviter les faux positifs dans la détection de clients.
+    Note: Endpoint Django simple (sans DRF) pour éviter les problèmes d'authentification.
     
     Retourne:
     - codes: Set de tous les identifiants valides (mots individuels) en majuscules
@@ -1485,14 +1486,11 @@ def assistant_valid_clients_view(request):
         if numero:
             valid_codes.add(numero.upper())
     
-    return Response({
+    return JsonResponse({
         'codes': sorted(list(valid_codes)),
         'clients': sorted(full_names),
         'count': len(valid_codes),
     })
-
-
-setattr(assistant_valid_clients_view, 'ressource', 'documents')
 
 
 @api_view(['GET'])
@@ -2155,8 +2153,284 @@ def document_search_view(request):
 setattr(document_search_view, 'ressource', 'documents')
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_document_search_by_reference_view(request):
+    """
+    Recherche exacte de documents par référence pour l'assistant IA.
+    Retourne uniquement le(s) document(s) correspondant exactement à la référence demandée.
+
+    Paramètres:
+    - reference: référence exacte du document (ex: N°96, 96, N96)
+    """
+    reference_param = request.query_params.get('reference', '').strip()
+
+    if not reference_param:
+        return Response({'resultats': [], 'message': 'Paramètre reference requis'})
+
+    # Normaliser la référence: extraire le numéro et chercher avec différents formats
+    import re
+    # Extraire le numéro de la référence (ex: "N°96" -> "96", "N96" -> "96", "96" -> "96")
+    numero_match = re.search(r'(\d+)', reference_param)
+    if not numero_match:
+        return Response({'resultats': [], 'message': 'Aucun numéro trouvé dans la référence'})
+
+    numero = numero_match.group(1)
+    # Variante sans zéros en tête (ex: 0757 -> 757) pour matcher les deux représentations
+    numero_sans_zeros = numero.lstrip('0') or '0'
+
+    # Chercher avec différents formats de référence
+    formats_reference = [
+        f"N°{numero}",
+        f"N° {numero}",
+        f"N{numero}",
+        numero,
+    ]
+    if numero_sans_zeros != numero:
+        formats_reference.extend([
+            f"N°{numero_sans_zeros}",
+            f"N° {numero_sans_zeros}",
+            f"N{numero_sans_zeros}",
+            numero_sans_zeros,
+        ])
+
+    # Construire la requête avec OR sur tous les formats
+    from django.db.models import Q
+    query = Q()
+    for fmt in formats_reference:
+        # Certains documents ont reference NULL mais contiennent le N° dans le titre
+        query |= Q(reference__iexact=fmt)
+        query |= Q(titre__icontains=fmt)
+        query |= Q(chemin_fichier__icontains=fmt)
+
+    documents = Document.objects.select_related('risque__exercice__client').filter(query)[:10]
+
+    resultats = []
+    for doc in documents:
+        client_nom = doc.risque.exercice.client.nom if doc.risque and doc.risque.exercice else 'Client inconnu'
+        # Construire l'URL du fichier pour la prévisualisation
+        fichier_url = f"/media/{doc.chemin_fichier}" if doc.chemin_fichier else None
+        resultats.append({
+            'id': str(doc.id),
+            'titre': doc.titre or 'Sans titre',
+            'reference': doc.reference or '',
+            'type_courrier': doc.type_courrier or '',
+            'client': client_nom,
+            'exercice': doc.risque.exercice.annee if doc.risque and doc.risque.exercice else '',
+            'risque': doc.risque.type if doc.risque else '',
+            'date_document': doc.date_document.isoformat() if doc.date_document else None,
+            'cree_le': doc.cree_le.isoformat(),
+            'chemin_fichier': doc.chemin_fichier or '',
+            'fichier_url': fichier_url,
+            'metadata': {}
+        })
+
+    return Response({
+        'resultats': resultats,
+        'reference_recherchee': reference_param,
+        'formats_testes': formats_reference
+    })
+
+
+setattr(assistant_document_search_by_reference_view, 'ressource', 'documents')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_document_search_filtered_view(request):
+    """
+    Recherche de documents avec filtres multiples pour l'assistant IA.
+    Supporte les filtres: client, exercice, risque, type_document, type_courrier.
+
+    Paramètres:
+    - q: requête textuelle (optionnel)
+    - client: nom ou code client
+    - exercice: année de l'exercice
+    - risque: type de risque (ex: responsabilite civile, sante, auto)
+    - type_document: type de document (ex: avenant, facture, contrat)
+    - type_courrier: type de courrier (ex: ACS_VERS_CLIENT)
+    - top_k: nombre de résultats (défaut: 10)
+    """
+    query = request.query_params.get('q', '').strip()
+    client_filter = request.query_params.get('client', '').strip()
+    exercice_filter = request.query_params.get('exercice', '').strip()
+    risque_filter = request.query_params.get('risque', '').strip()
+    type_document_filter = request.query_params.get('type_document', '').strip()
+    type_courrier_filter = request.query_params.get('type_courrier', '').strip()
+
+    try:
+        top_k = int(request.query_params.get('top_k', 10))
+    except ValueError:
+        top_k = 10
+
+    # Construire la requête avec filtres
+    queryset = Document.objects.select_related('risque__exercice__client')
+
+    # Filtre par client (nom ou numero_client)
+    if client_filter:
+        queryset = queryset.filter(
+            Q(risque__exercice__client__nom__iexact=client_filter) |
+            Q(risque__exercice__client__numero_client__iexact=client_filter)
+        )
+        logging.info(f"Filtre client: {client_filter}")
+
+    # Filtre par exercice (année)
+    if exercice_filter:
+        try:
+            annee = int(exercice_filter)
+            queryset = queryset.filter(risque__exercice__annee=annee)
+            logging.info(f"Filtre exercice: {annee}")
+        except ValueError:
+            pass
+
+    # Filtre par risque (type) - robuste aux variantes (casse/accents/typos)
+    if risque_filter:
+        import re
+        import unicodedata
+
+        def _norm(s: str) -> str:
+            s = (s or '').strip().lower().replace('_', ' ')
+            s = unicodedata.normalize('NFKD', s)
+            s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+            s = re.sub(r"[^0-9a-z]+", " ", s)
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
+
+        risque_norm = _norm(risque_filter)
+        raw_tokens = [t for t in risque_norm.split(' ') if t]
+        tokens = [t for t in raw_tokens if len(t) >= 3 and not t.isdigit()]
+
+        # Groupes de synonymes/abréviations observés en base
+        # Chaque groupe produit un OR; les groupes sélectionnés sont combinés en AND.
+        synonym_groups = {
+            'rc': ['rc', 'responsabilite', 'responsabilite civile', 'responsabilite  civile', 'responabilite', 'responabilite civile'],
+            'auto': ['auto', 'automobile'],
+            'sante': ['sante', 'sant'],  # couvre aussi des valeurs dégradées type 'Sant??'
+            'mrp': ['mrp', 'professionnel', 'professionnelle', 'proffessionnelle', 'professionnelle (mrp)'],
+            'mri': ['mri', 'm r i', 'immeuble', 'immeubles', 'multirisque immeuble'],
+            'multirisque': ['multirisque', 'multirisques'],
+            'reglement': ['reglement', 'reglements'],
+            'transport_facultes': ['transport', 'facultes', 'faculte'],
+        }
+
+        def _group_q(patterns: list[str]) -> Q:
+            q = Q()
+            for p in patterns:
+                p_norm = _norm(p)
+                if p_norm:
+                    q |= Q(risque__type__icontains=p_norm)
+            return q
+
+        selected_groups: list[Q] = []
+
+        # Sélection des groupes en fonction des tokens
+        token_set = set(tokens)
+        if 'rc' in token_set or ('responsabilite' in token_set and 'civile' in token_set) or ('responsabilite' in token_set and 'civil' in token_set) or ('responabilite' in token_set):
+            selected_groups.append(_group_q(synonym_groups['rc']))
+        if 'auto' in token_set or 'automobile' in token_set:
+            selected_groups.append(_group_q(synonym_groups['auto']))
+        if 'sante' in token_set or 'sant' in token_set:
+            selected_groups.append(_group_q(synonym_groups['sante']))
+
+        # Multirisque: distinguer IMMEUBLE (MRI) vs PROFESSIONNELLE (MRP) quand précisé
+        if 'immeuble' in token_set or 'mri' in token_set:
+            # Exiger multirisque + immeuble (ou équivalents) pour éviter MRP
+            selected_groups.append(_group_q(synonym_groups['mri']))
+            selected_groups.append(_group_q(synonym_groups['multirisque']))
+        if 'professionnelle' in token_set or 'professionnel' in token_set or 'mrp' in token_set or 'proffessionnelle' in token_set:
+            selected_groups.append(_group_q(synonym_groups['mrp']))
+            selected_groups.append(_group_q(synonym_groups['multirisque']))
+        if 'multirisque' in token_set and ('immeuble' not in token_set and 'mri' not in token_set and 'mrp' not in token_set and 'professionnelle' not in token_set and 'professionnel' not in token_set):
+            # multirisque non précisé => volontairement large
+            selected_groups.append(_group_q(synonym_groups['multirisque']))
+
+        if 'reglement' in token_set or 'reglements' in token_set:
+            selected_groups.append(_group_q(synonym_groups['reglement']))
+
+        if 'transport' in token_set or 'facultes' in token_set or 'faculte' in token_set:
+            # Exiger les 2 composantes si l'une est présente
+            selected_groups.append(_group_q(synonym_groups['transport_facultes']))
+
+        # Base: tokenisation AND sur les tokens significatifs
+        base_q = Q()
+        for t in tokens:
+            base_q &= Q(risque__type__icontains=t)
+
+        risque_query = base_q
+        for gq in selected_groups:
+            risque_query &= gq
+
+        queryset = queryset.filter(risque_query)
+        logging.info(f"Filtre risque: {risque_filter}")
+
+    # Filtre par type de document (dans le titre ou type_courrier)
+    if type_document_filter:
+        type_doc_lower = type_document_filter.lower()
+        queryset = queryset.filter(
+            Q(titre__icontains=type_doc_lower) |
+            Q(type_courrier__icontains=type_doc_lower)
+        )
+        logging.info(f"Filtre type_document: {type_document_filter}")
+
+    # Filtre par type de courrier
+    if type_courrier_filter:
+        queryset = queryset.filter(type_courrier__iexact=type_courrier_filter)
+        logging.info(f"Filtre type_courrier: {type_courrier_filter}")
+
+    # Si une requête textuelle est fournie, filtrer aussi par titre (tokenisation)
+    if query:
+        import re
+        stopwords = {
+            'de', 'du', 'des', 'd', 'la', 'le', 'les', 'un', 'une', 'et', 'ou',
+            'client', 'risque', 'annee', 'année', 'exercice', 'type', 'document',
+        }
+        raw_tokens = re.split(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+", query.lower())
+        tokens = [t for t in raw_tokens if t and len(t) >= 3 and t not in stopwords and not t.isdigit()]
+        if tokens:
+            text_q = Q()
+            for t in tokens:
+                text_q |= Q(titre__icontains=t)
+            queryset = queryset.filter(text_q)
+
+    # Limiter et récupérer les résultats
+    documents = queryset.order_by('-cree_le')[:top_k]
+
+    resultats = []
+    for doc in documents:
+        client_nom = doc.risque.exercice.client.nom if doc.risque and doc.risque.exercice else 'Client inconnu'
+        fichier_url = f"/media/{doc.chemin_fichier}" if doc.chemin_fichier else None
+        resultats.append({
+            'id': str(doc.id),
+            'titre': doc.titre or 'Sans titre',
+            'reference': doc.reference or '',
+            'type_courrier': doc.type_courrier or '',
+            'client': client_nom,
+            'exercice': doc.risque.exercice.annee if doc.risque and doc.risque.exercice else '',
+            'risque': doc.risque.type if doc.risque else '',
+            'date_document': doc.date_document.isoformat() if doc.date_document else None,
+            'cree_le': doc.cree_le.isoformat(),
+            'chemin_fichier': doc.chemin_fichier or '',
+            'fichier_url': fichier_url,
+        })
+
+    return Response({
+        'results': resultats,
+        'filtres_appliques': {
+            'client': client_filter or None,
+            'exercice': exercice_filter or None,
+            'risque': risque_filter or None,
+            'type_document': type_document_filter or None,
+            'type_courrier': type_courrier_filter or None,
+            'query': query or None,
+        },
+        'total': len(resultats),
+        'method': 'filtered'
+    })
+
+
+setattr(assistant_document_search_filtered_view, 'ressource', 'documents')
+
+
 def _log_perf_metric(metric_name: str, duration_ms: float, **extra):
     """Journalise une métrique de performance avec des tags supplémentaires"""
     logging.info(

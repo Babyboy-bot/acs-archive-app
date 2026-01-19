@@ -115,6 +115,10 @@ const SUGGESTIONS_DEFAUT = [
 const LOCAL_STORAGE_KEY = "acs-assistant-conversation-v1";
 const ACTIVE_CONVERSATION_KEY = "acs-assistant-active-conversation-id";
 
+function getConversationStorageKey(conversationId: string) {
+  return `${LOCAL_STORAGE_KEY}:${conversationId}`;
+}
+
 export default function ConsultantChatPage() {
   // Tous les hooks doivent être appelés AVANT tout return conditionnel
   const { estAuthentifie, chargement: authChargement } = useRequireAuth();
@@ -234,11 +238,15 @@ export default function ConsultantChatPage() {
     void chargerConversations();
   }, []);
 
-  // Charger l'historique de conversation depuis localStorage
+  // Charger l'historique de conversation depuis localStorage (par conversationId)
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!conversationId) return;
+
     try {
-      const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+      const raw = window.localStorage.getItem(
+        getConversationStorageKey(conversationId)
+      );
       if (!raw) return;
 
       const parsed = JSON.parse(raw) as Array<
@@ -259,7 +267,7 @@ export default function ConsultantChatPage() {
         error
       );
     }
-  }, []);
+  }, [conversationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -268,13 +276,14 @@ export default function ConsultantChatPage() {
   // Sauvegarder l'historique à chaque mise à jour des messages
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!conversationId) return;
     try {
       const serialisable = messages.map((m) => ({
         ...m,
         timestamp: m.timestamp.toISOString(),
       }));
       window.localStorage.setItem(
-        LOCAL_STORAGE_KEY,
+        getConversationStorageKey(conversationId),
         JSON.stringify(serialisable)
       );
     } catch (error) {
@@ -283,7 +292,7 @@ export default function ConsultantChatPage() {
         error
       );
     }
-  }, [messages]);
+  }, [messages, conversationId]);
 
   const handleLogout = () => {
     supprimerSession();
@@ -601,13 +610,25 @@ export default function ConsultantChatPage() {
         if (typeof window !== "undefined") {
           try {
             window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
-            window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+            window.localStorage.removeItem(
+              getConversationStorageKey(conversation.id)
+            );
           } catch (error) {
             console.error(
               "Erreur lors du nettoyage de la conversation active de l'assistant:",
               error
             );
           }
+        }
+      } else if (typeof window !== "undefined") {
+        // Conversation supprimée non-active: nettoyer son historique local si présent
+        try {
+          window.localStorage.removeItem(getConversationStorageKey(conversation.id));
+        } catch (error) {
+          console.error(
+            "Erreur lors du nettoyage de l'historique local de la conversation supprimée:",
+            error
+          );
         }
       }
     } catch (error) {
@@ -795,11 +816,10 @@ export default function ConsultantChatPage() {
     setConversationId(null);
     if (typeof window !== "undefined") {
       try {
-        window.localStorage.removeItem(LOCAL_STORAGE_KEY);
         window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
       } catch (error) {
         console.error(
-          "Erreur lors de la réinitialisation de l'historique de conversation:",
+          "Erreur lors du nettoyage de l'historique de conversation:",
           error
         );
       }
