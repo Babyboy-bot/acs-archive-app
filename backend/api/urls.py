@@ -5,15 +5,10 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from .views import (
+from .views_main import (
     login_view,
     logout_view,
-    UtilisateurViewSet,
-    ClientViewSet,
-    ExerciceViewSet,
-    RisqueViewSet,
-    DocumentViewSet,
-    DocumentUploadView,
+    refresh_token_view,
     stats_view,
     assistant_stats_view,
     assistant_valid_clients_view,
@@ -23,8 +18,6 @@ from .views import (
     assistant_document_search_by_reference_view,
     assistant_document_search_filtered_view,
     documents_search_view,
-    AssistantConversationViewSet,
-    AssistantMessageViewSet,
     llm_quota_consume,
     llm_usage_log,
     llm_quota_status,
@@ -47,6 +40,17 @@ from .views import (
     ocr_quality_report_view,
 )
 
+from .views import (
+    UtilisateurViewSet,
+    ClientViewSet,
+    ExerciceViewSet,
+    RisqueViewSet,
+    DocumentViewSet,
+    DocumentUploadView,
+    AssistantConversationViewSet,
+    AssistantMessageViewSet,
+)
+
 # Router pour les ViewSets
 router = DefaultRouter()
 router.register(r'utilisateurs', UtilisateurViewSet, basename='utilisateur')
@@ -61,7 +65,7 @@ urlpatterns = [
     # Authentification
     path('auth/login/', login_view, name='login'),
     path('auth/logout/', logout_view, name='logout'),
-    path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/refresh/', refresh_token_view, name='token_refresh'),
     path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
     path('documents/search/', documents_search_view, name='documents-search'),
     path('stats/', stats_view, name='stats'),

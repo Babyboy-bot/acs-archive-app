@@ -40,10 +40,11 @@ export function StatsTempsReel({ intervalMs = 5000 }: StatsTempsReelProps) {
       if (!response.ok) {
         const message = (data as any)?.erreur || (data as any)?.detail
 
-        // Cas classique : utilisateur non authentifié -> on ne casse pas l'UI, on garde les stats à 0
+        // Laisser le refresh automatique gérer les 401 - ne pas intercepter ici
         if (response.status === 401) {
           console.warn('Stats non chargées (non authentifié):', message || '401 Unauthorized')
-          return
+          // Ne pas return, laisser l'erreur se propager pour que le refresh s'active
+          throw new Error(message || '401 Unauthorized')
         }
 
         throw new Error(message || 'Erreur lors du chargement des statistiques')

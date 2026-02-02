@@ -26,7 +26,7 @@ if not SECRET_KEY:
 # Par défaut, on considère DEBUG=False si la variable n'est pas définie.
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,acs.localhost,backend').split(',')
 
 # Désactiver la redirection automatique des URLs sans trailing slash
 # Cela évite les redirects qui cassent les requêtes preflight CORS
@@ -57,7 +57,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'api.middleware.JWTAuthCookieMiddleware',
+    'api.middleware.JWTAuthenticationMiddleware',  # AVANT AuthenticationMiddleware
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -156,7 +156,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'api.authentication.CookieJWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -192,11 +192,12 @@ SPECTACULAR_SETTINGS = {
 
 # JWT Configuration
 SIMPLE_JWT = {
-    # Durée de vie du token d'accès en jours (par défaut 7 jours)
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_DAYS', 7))),
+    # Durée de vie du token d'accès (par défaut 1 heure pour la sécurité)
+    # Le refresh token permet de renouveler automatiquement sans re-login
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 60))),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'ROTATE_REFRESH_TOKENS': False,  # Désactivé temporairement pour debug
+    'BLACKLIST_AFTER_ROTATION': False,  # Désactivé car pas de rotation
     'UPDATE_LAST_LOGIN': True,
     
     'ALGORITHM': 'HS256',
@@ -212,12 +213,25 @@ SIMPLE_JWT = {
     
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
+    
+    # Configuration des cookies pour JWT
+    'AUTH_COOKIE': 'acs_access_token',  # Nom unique pour ACS Archive
+    'REFRESH_COOKIE': 'acs_refresh_token',  # Nom unique pour ACS Archive
+    'AUTH_COOKIE_DOMAIN': 'acs.localhost',  # Domaine spécifique
+    'REFRESH_COOKIE_DOMAIN': 'acs.localhost',
+    'AUTH_COOKIE_PATH': '/',
+    'REFRESH_COOKIE_PATH': '/',
 }
 
 # Paramètres de sécurité supplémentaires activés automatiquement lorsque DEBUG=False.
 if not DEBUG:
     # Forcer l'utilisation de HTTPS au niveau Django (en complément du reverse proxy)
     SECURE_SSL_REDIRECT = True
+
+    # Indiquer à Django de faire confiance au reverse proxy (Render, Nginx, etc.)
+    # pour déterminer si la requête initiale était en HTTPS.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
 
     # Protection XSS et type sniffing
     SECURE_BROWSER_XSS_FILTER = True
@@ -231,18 +245,34 @@ if not DEBUG:
     # Cookies marqués comme sécurisés (transmis uniquement en HTTPS)
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    
+    # Protection CSRF avec SameSite
+    CSRF_COOKIE_SAMESITE = "Lax"  # ou "Strict" pour sécurité maximale
+    SESSION_COOKIE_SAMESITE = "Lax"
+    
+    # Activer la protection CSRF sur toutes les requêtes POST/PUT/DELETE
+    USE_TZ = True
 
 # CORS Configuration
 # En mode DEBUG, autoriser toutes les origines pour simplifier le développement
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 else:
-    CORS_ALLOWED_ORIGINS = os.getenv(
+    _cors_allowed_origins_raw = os.getenv(
         'CORS_ALLOWED_ORIGINS',
         'http://localhost:3010,http://127.0.0.1:3010,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001'
-    ).split(',')
+    )
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in _cors_allowed_origins_raw.split(',')
+        if origin.strip()
+    ]
 
 CORS_ALLOW_CREDENTIALS = True
+
+# Chrome peut déclencher un preflight additionnel pour les requêtes vers un réseau privé
+# (Access-Control-Request-Private-Network). On peut l'activer explicitement.
+CORS_ALLOW_PRIVATE_NETWORK = os.getenv('CORS_ALLOW_PRIVATE_NETWORK', 'False') == 'True'
 
 CORS_ALLOW_METHODS = [
     'DELETE',

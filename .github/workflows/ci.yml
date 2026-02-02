@@ -38,7 +38,6 @@ jobs:
 
       - name: Run ESLint
         run: npm run lint
-        continue-on-error: true
 
       - name: TypeScript check
         run: npx tsc --noEmit --skipLibCheck
@@ -230,9 +229,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Audit frontend dependencies
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high || echo "::warning::Des vulnérabilités npm ont été détectées"
         working-directory: ./front
-        continue-on-error: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -243,9 +241,8 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit backend dependencies
-        run: pip-audit -r requirements.txt
+        run: pip-audit -r requirements.txt || echo "::warning::Des vulnérabilités pip ont été détectées"
         working-directory: ./backend
-        continue-on-error: true
 
   # ============================================================================
   # SUMMARY

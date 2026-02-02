@@ -140,9 +140,9 @@ from .permissions import RoleBasedPermission, IsOwnerOrAdmin
 # ============================================================================
 
 import threading
-import pickle
 import hashlib
 from pathlib import Path
+import joblib  # Sérialisation sécurisée (remplace pickle pour éviter CWE-502)
 
 # Cache en mémoire pour les embeddings et TF-IDF
 _embeddings_cache = {}
@@ -160,21 +160,41 @@ def _get_cache_file_path(cache_key: str, suffix: str) -> Path:
     return cache_dir / f"{cache_key}.{suffix}"
 
 def _load_embeddings_from_cache(cache_key):
-    """Charge les embeddings depuis le cache disque si disponible"""
+    """Charge les embeddings depuis le cache disque si disponible.
+    
+    Utilise numpy.load pour les embeddings (format .npy) - plus sécurisé que pickle.
+    """
     if not settings.SEARCH_INDEX_DIR.exists():
         logging.debug("Dossier de cache d'index non trouvé")
         return None
     
-    cache_file = settings.SEARCH_INDEX_DIR / f"embeddings_{cache_key}.pkl"
-    if not cache_file.exists():
-        logging.debug(f"Fichier de cache non trouvé: {cache_file}")
-        return None
-        
+    # Nouveau format .npy (numpy) - plus sécurisé
+    cache_file_npy = settings.SEARCH_INDEX_DIR / f"embeddings_{cache_key}.npy"
+    # Ancien format .pkl pour rétrocompatibilité (sera migré)
+    cache_file_pkl = settings.SEARCH_INDEX_DIR / f"embeddings_{cache_key}.pkl"
+    
     try:
         start_time = time.time()
-        with open(cache_file, 'rb') as f:
-            embeddings = pickle.load(f)
-        load_time = (time.time() - start_time) * 1000  # en ms
+        
+        if cache_file_npy.exists():
+            # Charger depuis le nouveau format numpy (sécurisé)
+            embeddings = np.load(cache_file_npy, allow_pickle=False)
+        elif cache_file_pkl.exists():
+            # Migration: charger l'ancien format et le convertir
+            logging.info(f"Migration du cache embeddings vers format numpy sécurisé")
+            embeddings = joblib.load(cache_file_pkl)
+            # Sauvegarder au nouveau format
+            np.save(cache_file_npy, embeddings)
+            # Supprimer l'ancien fichier après migration réussie
+            try:
+                cache_file_pkl.unlink()
+            except Exception:
+                pass
+        else:
+            logging.debug(f"Fichier de cache non trouvé: {cache_file_npy}")
+            return None
+            
+        load_time = (time.time() - start_time) * 1000
         logging.info(f"Embeddings chargés depuis le cache en {load_time:.2f}ms - Taille: {len(embeddings) if embeddings is not None else 0} vecteurs")
         return embeddings
     except Exception as e:
@@ -182,49 +202,74 @@ def _load_embeddings_from_cache(cache_key):
         return None
 
 def _save_embeddings_to_cache(documents_hash: str, embeddings):
-    """Sauvegarde les embeddings dans le cache disque."""
-    cache_file = _get_cache_file_path(documents_hash, 'embeddings')
+    """Sauvegarde les embeddings dans le cache disque.
+    
+    Utilise numpy.save (format .npy) - plus sécurisé que pickle.
+    """
+    cache_dir = Path(settings.SEARCH_INDEX_DIR)
+    cache_dir.mkdir(exist_ok=True, parents=True)
+    cache_file = cache_dir / f"embeddings_{documents_hash}.npy"
     
     with _cache_lock:
         _embeddings_cache[documents_hash] = embeddings
     
     try:
-        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
-        with open(cache_file, 'wb') as f:
-            pickle.dump(embeddings, f)
+        # Convertir en numpy array si nécessaire
+        if not isinstance(embeddings, np.ndarray):
+            embeddings = np.array(embeddings)
+        np.save(cache_file, embeddings)
     except Exception as e:
         logging.error(f"Erreur lors de la sauvegarde du cache d'embeddings: {e}", exc_info=True)
 
 def _load_tfidf_from_cache(corpus_hash: str):
-    """Charge le TF-IDF depuis le cache disque si disponible."""
-    cache_file = _get_cache_file_path(corpus_hash, 'tfidf')
+    """Charge le TF-IDF depuis le cache disque si disponible.
+    
+    Utilise joblib (plus sécurisé que pickle pour scikit-learn).
+    """
+    cache_file = _get_cache_file_path(corpus_hash, 'tfidf.joblib')
+    cache_file_old = _get_cache_file_path(corpus_hash, 'tfidf')  # Ancien format
     
     with _cache_lock:
         if corpus_hash in _tfidf_cache:
             return _tfidf_cache[corpus_hash]
     
-    if cache_file.exists():
-        try:
-            with open(cache_file, 'rb') as f:
-                vectorizer, matrix = pickle.load(f)
+    try:
+        if cache_file.exists():
+            vectorizer, matrix = joblib.load(cache_file)
             with _cache_lock:
                 _tfidf_cache[corpus_hash] = (vectorizer, matrix)
             return vectorizer, matrix
-        except Exception as e:
-            logging.warning(f"Impossible de charger le TF-IDF cache: {e}")
+        elif cache_file_old.exists():
+            # Migration depuis l'ancien format
+            logging.info(f"Migration du cache TF-IDF vers format joblib sécurisé")
+            vectorizer, matrix = joblib.load(cache_file_old)
+            # Sauvegarder au nouveau format
+            joblib.dump((vectorizer, matrix), cache_file)
+            # Supprimer l'ancien fichier
+            try:
+                cache_file_old.unlink()
+            except Exception:
+                pass
+            with _cache_lock:
+                _tfidf_cache[corpus_hash] = (vectorizer, matrix)
+            return vectorizer, matrix
+    except Exception as e:
+        logging.warning(f"Impossible de charger le TF-IDF cache: {e}")
     
     return None, None
 
 def _save_tfidf_to_cache(corpus_hash: str, vectorizer, matrix):
-    """Sauvegarde le TF-IDF dans le cache disque."""
-    cache_file = _get_cache_file_path(corpus_hash, 'tfidf')
+    """Sauvegarde le TF-IDF dans le cache disque.
+    
+    Utilise joblib (plus sécurisé que pickle pour scikit-learn).
+    """
+    cache_file = _get_cache_file_path(corpus_hash, 'tfidf.joblib')
     
     with _cache_lock:
         _tfidf_cache[corpus_hash] = (vectorizer, matrix)
     
     try:
-        with open(cache_file, 'wb') as f:
-            pickle.dump((vectorizer, matrix), f)
+        joblib.dump((vectorizer, matrix), cache_file)
     except Exception as e:
         logging.warning(f"Impossible de sauvegarder le TF-IDF cache: {e}")
 
@@ -430,22 +475,37 @@ def login_view(request):
         refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
         samesite_policy = 'Lax'
         
-        # Définir les cookies de session
+        # Récupérer les noms des cookies depuis la configuration
+        access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
+        refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
+        
+        # Paramètres identiques pour suppression et création
+        cookie_params = {
+            'httponly': True,
+            'secure': secure_cookie,
+            'samesite': samesite_policy,
+            'path': '/',
+            'domain': 'acs.localhost'
+        }
+        
+        # Supprimer d'abord tous les cookies existants pour éviter la duplication
+        response.delete_cookie(access_cookie_name, **cookie_params)
+        response.delete_cookie(refresh_cookie_name, **cookie_params)
+        response.delete_cookie(access_cookie_name, path='/', domain='acs.localhost')  # Au cas où
+        response.delete_cookie(refresh_cookie_name, path='/', domain='acs.localhost')  # Au cas où
+        
+        # Définir les cookies de session avec exactement les mêmes paramètres
         response.set_cookie(
-            'access_token',
+            access_cookie_name,
             str(access_token),
-            httponly=True,
-            secure=secure_cookie,
-            samesite=samesite_policy,
             max_age=int(access_lifetime.total_seconds()),
+            **cookie_params
         )
         response.set_cookie(
-            'refresh_token',
+            refresh_cookie_name,
             str(refresh),
-            httponly=True,
-            secure=secure_cookie,
-            samesite=samesite_policy,
             max_age=int(refresh_lifetime.total_seconds()),
+            **cookie_params
         )
 
         return response
@@ -456,6 +516,75 @@ def login_view(request):
             {'erreur': 'Erreur serveur lors de l\'authentification'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def refresh_token_view(request):
+    """Endpoint de refresh token personnalisé qui lit depuis les cookies HttpOnly"""
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+    from django.conf import settings
+    
+    # Récupérer le nom du cookie depuis la configuration
+    refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
+    refresh_token = request.COOKIES.get(refresh_cookie_name)
+    
+    if not refresh_token:
+        return Response(
+            {'erreur': 'Aucun refresh token trouvé'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+    
+    try:
+        # Valider et rafraîchir le token
+        refresh = RefreshToken(refresh_token)
+        access_token = str(refresh.access_token)
+        
+        # Créer la réponse avec le nouveau access token
+        response = Response({
+            'success': True,
+            'message': 'Token rafraîchi avec succès'
+        })
+        
+        # Déterminer les paramètres des cookies
+        secure_cookie = not settings.DEBUG
+        access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
+        samesite_policy = 'Lax'
+        
+        # Récupérer le nom du cookie access token depuis la configuration
+        access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
+        
+        # Mettre à jour le cookie access_token
+        response.set_cookie(
+            access_cookie_name,
+            access_token,
+            httponly=True,
+            secure=secure_cookie,
+            samesite=samesite_policy,
+            max_age=int(access_lifetime.total_seconds()),
+        )
+        
+        return response
+        
+    except (InvalidToken, TokenError) as e:
+        # Nettoyer les cookies invalides pour éviter les boucles d'erreur
+        response = Response(
+            {'erreur': 'Le type de jeton fourni n\'est pas valide'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+        
+        # Supprimer les cookies invalides
+        secure_cookie = not settings.DEBUG
+        samesite_policy = 'Lax'
+        
+        access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
+        refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
+        
+        response.delete_cookie(access_cookie_name, httponly=True, secure=secure_cookie, samesite=samesite_policy)
+        response.delete_cookie(refresh_cookie_name, httponly=True, secure=secure_cookie, samesite=samesite_policy)
+        
+        return response
 
 
 @api_view(['POST'])
@@ -499,8 +628,12 @@ def documents_search_view(request):
     if not tokens:
         return Response({'resultats': []})
 
+    # Limite de sécurité pour éviter de charger tous les documents en mémoire
+    # En production avec beaucoup de documents, utiliser une recherche full-text PostgreSQL
+    MAX_DOCUMENTS_TO_SCAN = 5000
     documents = list(
-        Document.objects.select_related('categorie', 'risque__exercice__client').all()
+        Document.objects.select_related('categorie', 'risque__exercice__client')
+        .order_by('-cree_le')[:MAX_DOCUMENTS_TO_SCAN]
     )
     if not documents:
         return Response({'resultats': []})

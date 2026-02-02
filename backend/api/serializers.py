@@ -130,7 +130,11 @@ class ClientSimpleSerializer(ClientBaseSerializer):
 
     class Meta:
         model = Client
-        fields = '__all__'
+        fields = [
+            'id', 'nom', 'numero_client', 'type', 'email', 'telephone',
+            'adresse', 'entreprise', 'entreprise_nom', 'entreprise_parente',
+            'nombre_personnes_rattachees', 'cree_le', 'modifie_le'
+        ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 
 
@@ -140,7 +144,11 @@ class ClientSerializer(ClientBaseSerializer):
 
     class Meta:
         model = Client
-        fields = '__all__'
+        fields = [
+            'id', 'nom', 'numero_client', 'type', 'email', 'telephone',
+            'adresse', 'entreprise', 'entreprise_nom', 'entreprise_parente',
+            'nombre_personnes_rattachees', 'exercices', 'cree_le', 'modifie_le'
+        ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 
     def get_exercices(self, obj):
@@ -158,7 +166,10 @@ class ExerciceSimpleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Exercice
-        fields = '__all__'
+        fields = [
+            'id', 'annee', 'client', 'client_nom', 'statut',
+            'cree_le', 'modifie_le'
+        ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 
 
@@ -170,7 +181,10 @@ class ExerciceSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Exercice
-        fields = '__all__'
+        fields = [
+            'id', 'annee', 'client', 'client_nom', 'statut',
+            'risques', 'cree_le', 'modifie_le'
+        ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 
     def validate_annee(self, value):
@@ -202,7 +216,10 @@ class RisqueSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Risque
-        fields = '__all__'
+        fields = [
+            'id', 'type', 'numero_police', 'exercice', 'exercice_info',
+            'cree_le', 'modifie_le'
+        ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
     
     def get_exercice_info(self, obj):
@@ -242,7 +259,12 @@ class DocumentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Document
-        fields = '__all__'
+        fields = [
+            'id', 'titre', 'description', 'chemin_fichier', 'type_fichier',
+            'taille_fichier', 'type_courrier', 'risque', 'risque_detail',
+            'auteur', 'auteur_nom', 'categorie', 'date_document', 'reference',
+            'est_archive', 'date_archivage', 'fichier_url', 'cree_le', 'modifie_le'
+        ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 
 
@@ -254,7 +276,10 @@ class AssistantConversationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AssistantConversation
-        fields = '__all__'
+        fields = [
+            'id', 'utilisateur', 'titre', 'memoire_resume', 'memoire_etat',
+            'nombre_messages', 'dernier_message_le', 'cree_le', 'modifie_le'
+        ]
         read_only_fields = ['id', 'utilisateur', 'cree_le', 'modifie_le', 'dernier_message_le', 'nombre_messages']
 
 
@@ -263,5 +288,7 @@ class AssistantMessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AssistantMessage
-        fields = '__all__'
+        fields = [
+            'id', 'conversation', 'role', 'contenu', 'metadata', 'cree_le'
+        ]
         read_only_fields = ['id', 'cree_le']
