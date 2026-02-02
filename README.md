@@ -2,6 +2,7 @@
 
 Application de gestion et d'archivage documentaire pour ACS (Assureurs Conseils Service), avec :
 
+- **Dissociation complète** : Application isolée avec son propre sous-domaine et cookies
 - Authentification sécurisée multi‑rôles (JWT en cookies **httpOnly** + middleware, rôles admin / archiviste / consultant)
 - Gestion des clients, exercices, risques, documents (dont clients groupe / flotte)
 - Recherche avancée et recherche rapide des documents (client / exercice / risque / type de courrier, avec normalisation robuste accents/casse)
@@ -33,6 +34,12 @@ Application de gestion et d'archivage documentaire pour ACS (Assureurs Conseils 
 ```
 
 ## Fonctionnalités récentes
+
+- **Dissociation complète des applications**
+  - Sous-domaine dédié : `acs.localhost`
+  - Cookies isolés : `acs_access_token`, `acs_refresh_token`
+  - Sessions indépendantes : Pas d'interférence avec Notaire Archive
+  - Refresh automatique : Tokens JWT renouvelés automatiquement sans déconnexion
 
 - **Optimisations de performances**
   - Mise en cache des embeddings et des résultats de recherche
@@ -67,9 +74,9 @@ docker compose down
 ```
 
 **Accès :**
-- Frontend : http://localhost:80 (via Nginx)
-- Backend API : http://localhost:80/api (via Nginx)
-- Health check : http://localhost:80/api/health/
+- **Application** : http://acs.localhost:8080 (via Nginx)
+- **Backend API** : http://acs.localhost:8000/api (via Nginx)
+- **Health check** : http://acs.localhost:8000/api/health/
 
 > ⚠️ Docker Desktop doit être lancé avant d'exécuter ces commandes.
 
@@ -107,16 +114,17 @@ Interface web sur : `http://localhost:3000`
 
 ## Fonctionnalités principales
 
+- **Authentification JWT** : Cookies HttpOnly avec refresh automatique, isolation par sous-domaine
 - **Gestion des clients**
   - Clients particuliers et entreprises
-  - Gestion des groupes / flottes : un client « groupe » peut agréger les exercices/risques de ses membres
+  - Gestion des groupes / flottes : un client « groupe » peut agréger les exercices/risques de ses membres
 - **Exercices & risques**
   - Exercices annuels liés aux clients
   - Risques associés (automobile, santé, habitation, RC, prévoyance, etc.) avec normalisation des libellés
 - **Documents**
   - Archivage des courriers et pièces justificatives (PDF, images, …)
-  - Métadonnées complètes : client, exercice, type de risque, type de courrier (ACS → Client, ACS → Compagnie, avenant, facture, règlement, sinistre, …)
-  - Actions rapides : ouverture via proxy sécurisé, impression, téléchargement (selon la page)
+  - Métadonnées complètes : client, exercice, type de risque, type de courrier (ACS → Client, ACS → Compagnie, avenant, facture, règlement, sinistre, …)
+  - Actions rapides : ouverture via proxy sécurisé, impression, téléchargement (selon la page)
 - **Tableaux de bord & navigation**
   - Tableau de bord, pages clients, documents, utilisateurs, paramètres
   - Interface moderne avec animations (Framer Motion), thème et navigation cohérente
@@ -145,10 +153,11 @@ La gestion fine des permissions côté frontend repose sur des helpers comme `ha
 
 ## Authentification & sécurité
 
-- **JWT en cookies httpOnly**
-  - Les tokens d’accès / rafraîchissement sont stockés dans des cookies **httpOnly** côté backend
+- **JWT en cookies httpOnly avec isolation**
+  - Les tokens d’accès / rafraîchissement sont stockés dans des cookies **httpOnly** dédiés au sous-domaine `acs.localhost`
   - Un middleware Django injecte l’en‑tête `Authorization: Bearer <token>` à partir des cookies pour les vues DRF
   - Le frontend Next.js appelle l’API avec `credentials: 'include'` pour que les cookies soient envoyés automatiquement
+  - **Refresh automatique** : Tokens renouvelés automatiquement sans déconnexion
 - **Protection des routes frontend**
   - Hooks de session (`useUtilisateurCourant`) et de redirection contrôlent l’accès aux pages (connexion obligatoire, rôle consultant vs non-consultant, etc.)
 - **CORS / HTTPS**
@@ -160,16 +169,12 @@ La gestion fine des permissions côté frontend repose sur des helpers comme `ha
 ### Frontend (`front/.env.local`)
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api
+NEXT_PUBLIC_API_BASE_URL=/api
 
 # Configuration LLM (Mistral uniquement)
 MISTRAL_API_KEY=...
 MISTRAL_BASE_URL=https://api.mistral.ai/v1
 ASSISTANT_LLM_ENABLED=true
-
-# Optionnel : surcharger les modèles par défaut
-# MISTRAL_MODEL_DEFAULT=mistral-medium-latest
-# MISTRAL_MODEL_ADVANCED=mistral-large-latest
 ```
 
 ### Backend (`backend/.env`, optionnel)
@@ -178,20 +183,28 @@ ASSISTANT_LLM_ENABLED=true
 DEBUG=True
 SECRET_KEY=change-me
 DATABASE_URL=postgresql://user:password@localhost:5432/acs_archive
+ALLOWED_HOSTS=localhost,127.0.0.1,backend,acs.localhost
+CORS_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080,http://acs.localhost:8080
 ASSISTANT_LLM_QUOTA_DISABLED=true  # quotas LLM applicatifs désactivés (valeur par défaut dans settings.py)
 ```
 
 ## Technologies principales
 
-- **Frontend** : Next.js (App Router), React, TypeScript, TailwindCSS, Recharts, Framer Motion, React PDF, jsPDF…
-- **Backend** : Django 5, Django REST Framework, JWT (djangorestframework-simplejwt), PostgreSQL, psycopg2-binary
-- **IA / recherche** : scikit-learn, faiss-cpu (recherche lexicale/TF‑IDF pour l’assistant IA et l’API de recherche rapide)
+- **Frontend** : Next.js (App Router), React, TypeScript, TailwindCSS, Recharts, Framer Motion, React PDF, jsPDF…
+- **Backend** : Django 5, Django REST Framework, JWT (djangorestframework-simplejwt), PostgreSQL, psycopg2-binary
+- **IA / recherche** : scikit-learn, faiss-cpu (recherche lexicale/TF‑IDF pour l’assistant IA et l’API de recherche rapide)
 
 ## Recherche documentaire & assistant IA
 
-- **Recherche avancée** : page dédiée permettant de filtrer les documents par client, exercice, type de risque et type de courrier. Les libellés de risques sont normalisés (accents, variantes d’orthographe) pour garantir des résultats fiables.
-- **Recherche rapide** : barre globale (Ctrl+K) qui interroge l’endpoint `/documents/search/` et combine client / exercice / risque / type de courrier / titre / référence via une normalisation texte robuste (accents, casse, ponctuation).
-- **Assistant IA** : utilise aujourd’hui une recherche lexicale (TF‑IDF / FAISS) sur les documents. La recherche sémantique basée sur `torch` / `sentence-transformers` est volontairement désactivée dans l’environnement Windows local et sera réactivée plus tard sur une infrastructure adaptée (Linux/Cloud).
+- **Recherche avancée** : page dédiée permettant de filtrer les documents par client, exercice, type de risque et type de courrier. Les libellés de risques sont normalisés (accents, variantes d’orthographe) pour garantir des résultats fiables.
+- **Recherche rapide** : barre globale (Ctrl+K) qui interroge l’endpoint `/documents/search/` et combine client / exercice / risque / type de courrier / titre / référence via une normalisation texte robuste (accents, casse, ponctuation).
+- **Assistant IA** : utilise aujourd’hui une recherche lexicale (TF‑IDF / FAISS) sur les documents. La recherche sémantique basée sur `torch` / `sentence-transformers` est volontairement désactivée dans l’environnement Windows local et sera réactivée plus tard sur une infrastructure adaptée (Linux/Cloud).
+
+## 🔧 Isolation des applications
+- **Sous-domaine dédié** : `acs.localhost`
+- **Cookies isolés** : `acs_access_token`, `acs_refresh_token`
+- **Sessions indépendantes** : Pas d'interférence avec Notaire Archive
+- **Refresh automatique** : Tokens JWT renouvelés automatiquement sans déconnexion
 
 ## Environnements & base de données
 
@@ -205,9 +218,15 @@ ASSISTANT_LLM_QUOTA_DISABLED=true  # quotas LLM applicatifs désactivés (valeur
   - L’application est conçue pour tourner sur une base PostgreSQL dédiée par environnement (pas de partage direct de la base de production avec les développeurs)
   - Les sauvegardes doivent être réalisées via les outils PostgreSQL (`pg_dump`, `pg_restore`, etc.) ou via l’outil d’administration de la plateforme utilisée
 
+## 🐛 Dépannage rapide
+- **Ports** : 8080 (Nginx), 8000 (API), 5432 (Postgres host). Vérifier : `netstat -ano | findstr :8080`.
+- **Sous-domaine** : Assurez-vous que `acs.localhost` est dans votre fichier hosts
+- **Volumes corrompus** : `docker compose down -v && docker compose up -d`.
+- **Logs ciblés** : `docker compose logs backend` (ou frontend/db).
+
 ## Notes
 
 - Les médias sont servis par Django en développement via `/media/`.
 - Le frontend communique avec le backend via le préfixe `/api/*`.
 - La branche principale du projet est `main`.
-- La page "mot de passe oublié" ne déclenche pas de réinitialisation automatique : elle indique à l’utilisateur de contacter l’administrateur ACS (aucune adresse e‑mail n’est affichée dans l’UI).
+- La page "mot de passe oublié" ne déclenche pas de réinitialisation automatique : elle indique à l'utilisateur de contacter l'administrateur ACS (aucune adresse e‑mail n'est affichée dans l'UI).
