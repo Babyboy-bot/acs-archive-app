@@ -7,19 +7,10 @@ import {
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
-import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, extractDocumentIndex, getDocumentFromSelection, isContextExpired, getValidContextEntity, updateEntityProtected, CONFIDENCE_THRESHOLD, CONTEXT_EXPIRATION_MS, classifyIntention, convertLlmIndexToSystemIndex, calculerScoreQualiteOcr, SEUILS_CONFIANCE, type DocumentSelection, type ClassificationResult, type ClassificationContext, type OcrQualityResult, type CriteresExtraits } from './llm'
+import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, extractDocumentIndex, getDocumentFromSelection, isContextExpired, getValidContextEntity, updateEntityProtected, CONFIDENCE_THRESHOLD, CONTEXT_EXPIRATION_MS, classifyIntention, convertLlmIndexToSystemIndex, calculerScoreQualiteOcr, SEUILS_CONFIANCE, type DocumentSelection, type ClassificationResult, type ClassificationContext, type OcrQualityResult, type CriteresExtraits } from './llm'
 import { 
   recordInteraction, 
-  enrichPromptWithLearning,
 } from './learning'
-import {
-  type TypeMessage,
-  estSalutation,
-  estQuestionDefinitionGenerale,
-  estQuestionConseilGeneral,
-  estQuestionExplicationConcept,
-  estQuestionCapacitesAssistant
-} from './classification'
 // Import centralisé depuis criteria.ts (source unique de vérité)
 import {
   type CriteresRecherche,
@@ -28,7 +19,6 @@ import {
   extraireCriteresRecherche,
   loadValidClients,
   classifierSimple,
-  estQuestionAssuranceCourtage,
   estQuestionComptageContextuel,
   detectIntent,
 } from './criteria'
@@ -40,7 +30,6 @@ import {
   journaliserAssistant,
 } from './telemetry'
 import {
-  TONES,
   construireInsightsDocuments,
   construireActionsDocuments,
   construireNarrationHeuristique,
@@ -338,23 +327,6 @@ function recupererDerniereClarification(
   return { questionBase }
 }
 
-function estReponseLlmFiller(content: string): boolean {
-  const trimmed = content.trim()
-  if (!trimmed) return true
-
-  if (trimmed.length < 120) {
-    const fillers = [
-      /je vais (t'|te |vous )?(expliquer|te dire|repondre)/i,
-      /laisse[- ]moi (t'|te |vous )?expliquer/i,
-      /voici (ce que|comment)/i,
-      /en (gros|resume|clair)/i,
-    ]
-    if (fillers.some((p) => p.test(trimmed))) return true
-  }
-
-  return false
-}
-
 type QuestionClientsType = 'tous' | 'particuliers' | 'entreprises' | 'client_specifique'
 
 interface ClientSpecifiqueInfo {
@@ -539,8 +511,6 @@ export async function POST(request: Request) {
       // Fallback vers patterns regex si LLM échoue et qu'il y a des documents affichés
       isFollowUpOnDocument = isDocumentFollowUpQuestion(questionOriginale, currentMemory)
       requestedIndex = extractDocumentIndex(questionOriginale, selectionCount)
-      if (isFollowUpOnDocument) {
-      }
     }
     
     if (isFollowUpOnDocument) {
@@ -702,10 +672,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
     
     // Détecter si l'utilisateur corrige une mauvaise détection précédente
     const isUserCorrection = detectUserCorrection(sessionId, subjectAnalysis)
-    if (isUserCorrection) {
-    }
-    
-    
     // Appliquer la transition selon le type et la confiance
     let updatedMemory = currentMemory
     if (subjectAnalysis.transition === 'new_subject' || subjectAnalysis.transition === 'return_subject') {
@@ -713,7 +679,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       if (subjectAnalysis.confidence >= CONFIDENCE_THRESHOLD) {
         updatedMemory = applySubjectTransition(currentMemory, subjectAnalysis)
         setStructuredMemory(sessionId, updatedMemory)
-      } else {
       }
     }
     
@@ -758,147 +723,10 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       typeDocDetecte: criteresFinal.typeDocument,
     }
     
-    // =========================================================================
-    // MODE SALUTATION
-    // =========================================================================
-    if (modeAssistant === 'salutation') {
-      const reponse: AssistantResponse = {
-        question: questionOriginale,
-        type: 'documents',
-        resume: 'Bienvenue',
-        pieces: [],
-        insights: [],
-        actions: [],
-        narration: {
-          texte:
-            "Je peux faire deux choses: (1) rechercher des documents liés à ACS et (2) répondre à des questions liées à l’assurance et au courtage. Dis-moi ce que tu veux faire.",
-          source: 'heuristique',
-        },
-      }
-      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
-      await addToConversationWithPersistence(sessionId, 'assistant', reponse.narration!.texte, token)
-      return NextResponse.json(reponse)
-    }
-    
-    // =========================================================================
-    // MODE CONFIRMATION ("oui", "ok"...) : demande de précision dans le flux
-    // =========================================================================
-    if (modeAssistant === 'confirmation') {
-      const narrationTexte =
-        "D'accord. Dis-moi ce que tu souhaites rechercher dans les archives ACS. Par exemple : 'Documents du client 3CB' ou 'Factures 2023'."
-
-      const reponseConv: AssistantResponse = {
-        question: questionOriginale,
-        type: 'documents',
-        resume: narrationTexte,
-        pieces: [],
-        insights: [],
-        actions: [],
-        narration: { texte: narrationTexte, source: 'heuristique' },
-      }
-      
-      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
-      await addToConversationWithPersistence(sessionId, 'assistant', narrationTexte, token)
-      return NextResponse.json(reponseConv)
-    }
-
-    if (modeAssistant === 'hors_perimetre') {
-      const message =
-        "Je peux uniquement rechercher des documents dans les archives ACS. Reformule ta demande, par exemple : 'Documents du client 3CB' ou 'Factures 2023'."
-      const reponseHorsPerimetre: AssistantResponse = {
-        question: questionOriginale,
-        type: 'documents',
-        resume: message,
-        pieces: [],
-        insights: [],
-        actions: [],
-        narration: { texte: message, source: 'heuristique' },
-      }
-
-      await addToConversationWithPersistence(sessionId, 'user', questionOriginale, token)
-      await addToConversationWithPersistence(sessionId, 'assistant', message, token)
-      return NextResponse.json(reponseHorsPerimetre)
-    }
-
     const intent = detectIntent(question)
     const role = extraireRole(request)
     if (!role) {
       return NextResponse.json({ erreur: 'Rôle utilisateur manquant ou invalide.' }, { status: 401 })
-    }
-
-    // Les salutations et certaines questions conversationnelles passaient historiquement par le LLM.
-    // Avec le mode strict (docs vs assurance/courtage), on évite que ces heuristiques ne court-circuitent
-    // une recherche de documents déjà identifiée.
-    if (modeAssistant !== 'recherche_document' && (estSalutation(question) || typeMessage === 'conversation' || typeMessage === 'expression_emotion')) {
-      const salutationStartedAt = Date.now()
-      incrementRequest('documents')
-      journaliserAssistant({
-        type: 'request',
-        intent: 'documents',
-        questionLength: question.length,
-      })
-
-      let narration: AssistantResponse['narration'] = {
-        texte: "Bonjour ! Je suis l'assistant ACS. Comment puis-je vous aider ?",
-        source: 'heuristique',
-      }
-
-      // Passer par le LLM pour une réponse naturelle et contextuelle
-      if (isLlmConfigured()) {
-        try {
-          const { content, telemetry } = await generateLlmAnswer({
-            question: questionOriginale, // Utiliser la question originale pour le LLM
-            intent: 'documents',
-            sessionId,
-            token,
-          })
-          narration = {
-            texte: content,
-            source: 'llm',
-            telemetry,
-          }
-          incrementLlmSuccess()
-          if (telemetry) {
-            await logLlmUsage(telemetry, 'answer', token)
-          }
-        } catch (llmError) {
-          console.warn('LLM indisponible pour salutation, fallback heuristique.', llmError)
-          incrementLlmFallback()
-        }
-      }
-      // Enregistrer l'interaction pour l'apprentissage
-      const interactionIdSalutation = recordInteraction({
-        question: questionOriginale,
-        response: narration.texte,
-        intent: 'documents',
-        typeMessage: 'salutation',
-        clientMentionne: null,
-        typeDocMentionne: null,
-        responseTimeMs: Date.now() - salutationStartedAt,
-        llmUsed: narration.source === 'llm',
-        userId: token ? 'authenticated' : null,
-      })
-
-      const reponseSalutation: AssistantResponse = {
-        question,
-        type: 'documents',
-        resume: narration.texte,
-        pieces: undefined,
-        statistiques: undefined,
-        insights: [],
-        actions: [],
-                narration,
-        interactionId: interactionIdSalutation, // Pour le feedback ­ƒæì/­ƒæÄ
-      }
-
-      journaliserAssistant({
-        type: 'response',
-        intent: 'documents',
-        durationMs: Date.now() - salutationStartedAt,
-        pieces: 0,
-        llmUsed: narration.source === 'llm',
-      })
-      return NextResponse.json(reponseSalutation)
     }
 
     // =========================================================================
@@ -1196,104 +1024,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
 
     if (!ROLES_AUTORISES.has(role)) {
       return construireReponseRestreinte(question, intent, role)
-    }
-
-    // Questions sur les capacités / limites de l'assistant :
-    // on répond honnêtement sur ce qu'on peut ou ne peut pas faire, sans recherche de documents.
-    if (estQuestionCapacitesAssistant(question)) {
-      const messageCapacites =
-        "Je peux uniquement (1) rechercher des documents liés à ACS et (2) répondre aux questions liées à l’assurance et au courtage."
-
-      const reponseCapacites: AssistantResponse = {
-        question,
-        type: 'documents',
-        resume: messageCapacites,
-        pieces: undefined,
-        statistiques: undefined,
-        insights: [],
-        actions: [],
-        narration: {
-          texte: messageCapacites,
-          source: 'heuristique',
-        },
-      }
-
-      journaliserAssistant({
-        type: 'response',
-        intent: 'documents',
-        durationMs: Date.now() - startedAt,
-        pieces: 0,
-        llmUsed: false,
-      })
-
-      return NextResponse.json(reponseCapacites)
-    }
-
-    // Questions de définition générale, de conseil général ou de demande d'explication de concept :
-    // on ne lance PAS de recherche documentaire et on ne renvoie AUCUNE pièce justificative.
-    // On laisse uniquement le LLM (Mistral) expliquer le concept ou donner des conseils.
-    if (
-      modeAssistant !== 'recherche_document' &&
-      estQuestionAssuranceCourtage(questionOriginale) &&
-      (estQuestionDefinitionGenerale(question) || estQuestionConseilGeneral(question) || estQuestionExplicationConcept(question))
-    ) {
-      const startedAtDefinition = Date.now()
-      incrementRequest('documents')
-
-      let narration: AssistantResponse['narration'] = {
-        texte:
-          "Je peux répondre aux questions d’assurance/courtage, mais le service LLM est momentanément indisponible. Réessaie dans quelques instants.",
-        source: 'heuristique',
-      }
-
-      if (isLlmConfigured()) {
-        try {
-          const { content, telemetry } = await generateLlmAnswer({
-            question: questionOriginale,
-            intent: 'documents',
-            sessionId,
-            token,
-            customSystemPrompt: buildConversationSystemPrompt(),
-          })
-
-          if (estReponseLlmFiller(content)) {
-            throw new Error('Réponse LLM vide ou insuffisante')
-          }
-
-          narration = {
-            texte: content,
-            source: 'llm',
-            telemetry,
-          }
-          incrementLlmSuccess()
-          if (telemetry) {
-            await logLlmUsage(telemetry, 'answer', token)
-          }
-        } catch (llmError) {
-          console.warn('Assistant LLM (définition générale) indisponible.', llmError)
-          incrementLlmFallback()
-        }
-      }
-      const reponseDefinition: AssistantResponse = {
-        question,
-        type: 'documents',
-        resume: narration.texte,
-        pieces: undefined,
-        statistiques: undefined,
-        insights: [],
-        actions: [],
-                narration,
-      }
-
-      journaliserAssistant({
-        type: 'response',
-        intent: 'documents',
-        durationMs: Date.now() - startedAtDefinition,
-        pieces: 0,
-        llmUsed: narration.source === 'llm',
-      })
-
-      return NextResponse.json(reponseDefinition)
     }
 
     // Extraire les critères pour filtrer la recherche
