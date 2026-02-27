@@ -73,7 +73,6 @@ const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
 export const DEFAULT_TOP_K = 15
 export const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 export const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000
-const USE_FAISS = process.env.NEXT_PUBLIC_ASSISTANT_USE_FAISS === 'true'
 const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.ASSISTANT_BACKEND_FETCH_TIMEOUT_MS ?? '12000')
 const CLIENT_VALIDATION_TTL_MS = Number(process.env.ASSISTANT_CLIENT_VALIDATION_TTL_MS ?? '600000')
 
@@ -381,7 +380,7 @@ async function rechercherDocumentsSemantic(
       isFallback: result.metadata?.isFallback === true,
     }))
   } catch (error) {
-    console.warn('Recherche sémantique indisponible, fallback TF-IDF.', error)
+    console.warn('Recherche TF-IDF avancee indisponible.', error)
     return null
   }
 }
@@ -453,39 +452,6 @@ async function rechercherDocumentsFiltered(
   }
 }
 
-async function rechercherDocumentsFaiss(
-  question: string,
-  token: string | null,
-  topK: number
-): Promise<DocumentPiece[] | null> {
-  const url = buildBackendUrl('assistant/documents/search/faiss/')
-  url.searchParams.set('q', question)
-  url.searchParams.set('top_k', String(topK))
-  url.searchParams.set('include_fallback', 'true')
-
-  try {
-    const data = await fetchJson<{ results?: AssistantSearchResult[] }>(url, token)
-    const results = data?.results ?? []
-    if (!results.length) {
-      return null
-    }
-
-    return results.map((result) => ({
-      id: result.id,
-      source: result.titre,
-      content: result.content,
-      metadata: {
-        ...result.metadata,
-        highlights: result.highlights ?? [],
-      },
-      score: result.score,
-      isFallback: result.metadata?.isFallback === true,
-    }))
-  } catch (error) {
-    console.warn('Assistant FAISS search unavailable, falling back to TF-IDF.', error)
-    return null
-  }
-}
 
 function prioriserPiecesParReference(pieces: DocumentPiece[], referenceDemandee: string | null): DocumentPiece[] {
   if (!referenceDemandee) {
@@ -662,7 +628,7 @@ export async function rechercherDocuments(
     }
   }
   
-  // 2. Sinon, essayer la recherche sémantique
+  // 2. Sinon, essayer la recherche TF-IDF avancee (avec chunks PDF)
   if (!pieces.length && !filtresBackend.typeDocument) {
     const semanticPieces = await rechercherDocumentsSemantic(question, token, topK * 3, filtresBackend)
     if (semanticPieces && semanticPieces.length > 0) {
@@ -670,15 +636,7 @@ export async function rechercherDocuments(
     }
   }
 
-  // 3. Fallback sur FAISS
-  if (!pieces.length && USE_FAISS && !filtresBackend.typeDocument) {
-    const faissPieces = await rechercherDocumentsFaiss(question, token, topK * 3)
-    if (faissPieces && faissPieces.length > 0) {
-      pieces = faissPieces
-    }
-  }
-
-  // 4. Fallback TF-IDF
+  // 3. Fallback TF-IDF simple
   if (!pieces.length && !filtresBackend.typeDocument) {
     const searchUrl = buildBackendUrl('assistant/documents/search/tfidf/')
     searchUrl.searchParams.set('q', question)

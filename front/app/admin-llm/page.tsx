@@ -49,7 +49,6 @@ interface AssistantHealth {
   llm_enabled: boolean
   config_ok: boolean
   errors: string[]
-  semantic_search_available: boolean
 }
 
 export default function AdminLlmPage() {
@@ -231,7 +230,6 @@ export default function AdminLlmPage() {
                   <p className="text-sm text-theme-secondary">
                     Fournisseur&nbsp;: <span className="font-medium text-theme-primary">{libelleProvider(health.provider)}</span>
                     {' · '}LLM activé&nbsp;: <span className="font-medium">{health.llm_enabled ? 'Oui' : 'Non'}</span>
-                    {' · '}Recherche sémantique&nbsp;: <span className="font-medium">{health.semantic_search_available ? 'Disponible' : 'Désactivée'}</span>
                   </p>
                 ) : (
                   <p className="text-sm text-theme-secondary">Impossible de charger l'état technique de l'assistant.</p>

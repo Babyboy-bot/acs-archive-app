@@ -46,74 +46,6 @@ def should_use_secure_cookie(request):
     return request.is_secure()
 
 
-# faiss importé de façon lazy pour ne pas bloquer le démarrage
-_FAISS_MODULE = None
-def get_faiss():
-    global _FAISS_MODULE
-    if _FAISS_MODULE is None:
-        import faiss
-        _FAISS_MODULE = faiss
-    return _FAISS_MODULE
-
-# Embeddings sémantiques avec sentence-transformers (chargement lazy pour ne pas bloquer le démarrage)
-# Le cache HuggingFace est persisté dans le volume Docker pour éviter les re-téléchargements
-_SEMANTIC_MODEL = None
-_SEMANTIC_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'  # Multilingue, rapide, bon pour le français
-_SENTENCE_TRANSFORMERS_CHECKED = False
-_SENTENCE_TRANSFORMERS_AVAILABLE = False
-
-def get_semantic_model():
-    """Charge le modèle sémantique de façon lazy (à la première utilisation)."""
-    global _SEMANTIC_MODEL, _SENTENCE_TRANSFORMERS_CHECKED, _SENTENCE_TRANSFORMERS_AVAILABLE
-    
-    if not _SENTENCE_TRANSFORMERS_CHECKED:
-        _SENTENCE_TRANSFORMERS_CHECKED = True
-        try:
-            from sentence_transformers import SentenceTransformer
-            _SENTENCE_TRANSFORMERS_AVAILABLE = True
-        except ImportError as exc:
-            logging.warning("sentence-transformers non disponible (%s), recherche sémantique désactivée", exc)
-            _SENTENCE_TRANSFORMERS_AVAILABLE = False
-    
-    if not _SENTENCE_TRANSFORMERS_AVAILABLE:
-        return None
-    
-    if _SEMANTIC_MODEL is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            logging.info(f"Chargement du modèle sémantique: {_SEMANTIC_MODEL_NAME}")
-            _SEMANTIC_MODEL = SentenceTransformer(_SEMANTIC_MODEL_NAME)
-            logging.info("Modèle sémantique chargé avec succès")
-        except Exception as exc:
-            logging.warning("Échec du chargement du modèle sémantique (%s)", exc)
-            return None
-    
-    return _SEMANTIC_MODEL
-
-def is_semantic_search_available():
-    """Vérifie si la recherche sémantique est disponible (sans charger le modèle).
-    
-    Désactivé par défaut pour éviter le téléchargement de modèles lourds au démarrage.
-    Activer via ENABLE_SEMANTIC_SEARCH=true dans l'environnement.
-    """
-    import os
-    if os.environ.get('ENABLE_SEMANTIC_SEARCH', '').lower() != 'true':
-        return False
-    
-    global _SENTENCE_TRANSFORMERS_CHECKED, _SENTENCE_TRANSFORMERS_AVAILABLE
-    if not _SENTENCE_TRANSFORMERS_CHECKED:
-        _SENTENCE_TRANSFORMERS_CHECKED = True
-        try:
-            import importlib.util
-            spec = importlib.util.find_spec('sentence_transformers')
-            _SENTENCE_TRANSFORMERS_AVAILABLE = spec is not None
-        except Exception:
-            _SENTENCE_TRANSFORMERS_AVAILABLE = False
-    return _SENTENCE_TRANSFORMERS_AVAILABLE
-
-# Vérifie réellement si la recherche sémantique est activée et disponible
-SEMANTIC_SEARCH_AVAILABLE = is_semantic_search_available()
-
 try:
     import PyPDF2
     PDF_EXTRACTION_AVAILABLE = True
@@ -152,7 +84,7 @@ from .permissions import RoleBasedPermission, IsOwnerOrAdmin
 
 
 # ============================================================================
-# CACHE EMBEDDINGS ET TF-IDF (OPTIMISATION)
+# CACHE TF-IDF (OPTIMISATION)
 # ============================================================================
 
 import threading
@@ -160,8 +92,7 @@ import hashlib
 from pathlib import Path
 import joblib  # Sérialisation sécurisée (remplace pickle pour éviter CWE-502)
 
-# Cache en mémoire pour les embeddings et TF-IDF
-_embeddings_cache = {}
+# Cache en mémoire pour le TF-IDF
 _tfidf_cache = {}
 _cache_lock = threading.Lock()
 
@@ -174,68 +105,6 @@ def _get_cache_file_path(cache_key: str, suffix: str) -> Path:
     cache_dir = Path(settings.SEARCH_INDEX_DIR)
     cache_dir.mkdir(exist_ok=True, parents=True)
     return cache_dir / f"{cache_key}.{suffix}"
-
-def _load_embeddings_from_cache(cache_key):
-    """Charge les embeddings depuis le cache disque si disponible.
-    
-    Utilise numpy.load pour les embeddings (format .npy) - plus sécurisé que pickle.
-    """
-    if not settings.SEARCH_INDEX_DIR.exists():
-        logging.debug("Dossier de cache d'index non trouvé")
-        return None
-    
-    # Nouveau format .npy (numpy) - plus sécurisé
-    cache_file_npy = settings.SEARCH_INDEX_DIR / f"embeddings_{cache_key}.npy"
-    # Ancien format .pkl pour rétrocompatibilité (sera migré)
-    cache_file_pkl = settings.SEARCH_INDEX_DIR / f"embeddings_{cache_key}.pkl"
-    
-    try:
-        start_time = time.time()
-        
-        if cache_file_npy.exists():
-            # Charger depuis le nouveau format numpy (sécurisé)
-            embeddings = np.load(cache_file_npy, allow_pickle=False)
-        elif cache_file_pkl.exists():
-            # Migration: charger l'ancien format et le convertir
-            logging.info(f"Migration du cache embeddings vers format numpy sécurisé")
-            embeddings = joblib.load(cache_file_pkl)
-            # Sauvegarder au nouveau format
-            np.save(cache_file_npy, embeddings)
-            # Supprimer l'ancien fichier après migration réussie
-            try:
-                cache_file_pkl.unlink()
-            except Exception:
-                pass
-        else:
-            logging.debug(f"Fichier de cache non trouvé: {cache_file_npy}")
-            return None
-            
-        load_time = (time.time() - start_time) * 1000
-        logging.info(f"Embeddings chargés depuis le cache en {load_time:.2f}ms - Taille: {len(embeddings) if embeddings is not None else 0} vecteurs")
-        return embeddings
-    except Exception as e:
-        logging.error(f"Erreur lors du chargement du cache d'embeddings: {e}", exc_info=True)
-        return None
-
-def _save_embeddings_to_cache(documents_hash: str, embeddings):
-    """Sauvegarde les embeddings dans le cache disque.
-    
-    Utilise numpy.save (format .npy) - plus sécurisé que pickle.
-    """
-    cache_dir = Path(settings.SEARCH_INDEX_DIR)
-    cache_dir.mkdir(exist_ok=True, parents=True)
-    cache_file = cache_dir / f"embeddings_{documents_hash}.npy"
-    
-    with _cache_lock:
-        _embeddings_cache[documents_hash] = embeddings
-    
-    try:
-        # Convertir en numpy array si nécessaire
-        if not isinstance(embeddings, np.ndarray):
-            embeddings = np.array(embeddings)
-        np.save(cache_file, embeddings)
-    except Exception as e:
-        logging.error(f"Erreur lors de la sauvegarde du cache d'embeddings: {e}", exc_info=True)
 
 def _load_tfidf_from_cache(corpus_hash: str):
     """Charge le TF-IDF depuis le cache disque si disponible.
@@ -861,8 +730,7 @@ def llm_quota_status(request):
 def assistant_health(request):
     """Retourne un état de santé technique de l'assistant LLM.
 
-    Vérifie la configuration de base du provider LLM (provider, clés, URLs) et
-    expose aussi l'état de la recherche sémantique.
+    Vérifie la configuration de base du provider LLM (provider, clés, URLs).
 
     Réponse JSON minimale:
     {
@@ -870,7 +738,6 @@ def assistant_health(request):
       "llm_enabled": true/false,
       "config_ok": true/false,
       "errors": ["..."] ,
-      "semantic_search_available": true/false
     }
     """
 
@@ -921,15 +788,13 @@ def assistant_health(request):
         'llm_enabled': llm_enabled,
         'config_ok': bool(config_ok),
         'errors': errors,
-        'semantic_search_available': bool(SEMANTIC_SEARCH_AVAILABLE),
     }
 
     logging.info(
-        "ASSISTANT_HEALTH provider=%s enabled=%s config_ok=%s semantic_search_available=%s errors=%s",
+        "ASSISTANT_HEALTH provider=%s enabled=%s config_ok=%s errors=%s",
         provider,
         llm_enabled,
         bool(config_ok),
-        bool(SEMANTIC_SEARCH_AVAILABLE),
         ";".join(errors) if errors else "",
     )
 
@@ -2197,81 +2062,6 @@ setattr(assistant_document_search_view, 'ressource', 'documents')
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
-def assistant_document_search_faiss_view(request):
-    """Recherche vectorielle via FAISS pour l'assistant IA"""
-
-    query = (request.query_params.get('q') or '').strip()
-    if not query:
-        return Response({'results': []})
-
-    include_fallback = (request.query_params.get('include_fallback') or '').lower() == 'true'
-
-    try:
-        top_k = int(request.query_params.get('top_k') or 5)
-    except ValueError:
-        top_k = 5
-
-    documents = list(
-        Document.objects.select_related('categorie', 'risque__exercice__client').all()
-    )
-
-    if not documents:
-        return Response({'results': []})
-
-    payloads = [_build_document_payload(doc) for doc in documents]
-    corpus = [_build_document_text(payload) for payload in payloads]
-
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(corpus)
-
-    if tfidf_matrix.shape[1] == 0:
-        return Response({'results': []})
-
-    doc_matrix = tfidf_matrix.astype(np.float32).toarray()
-    if doc_matrix.size == 0:
-        return Response({'results': []})
-
-    get_faiss().normalize_L2(doc_matrix)
-
-    query_vector = vectorizer.transform([query]).astype(np.float32).toarray()
-    if query_vector.size == 0 or not np.any(query_vector):
-        if include_fallback:
-            fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
-            if fallback_document:
-                payload = _build_document_payload(fallback_document, request)
-                return Response({'results': [_build_assistant_result(payload, 0.0, is_fallback=True)]})
-        return Response({'results': []})
-
-    get_faiss().normalize_L2(query_vector)
-
-    index = get_faiss().IndexFlatIP(doc_matrix.shape[1])
-    index.add(doc_matrix)
-
-    distances, indices = index.search(query_vector, max(top_k, 1))
-
-    results = []
-    for idx, score in zip(indices[0], distances[0]):
-        if idx < 0:
-            continue
-        if score <= 0:
-            continue
-        payload = payloads[idx]
-        results.append(_build_assistant_result(payload, float(score)))
-
-    if include_fallback and not results:
-        fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
-        if fallback_document:
-            payload = _build_document_payload(fallback_document, request)
-            results.append(_build_assistant_result(payload, 0.0, is_fallback=True))
-
-    return Response({'results': results})
-
-
-setattr(assistant_document_search_faiss_view, 'ressource', 'documents')
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, RoleBasedPermission])
 def document_search_view(request):
     """Recherche simplifiée de documents"""
     terme = (request.query_params.get('q') or '').strip()
@@ -2586,205 +2376,55 @@ def _log_perf_metric(metric_name: str, duration_ms: float, **extra):
 
 def assistant_semantic_search_view(request):
     """
-    Recherche sémantique avancée pour l'assistant IA.
-    Utilise des embeddings multilingues pour comprendre le sens des requêtes.
-    Fallback sur TF-IDF si sentence-transformers n'est pas disponible.
+    Recherche avancee TF-IDF pour l'assistant IA avec support des chunks PDF.
     
-    Paramètres de filtre optionnels :
+    Parametres de filtre optionnels :
     - client: code client (ex: 3CB)
-    - exercice: année de l'exercice (ex: 2018)
+    - exercice: annee de l'exercice (ex: 2018)
     - risque: type de risque (ex: sante)
-    - top_k: nombre de résultats à retourner (défaut: 5, max: 20)
-    - max_docs: nombre maximum de documents à analyser (défaut: 100, max: 500)
+    - top_k: nombre de resultats a retourner (defaut: 5, max: 20)
+    - max_docs: nombre maximum de documents a analyser (defaut: 100, max: 500)
     """
-    request_start_time = time.time()
-    if not SEMANTIC_SEARCH_AVAILABLE:
-        return assistant_document_search_view(request)
-
     query = request.data.get('query', '').strip()
     if not query:
-        return Response({'error': 'La requête est vide'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'La requete est vide'}, status=status.HTTP_400_BAD_REQUEST)
 
     include_fallback = str(request.data.get('include_fallback', 'false')).lower() == 'true'
 
-    # Récupération des paramètres de filtre et de limitation
     client_filter = request.data.get('client')
     exercice_filter = request.data.get('exercice')
     risque_filter = request.data.get('risque')
-    top_k = min(int(request.data.get('top_k', 5)), 20)  # Limiter à 20 résultats max
-    max_docs = min(int(request.data.get('max_docs', 100)), 500)  # Limiter à 500 documents max
-    
-    # Log des paramètres de la requête
-    _log_perf_metric(
-        "search_request", 
-        0,
-        query_length=len(query),
-        client_filter=bool(client_filter),
-        exercice_filter=bool(exercice_filter),
-        risque_filter=bool(risque_filter),
-        top_k=top_k,
-        max_docs=max_docs
-    )   
+    top_k = min(int(request.data.get('top_k', 5)), 20)
+    max_docs = min(int(request.data.get('max_docs', 100)), 500)
 
-    # Filtres optionnels pour affiner la recherche
-    # Construire la requête avec filtres
+    # Construire la requete avec filtres
     queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
     
     if client_filter:
-        # Le client peut être identifié par son nom ou son numero_client
         queryset = queryset.filter(
             Q(risque__exercice__client__nom__iexact=client_filter) |
             Q(risque__exercice__client__numero_client__iexact=client_filter)
         )
-        logging.info(f"Filtre client: {client_filter}")
     
     if exercice_filter:
         try:
             annee = int(exercice_filter)
             queryset = queryset.filter(risque__exercice__annee=annee)
-            logging.info(f"Filtre exercice: {annee}")
         except ValueError:
             pass
     
     if risque_filter:
-        # Le risque est identifié par son type
         queryset = queryset.filter(risque__type__icontains=risque_filter)
-        logging.info(f"Filtre risque: {risque_filter}")
     
-    # Limiter le nombre de documents analysés pour éviter les performances dégradées
     documents = list(queryset.all()[:max_docs])
-    total_documents = queryset.count()
     
     if not documents:
         return Response({'results': [], 'method': 'none'})
-        
-    if len(documents) >= max_docs:
-        logging.warning(
-            "Limite de documents atteinte: %d/%d documents analysés (max_docs=%d)",
-            max_docs, total_documents, max_docs
-        )
 
     payloads = [_build_document_payload(doc, request) for doc in documents]
     corpus = [_build_document_text(payload) for payload in payloads]
 
-    # Générer une clé de cache basée sur les documents et filtres
-    documents_text = '|'.join([f"{doc.id}:{doc.titre}" for doc in documents])
-    documents_hash = _get_cache_key(f"{documents_text}:{client_filter}:{exercice_filter}:{risque_filter}")
-
-    # Essayer la recherche sémantique si disponible
-    if SEMANTIC_SEARCH_AVAILABLE:
-        try:
-            model_load_start = time.time()
-            model = get_semantic_model()
-            model_load_time = (time.time() - model_load_start) * 1000
-            _log_perf_metric("model_load", model_load_time)
-            
-            if model is not None:
-                # Tenter de charger les embeddings depuis le cache
-                cached_embeddings = _load_embeddings_from_cache(documents_hash)
-                
-                if cached_embeddings is not None:
-                    doc_embeddings = cached_embeddings
-                    _log_perf_metric("embeddings_load_cache", 0, docs_count=len(documents))
-                else:
-                    # Encoder les documents et mettre en cache
-                    encode_start = time.time()
-                    doc_embeddings = model.encode(corpus, convert_to_numpy=True, normalize_embeddings=True)
-                    encode_time = (time.time() - encode_start) * 1000
-                    
-                    cache_start = time.time()
-                    _save_embeddings_to_cache(documents_hash, doc_embeddings)
-                    cache_time = (time.time() - cache_start) * 1000
-                    
-                    _log_perf_metric(
-                        "embeddings_compute", 
-                        encode_time,
-                        docs_count=len(documents),
-                        cache_time_ms=cache_time
-                    )
-                
-                # Encoder la requête
-                query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
-                
-                # Créer l'index FAISS avec les embeddings sémantiques
-                dimension = doc_embeddings.shape[1]
-                index = get_faiss().IndexFlatIP(dimension)
-                index.add(doc_embeddings.astype(np.float32))
-                
-                # Rechercher les documents les plus similaires
-                search_start = time.time()
-                distances, indices = index.search(query_embedding.astype(np.float32), min(top_k, len(documents)))
-                search_time = (time.time() - search_start) * 1000
-                
-                results = []
-                process_start = time.time()
-                for idx, score in zip(indices[0], distances[0]):
-                    if idx < 0 or score <= 0:
-                        continue
-                    payload = payloads[idx]
-                    result = _build_assistant_result(payload, float(score))
-                    result['search_method'] = 'semantic'
-                    results.append(result)
-                
-                process_time = (time.time() - process_start) * 1000
-                
-                _log_perf_metric(
-                    "semantic_search", 
-                    search_time,
-                    results_count=len(results),
-                    process_time_ms=process_time
-                )
-                
-                if results:
-                    try:
-                        apercu = [
-                            {
-                                'id': r.get('id'),
-                                'client': (r.get('metadata') or {}).get('client'),
-                                'exercice': (r.get('metadata') or {}).get('exercice'),
-                                'risque': (r.get('metadata') or {}).get('risque'),
-                                'score': r.get('score'),
-                            }
-                            for r in results[:10]
-                        ]
-                        logging.info(
-                            "Assistant semantic search: query=%r client=%s exercice=%s risque=%s top=%s",
-                            query,
-                            client_filter or None,
-                            exercice_filter or None,
-                            risque_filter or None,
-                            apercu,
-                        )
-                    except Exception as log_error:
-                        logging.error("Erreur lors du logging des résultats sémantiques: %s", log_error)
-
-                    # Log de la requête complète
-                    total_time = (time.time() - request_start_time) * 1000
-                    _log_perf_metric(
-                        "search_complete", 
-                        total_time,
-                        method='semantic',
-                        results_count=len(results),
-                        cached=False
-                    )
-                    
-                    return Response({
-                        'results': results, 
-                        'method': 'semantic',
-                        'cached': False,
-                        'performance': {
-                            'total_time_ms': round(total_time, 2),
-                            'documents_processed': len(documents)
-                        }
-                    })
-                
-                # Pas de résultats sémantiques, fallback
-                logging.info("Recherche sémantique: aucun résultat, fallback TF-IDF")
-        except Exception as e:
-            logging.error(f"Erreur recherche sémantique: {e}, fallback TF-IDF")
-
-    # Fallback sur TF-IDF si la recherche sémantique échoue ou n'est pas disponible.
-    # On privilégie les chunks de documents (texte extrait des PDF) s'ils sont disponibles.
+    # Privilegier les chunks de documents (texte extrait des PDF) s'ils sont disponibles
     try:
         chunks_qs = DocumentChunk.objects.filter(
             document__in=documents
