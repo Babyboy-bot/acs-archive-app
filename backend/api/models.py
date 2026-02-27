@@ -401,86 +401,9 @@ class LlmUsage(models.Model):
         return f"{self.utilisateur_id} {self.purpose} {self.tokens_total} @ {self.timestamp}"
 
 
-class AssistantInteraction(models.Model):
-    """Interactions de l'assistant IA pour l'apprentissage progressif.
-    
-    Stocke les questions/réponses avec feedback pour améliorer l'assistant.
-    """
-    
-    FEEDBACK_CHOICES = [
-        ('positive', 'Positif'),
-        ('negative', 'Négatif'),
-        ('neutral', 'Neutre'),
-    ]
-    
-    INTENT_CHOICES = [
-        ('documents', 'Documents'),
-        ('statistiques', 'Statistiques'),
-    ]
-    
-    id = models.CharField(max_length=50, primary_key=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
-    utilisateur = models.ForeignKey(
-        Utilisateur,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='assistant_interactions',
-    )
-    question = models.TextField()
-    question_normalized = models.TextField()
-    response = models.TextField()
-    intent = models.CharField(max_length=20, choices=INTENT_CHOICES)
-    type_message = models.CharField(max_length=50, default='document')
-    client_mentionne = models.CharField(max_length=255, null=True, blank=True)
-    type_doc_mentionne = models.CharField(max_length=100, null=True, blank=True)
-    feedback = models.CharField(max_length=20, choices=FEEDBACK_CHOICES, null=True, blank=True)
-    feedback_comment = models.TextField(null=True, blank=True)
-    response_time_ms = models.PositiveIntegerField(default=0)
-    llm_used = models.BooleanField(default=False)
-    
-    class Meta:
-        db_table = 'assistant_interactions'
-        verbose_name = "Interaction assistant"
-        verbose_name_plural = "Interactions assistant"
-        ordering = ['-timestamp']
-        indexes = [
-            models.Index(fields=['question_normalized']),
-            models.Index(fields=['feedback']),
-            models.Index(fields=['intent']),
-        ]
-    
-    def __str__(self) -> str:
-        return f"{self.id} - {self.question[:50]}..."
-
-
-class AssistantQuestionPattern(models.Model):
-    """Patterns de questions fréquentes pour l'apprentissage.
-    
-    Identifie les questions récurrentes et leurs meilleures réponses.
-    """
-    
-    pattern = models.CharField(max_length=500, unique=True)
-    examples = models.JSONField(default=list)  # Liste d'exemples de questions
-    best_responses = models.JSONField(default=list)  # Meilleures réponses
-    frequency = models.PositiveIntegerField(default=1)
-    avg_feedback_score = models.FloatField(default=0.0)  # -1 à 1
-    last_updated = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        db_table = 'assistant_question_patterns'
-        verbose_name = "Pattern de question"
-        verbose_name_plural = "Patterns de questions"
-        ordering = ['-frequency']
-    
-    def __str__(self) -> str:
-        return f"{self.pattern} (freq: {self.frequency})"
-
-
 class AuditLog(models.Model):
     """Journal d'audit pour tracer les actions importantes.
     
-    Conforme aux exigences d'archivage professionnel (NF Z42-013).
     Enregistre toutes les actions sur les documents et données sensibles.
     """
     

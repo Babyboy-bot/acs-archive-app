@@ -48,9 +48,6 @@ export type AssistantRestriction = {
 export type AssistantTrace = {
   mode?:
     | 'recherche_document'
-    | 'hors_perimetre'
-    | 'salutation'
-    | 'confirmation'
     | 'statistiques'
   intent: 'documents' | 'statistiques'
   typeMessage?: string
@@ -85,8 +82,6 @@ export type AssistantResponse = {
   actions?: string[]
   narration?: AssistantNarration
   restriction?: AssistantRestriction
-  // Système d'apprentissage
-  interactionId?: string
   // Traçabilité métier de la réponse
   trace?: AssistantTrace
 }

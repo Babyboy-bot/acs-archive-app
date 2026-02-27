@@ -44,7 +44,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 result = auth.authenticate(request)
                 if result:
                     access_token_valid = True  # Token valide
-                    logger.info("Access token valide trouvé")
+                    logger.debug("Access token valide trouvé")
                     
             except Exception as e:
                 # Token invalide ou expiré
@@ -54,7 +54,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         # Si l'access token est invalide ou manquant, essayer de rafraîchir
         if not access_token_valid and refresh_token:
             try:
-                logger.info("Tentative de refresh avec refresh token")
+                logger.debug("Tentative de refresh avec refresh token")
                 refresh = RefreshToken(refresh_token)
                 new_access_token = str(refresh.access_token)
                 
@@ -64,7 +64,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 # Stocker le nouveau token pour l'ajouter à la réponse
                 request._new_access_token = new_access_token
                 
-                logger.info("Token rafraîchi automatiquement avec succès")
+                logger.debug("Token rafraîchi automatiquement avec succès")
                 
             except Exception as e:
                 logger.warning(f"Échec du refresh: {e}")

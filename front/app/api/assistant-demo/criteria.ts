@@ -20,9 +20,6 @@ export type CriteresRecherche = {
 
 export type ModeAssistant =
   | 'recherche_document'
-  | 'hors_perimetre'
-  | 'salutation'
-  | 'confirmation'
 
 // ============================================================================
 // CONSTANTES - MOTS-CLÉS ET PATTERNS
@@ -489,18 +486,7 @@ export function estQuestionAssuranceCourtage(question: string): boolean {
 export function classifierSimple(question: string, criteresExtraits: CriteresRecherche): ModeAssistant {
   const lower = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
   
-  // 1. Salutations simples
-  const salutations = ['bonjour', 'salut', 'coucou', 'hello', 'bonsoir', 'hey', 'hi', 'yo']
-  if (salutations.some(s => lower === s || lower === s + '!')) {
-    return 'salutation'
-  }
-  
-  // 2. Confirmations simples
-  if (/^(oui|ok|d'?accord|vas[-\s]?y|go|ouais|yep|yes|non|nan|nope|a|b)$/i.test(lower)) {
-    return 'confirmation'
-  }
-  
-  // 3. Détecter une recherche de documents
+  // Détecter une recherche de documents
   const aCriteresForts = !!(criteresExtraits.client || criteresExtraits.annee || criteresExtraits.reference)
   const aCriteresFaibles = !!(criteresExtraits.typeDocument || criteresExtraits.risque)
   const aCriteres = aCriteresForts || aCriteresFaibles

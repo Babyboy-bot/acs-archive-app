@@ -22,8 +22,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-acs_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-acs_user} -d ${POSTGRES_DB:-acs_archive}"]
       interval: 10s
@@ -47,7 +45,7 @@ services:
       - .env
     environment:
       - DEBUG=${DEBUG:-True}
-      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set in .env}
       # Variables de base de données (utilisées par settings.py)
       - DB_HOST=db
       - DB_PORT=5432
@@ -63,7 +61,6 @@ services:
       - ./backend:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-      - huggingface_cache:/root/.cache/huggingface
     ports:
       - "8000:8000"
     healthcheck:
@@ -124,8 +121,6 @@ volumes:
   static_volume:
     driver: local
   media_volume:
-    driver: local
-  huggingface_cache:
     driver: local
 
 # ==========================================================================

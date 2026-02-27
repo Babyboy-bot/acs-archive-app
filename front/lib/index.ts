@@ -11,7 +11,6 @@ export {
   enregistrerSession,
   supprimerSession,
   getToken,
-  getRefreshToken,
   getUtilisateurActif,
   API_BASE_URL,
   verifierSessionServeur,

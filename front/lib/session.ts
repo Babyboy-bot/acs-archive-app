@@ -11,8 +11,6 @@ export type SessionUtilisateur = {
 
 export type RoleUtilisateurCode = SessionUtilisateur['role']
 
-const TOKEN_KEY = 'authToken'
-const REFRESH_KEY = 'refreshToken'
 const UTILISATEUR_KEY = 'utilisateurActif'
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? (typeof window !== 'undefined' ? '/api' : 'http://backend:8000/api')
@@ -27,24 +25,12 @@ export function enregistrerSession(session: {
   utilisateur: SessionUtilisateur
 }) {
   if (!isBrowser()) return
-  try {
-    // Nettoyage défensif d'anciens tokens éventuels
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(REFRESH_KEY)
-  } catch {
-    // Ignorer les erreurs de quota ou d'accès
-  }
   localStorage.setItem(UTILISATEUR_KEY, JSON.stringify(session.utilisateur))
 }
 
 export function getToken(): string | null {
   if (!isBrowser()) return null
   // L'authentification repose désormais uniquement sur les cookies httpOnly.
-  return null
-}
-
-export function getRefreshToken(): string | null {
-  if (!isBrowser()) return null
   return null
 }
 
@@ -62,8 +48,6 @@ export function getUtilisateurActif(): SessionUtilisateur | null {
 
 export function supprimerSession() {
   if (!isBrowser()) return
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(REFRESH_KEY)
   localStorage.removeItem(UTILISATEUR_KEY)
 }
 

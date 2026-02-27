@@ -102,13 +102,6 @@ class UtilisateurListSerializer(serializers.ModelSerializer):
         ]
 
 
-class LoginSerializer(serializers.Serializer):
-    """Serializer pour la connexion"""
-    
-    nom_utilisateur = serializers.CharField(required=True)
-    mot_de_passe = serializers.CharField(required=True, write_only=True, style={'input_type': 'password'})
-
-
 class ClientBaseSerializer(serializers.ModelSerializer):
     entreprise = serializers.PrimaryKeyRelatedField(
         source='entreprise_parente',
