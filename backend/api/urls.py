@@ -24,10 +24,6 @@ from .views_main import (
     llm_admin_history,
     assistant_health,
     assistant_feedback,
-    assistant_learning_record,
-    assistant_learning_similar,
-    assistant_learning_stats,
-    assistant_learning_pattern_update,
     audit_log_list,
     audit_log_detail,
     audit_log_stats,
@@ -86,12 +82,6 @@ urlpatterns = [
     
     # Rapport qualité OCR (priorisation re-scan)
     path('ocr/quality-report/', ocr_quality_report_view, name='ocr-quality-report'),
-    
-    # Apprentissage assistant
-    path('assistant/learning/record/', assistant_learning_record, name='assistant-learning-record'),
-    path('assistant/learning/similar/', assistant_learning_similar, name='assistant-learning-similar'),
-    path('assistant/learning/stats/', assistant_learning_stats, name='assistant-learning-stats'),
-    path('assistant/learning/patterns/', assistant_learning_pattern_update, name='assistant-learning-patterns'),
     
     # Journal d'audit
     path('audit/logs/', audit_log_list, name='audit-log-list'),

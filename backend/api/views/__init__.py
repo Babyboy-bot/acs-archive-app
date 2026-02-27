@@ -47,12 +47,6 @@ from ..views_main import (
     assistant_health,
     assistant_feedback,
     
-    # Learning
-    assistant_learning_record,
-    assistant_learning_similar,
-    assistant_learning_stats,
-    assistant_learning_pattern_update,
-    
     # LLM Quota
     llm_quota_consume,
     llm_usage_log,
@@ -104,12 +98,6 @@ __all__ = [
     'assistant_chat_view',
     'assistant_health',
     'assistant_feedback',
-    
-    # Learning
-    'assistant_learning_record',
-    'assistant_learning_similar',
-    'assistant_learning_stats',
-    'assistant_learning_pattern_update',
     
     # LLM Quota
     'llm_quota_consume',
