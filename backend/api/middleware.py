@@ -28,7 +28,8 @@ class JWTAuthCookieMiddleware(MiddlewareMixin):
             return
             
         # Récupérer le access token depuis les cookies
-        access_token = request.COOKIES.get("access_token")
+        auth_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
+        access_token = request.COOKIES.get(auth_cookie_name)
         if not access_token:
             return
             
@@ -50,7 +51,8 @@ class JWTAuthCookieMiddleware(MiddlewareMixin):
         if (hasattr(response, 'status_code') and 
             response.status_code == 401):
             
-            refresh_token = request.COOKIES.get("refresh_token")
+            refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
+            refresh_token = request.COOKIES.get(refresh_cookie_name)
             if not refresh_token:
                 return response
                 
@@ -61,7 +63,7 @@ class JWTAuthCookieMiddleware(MiddlewareMixin):
                 
                 # Ajouter le nouveau token dans la réponse
                 response.set_cookie(
-                    'access_token',
+                    auth_cookie_name,
                     new_access_token,
                     max_age=60 * 60 * 24 * 7,  # 7 jours
                     httponly=True,
@@ -75,8 +77,8 @@ class JWTAuthCookieMiddleware(MiddlewareMixin):
             except Exception as e:
                 logger.warning(f"Échec du refresh automatique: {e}")
                 # Si le refresh échoue, supprimer les cookies invalides
-                response.delete_cookie('access_token', path='/')
-                response.delete_cookie('refresh_token', path='/')
+                response.delete_cookie(auth_cookie_name, path='/')
+                response.delete_cookie(refresh_cookie_name, path='/')
                 
         return response
 
@@ -98,8 +100,10 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             if path.startswith(prefix):
                 return None
             
-        access_token = request.COOKIES.get("acs_access_token")
-        refresh_token = request.COOKIES.get("acs_refresh_token")
+        auth_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
+        refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
+        access_token = request.COOKIES.get(auth_cookie_name)
+        refresh_token = request.COOKIES.get(refresh_cookie_name)
         
         if not access_token and not refresh_token:
             return None
@@ -149,20 +153,22 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         
         # Ajouter le nouveau token s'il a été généré
         if hasattr(request, '_new_access_token'):
+            auth_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
             response.set_cookie(
-                'acs_access_token',
+                auth_cookie_name,
                 request._new_access_token,
                 max_age=60 * 60 * 24 * 7,
                 httponly=True,
                 secure=not settings.DEBUG,
                 samesite='Lax',
                 path='/',
-                domain='acs.localhost'  # Domaine spécifique
             )
             
         # Supprimer les tokens invalides si nécessaire
         if hasattr(request, '_clear_tokens'):
-            response.delete_cookie('acs_access_token', path='/', domain='acs.localhost')
-            response.delete_cookie('acs_refresh_token', path='/', domain='acs.localhost')
+            auth_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
+            refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
+            response.delete_cookie(auth_cookie_name, path='/')
+            response.delete_cookie(refresh_cookie_name, path='/')
             
         return response

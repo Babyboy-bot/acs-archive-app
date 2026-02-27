@@ -1,7 +1,7 @@
 """
 Serializers pour l'API Django REST Framework
 """
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -241,21 +241,28 @@ class DocumentSerializer(serializers.ModelSerializer):
             return None
 
         try:
-            relative_url = default_storage.url(obj.chemin_fichier)
+            chemin = default_storage.url(obj.chemin_fichier)
         except Exception:
-            relative_url = obj.chemin_fichier
+            chemin = str(obj.chemin_fichier)
 
-        if relative_url.startswith(('http://', 'https://')):
-            return relative_url
+        if chemin.startswith(('http://', 'https://')):
+            parsed = urlparse(chemin)
+            chemin = parsed.path or chemin
 
-        request = self.context.get('request')
-        if request is not None:
-            return request.build_absolute_uri(relative_url)
+        if not chemin.startswith('/'):
+            chemin = f'/{chemin}'
 
-        media_url = settings.MEDIA_URL
-        if not media_url.endswith('/'):
-            media_url = f'{media_url}/'
-        return urljoin(media_url, obj.chemin_fichier.lstrip('/'))
+        media_prefix = settings.MEDIA_URL or '/media/'
+        if not media_prefix.startswith('/'):
+            media_prefix = f'/{media_prefix}'
+        if not media_prefix.endswith('/'):
+            media_prefix = f'{media_prefix}/'
+
+        if chemin.startswith('/media/'):
+            return chemin
+
+        cleaned = chemin.lstrip('/')
+        return f"{media_prefix}{cleaned}" if media_prefix.endswith('/') else f"{media_prefix}/{cleaned}"
 
     class Meta:
         model = Document

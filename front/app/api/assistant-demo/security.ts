@@ -1,5 +1,5 @@
 /**
- * 🔒 Module de sécurité pour l'assistant
+ * Module de sécurité pour l'assistant
  * - Rate limiting
  * - Détection d'injection de prompt
  * - Validation des entrées
@@ -310,7 +310,8 @@ export function extraireTokenDepuisCookies(request: Request): string | null {
     {} as Record<string, string>,
   )
 
-  const accessToken = cookies['access_token']
+  const cookieName = process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME || 'acs_access_token'
+  const accessToken = cookies[cookieName]
   if (accessToken) {
     return accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`
   }

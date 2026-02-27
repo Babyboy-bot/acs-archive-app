@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
@@ -10,7 +12,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: [['list']],
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3000',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5000',
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
@@ -22,7 +24,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    url: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3000',
+    url: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5000',
     reuseExistingServer: true,
     timeout: 120 * 1000,
   },

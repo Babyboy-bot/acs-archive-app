@@ -55,7 +55,7 @@ services:
       - DB_USER=${POSTGRES_USER:-acs_user}
       - DB_PASSWORD=${POSTGRES_PASSWORD:-acs_password}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://frontend:3000}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5000,http://frontend:5000}
       - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
       - ASSISTANT_LLM_PROVIDER=${ASSISTANT_LLM_PROVIDER:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
@@ -95,7 +95,7 @@ services:
       - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
       - MISTRAL_ENABLED=${MISTRAL_ENABLED:-false}
     ports:
-      - "3000:3000"
+      - "5000:5000"
 
   # ==========================================================================
   # Nginx Reverse Proxy - Point d'entrée unique

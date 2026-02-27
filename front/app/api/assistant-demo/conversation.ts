@@ -142,13 +142,11 @@ export function getValidContextEntity(
   
   // Vérifier l'expiration globale
   if (isContextExpired(memory)) {
-    console.log(`Contexte expiré: ${entity} ignoré`)
     return null
   }
   
   // Vérifier l'expiration spécifique de l'entité
   if (entite.timestamp && Date.now() - entite.timestamp > CONTEXT_EXPIRATION_MS) {
-    console.log(`Entité ${entity} expirée`)
     return null
   }
   
@@ -168,7 +166,6 @@ export function updateEntityProtected(
 ): void {
   if (!confirmed && value !== null) {
     // Valeur devinée → ne pas écrire en mémoire
-    console.log(`Entité ${entity}="${value}" non confirmée → ignorée`)
     return
   }
   
@@ -952,7 +949,6 @@ export function logSubjectTransition(
   telemetryCache.set(sessionId, events)
   
   // Log console pour debug
-  console.log(`[TELEMETRY] ${analysis.transition} (${Math.round(analysis.confidence * 100)}%) - ${analysis.reason}`)
 }
 
 /**
@@ -966,7 +962,6 @@ export function markLastTransitionAsOverridden(sessionId: string): void {
     // Si l'événement est récent (< 30 secondes), le marquer comme corrigé
     if (Date.now() - lastEvent.timestamp < 30000) {
       lastEvent.wasOverridden = true
-      console.log(`[TELEMETRY] Dernière transition marquée comme corrigée`)
     }
   }
 }

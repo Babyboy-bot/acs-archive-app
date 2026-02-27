@@ -14,8 +14,11 @@ export {
   getRefreshToken,
   getUtilisateurActif,
   API_BASE_URL,
+  verifierSessionServeur,
 } from './session'
 export type { SessionUtilisateur } from './session'
+
+export { normalizeMediaUrl } from './media'
 
 // Permissions
 export {

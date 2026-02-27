@@ -11,7 +11,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { PreviewPDF } from '@/components/PreviewPDF'
 import { apiFetchJson, buildApiUrl } from '@/lib/api'
-import { getToken } from '@/lib/session'
+import { getToken, normalizeMediaUrl } from '@/lib'
 import { printBlob } from '@/lib/print'
 import { exporterCSV, exporterExcel, exporterPDF } from '@/lib/export'
 import { useTheme } from '@/hooks/useTheme'
@@ -217,7 +217,7 @@ export default function PageDocuments() {
   const peutCreerDocuments = hasPermission(role, 'documents', 'creer')
   const peutModifierDocuments = hasPermission(role, 'documents', 'modifier')
   const peutSupprimerDocuments = hasPermission(role, 'documents', 'supprimer')
-  const peutTelecharger = role !== 'CONSULTANT' // 🔒 PDG: Consultants ne peuvent pas télécharger
+  const peutTelecharger = role !== 'CONSULTANT'
 
   const [recherche, setRecherche] = useState('')
   const [filtreRisque, setFiltreRisque] = useState('')
@@ -317,7 +317,7 @@ export default function PageDocuments() {
           const risqueKey = normalizeRisqueKey(typeRisqueBrut) || 'AUTRE'
           const risqueLabel = formatRisqueLabel(typeRisqueBrut || 'Autre')
           const creeLe = doc.cree_le ?? doc.creeLe ?? null
-          const fichierUrl = doc.fichier_url ?? doc.fichierUrl ?? null
+          const fichierUrl = normalizeMediaUrl(doc.fichier_url ?? doc.fichierUrl ?? null)
           const typeCourrier = doc.type_courrier ?? doc.typeCourrier ?? 'AUTRE'
           const tailleBrute = doc.taille_fichier ?? doc.tailleFichier ?? null
 
@@ -428,7 +428,22 @@ export default function PageDocuments() {
   }, [documents])
 
   const extraireUrlDocument = (doc: DocumentUI) =>
-    doc.source?.fichier_url ?? doc.source?.fichierUrl ?? doc.urlFichier ?? null
+    normalizeMediaUrl(doc.source?.fichier_url ?? doc.source?.fichierUrl ?? doc.urlFichier ?? null)
+
+  const resoudreUrlDocument = (url: string) => {
+    if (!url) return url
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/media/')) {
+      return url
+    }
+    return buildApiUrl(url)
+  }
+
+  const construireUrlTelechargement = (url: string) => {
+    if (!url) return url
+    const resolved = resoudreUrlDocument(url)
+    if (!resolved) return resolved
+    return resolved.startsWith('/media/') ? resolved : `/api/proxy/document?url=${encodeURIComponent(resolved)}`
+  }
 
   const ouvrirPreview = (doc: DocumentUI) => {
     const url = extraireUrlDocument(doc)
@@ -466,8 +481,8 @@ export default function PageDocuments() {
       return
     }
 
-    const resolvedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : buildApiUrl(url)
-    const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`
+    const resolvedUrl = resoudreUrlDocument(url)
+    const fetchUrl = resolvedUrl ? (resolvedUrl.startsWith('/media/') ? resolvedUrl : `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`) : null
 
     const startPrint = async () => {
       try {
@@ -477,7 +492,7 @@ export default function PageDocuments() {
           headers.set('Authorization', `Bearer ${token}`)
         }
 
-        const response = await fetch(proxyUrl, {
+        const response = await fetch(fetchUrl ?? resolvedUrl!, {
           credentials: 'include',
           headers,
         })
@@ -499,10 +514,12 @@ export default function PageDocuments() {
         console.error('Impression document', error)
         setErreur(error?.message ?? "Impossible d'imprimer le document")
         if (error instanceof Error && error.name === 'SecurityError') {
-          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+          window.open(resolvedUrl ?? url, '_blank', 'noopener,noreferrer')
           return
         }
-        window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+        if (resolvedUrl) {
+          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+        }
       }
     }
 
@@ -518,12 +535,11 @@ export default function PageDocuments() {
 
     setErreur('')
     if (typeof window !== 'undefined') {
-      const resolvedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : buildApiUrl(url)
-      const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`
+      const fetchUrl = construireUrlTelechargement(url)
 
       const startDownload = async () => {
         try {
-          const response = await fetch(proxyUrl, {
+          const response = await fetch(fetchUrl ?? url, {
             credentials: 'include',
             headers: { Accept: 'application/pdf' },
           })
@@ -543,8 +559,11 @@ export default function PageDocuments() {
           document.body.removeChild(lien)
           URL.revokeObjectURL(objectUrl)
         } catch (error) {
-          console.error('Téléchargement direct', error)
-          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+          console.error('Téléchargement document', error)
+          const fallback = resoudreUrlDocument(url)
+          if (fallback) {
+            window.open(fallback, '_blank', 'noopener,noreferrer')
+          }
         }
       }
 

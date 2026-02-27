@@ -107,8 +107,8 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       {/* Logo et titre */}
       <div className="p-4 border-b border-theme">
         <Link href="/tableau-de-bord" className="flex items-center gap-3">
-          <div className="w-22 h-22 rounded-xl flex items-center justify-center text-white font-bold">
-            <img src="/acs-logo.svg" alt="ACS Archive" width="40" height="40" />
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center">
+            <img src="/acs-logo.svg" alt="ACS Archive" width={44} height={44} className="w-11 h-11 object-contain" />
           </div>
           <AnimatePresence>
             {!collapsed && (

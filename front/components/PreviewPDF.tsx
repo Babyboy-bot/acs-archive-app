@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Icon } from './Icon'
 import { buildApiUrl } from '@/lib/api'
+import { normalizeMediaUrl } from '@/lib'
 import { getToken } from '@/lib/session'
 import { printBlob } from '@/lib/print'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -17,7 +18,7 @@ interface PreviewPDFProps {
 
 export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFProps) {
   const utilisateur = useUtilisateurCourant()
-  const canDownload = utilisateur?.role !== 'CONSULTANT' // 🔒 PDG: Consultants ne peuvent pas télécharger
+  const canDownload = utilisateur?.role !== 'CONSULTANT'
   
   const [zoom, setZoom] = useState(40)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -27,10 +28,14 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
 
   const resolvedUrl = useMemo(() => {
     if (!urlDocument) return null
-    if (urlDocument.startsWith('http://') || urlDocument.startsWith('https://')) {
-      return urlDocument
+    const normalized = normalizeMediaUrl(urlDocument) ?? urlDocument
+    if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+      return normalized
     }
-    return buildApiUrl(urlDocument)
+    if (normalized.startsWith('/media/')) {
+      return normalized
+    }
+    return buildApiUrl(normalized)
   }, [urlDocument])
 
   const fetchUrl = useMemo(() => {

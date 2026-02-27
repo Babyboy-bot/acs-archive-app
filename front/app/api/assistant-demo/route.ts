@@ -4,24 +4,16 @@ import {
   extraireUserIdDepuisToken,
   extraireTokenDepuisCookies,
   generateSessionId,
-  RATE_LIMIT_WINDOW_MS,
-  RATE_LIMIT_MAX_REQUESTS,
-  rateLimitStore
 } from './security'
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
 import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, buildConversationSystemPrompt, buildClarificationSystemPrompt, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, extractDocumentIndex, getDocumentFromSelection, isContextExpired, getValidContextEntity, updateEntityProtected, CONFIDENCE_THRESHOLD, CONTEXT_EXPIRATION_MS, classifyIntention, convertLlmIndexToSystemIndex, calculerScoreQualiteOcr, SEUILS_CONFIANCE, type DocumentSelection, type ClassificationResult, type ClassificationContext, type OcrQualityResult, type CriteresExtraits } from './llm'
 import { 
   recordInteraction, 
-  getSimilarGoodResponse, 
   enrichPromptWithLearning,
-  getContextualExamples 
 } from './learning'
 import {
   type TypeMessage,
-  type MessageMetadata,
-  analyserMessageComplet,
-  genererReponseNonDocument,
   estSalutation,
   estQuestionDefinitionGenerale,
   estQuestionConseilGeneral,
@@ -30,19 +22,45 @@ import {
 } from './classification'
 // Import centralisé depuis criteria.ts (source unique de vérité)
 import {
-  type CriteresRecherche as CriteresRechercheCriteria,
-  type ModeAssistant as ModeAssistantCriteria,
+  type CriteresRecherche,
+  type ModeAssistant,
   TYPE_DOCUMENT_KEYWORDS,
-  TYPES_RISQUES,
-  REFERENCE_PATTERNS,
-  extraireCriteresRecherche as extraireCriteresCriteria,
+  extraireCriteresRecherche,
   loadValidClients,
-  classifierSimple as classifierSimpleCriteria,
-  estQuestionAssuranceCourtage as estQuestionAssuranceCourtageCriteria,
-  estQuestionComptageContextuel as estQuestionComptageContextuelCriteria,
-  detectIntent as detectIntentCriteria,
-  contientReferenceContextuelle as contientReferenceContextuelleCriteria,
+  classifierSimple,
+  estQuestionAssuranceCourtage,
+  estQuestionComptageContextuel,
+  detectIntent,
 } from './criteria'
+import {
+  incrementRequest,
+  incrementLlmSuccess,
+  incrementLlmFallback,
+  incrementErrors,
+  journaliserAssistant,
+} from './telemetry'
+import {
+  TONES,
+  construireInsightsDocuments,
+  construireActionsDocuments,
+  construireNarrationHeuristique,
+  genererNarrationSimple,
+  construireResumeStatistiques,
+  construireInsightsStatistiques,
+  construireActionsStatistiques,
+  construireResumeDocuments,
+} from './narration'
+import {
+  BackendError,
+  DEFAULT_TOP_K,
+  extraireClientMentionne,
+  verifierCodeClientBackend,
+  logLlmUsage,
+  rechercherDocuments,
+  collecterStatistiques,
+  type FiltresRecherche,
+} from './api-client'
+import { filtrerParPertinence } from './filtering'
 
 /**
  * Contexte extrait de l'historique de conversation
@@ -143,113 +161,6 @@ function extraireContexteHistorique(sessionId: string): ContexteHistorique {
   return { client, typeDocument, annee, risque, dernierResultatVide }
 }
 
-/**
- * Extrait le dernier client mentionné dans l'historique de conversation
- */
-function extraireDernierClientContexte(sessionId: string): string | null {
-  return extraireContexteHistorique(sessionId).client
-}
-
-/**
- * Vérifie si la question contient une référence contextuelle (il, lui, ce client, etc.)
- */
-function contientReferenceContextuelle(question: string): boolean {
-  return REFERENCE_PATTERNS.some((pattern) => pattern.test(question))
-}
-
-/**
- * Résultat de l'enrichissement avec contexte complet
- */
-type ResultatEnrichissement = {
-  questionEnrichie: string
-  clientContexte: string | null
-  anneeContexte: string | null
-  risqueContexte: string | null
-  typeDocumentContexte: string | null
-}
-
-/**
- * Enrichit la question avec le contexte complet de la conversation
- * (client + année + risque + type de document)
- */
-function enrichirQuestionAvecContexte(question: string, sessionId: string | null): ResultatEnrichissement {
-  if (!sessionId) {
-    return {
-      questionEnrichie: question,
-      clientContexte: null,
-      anneeContexte: null,
-      risqueContexte: null,
-      typeDocumentContexte: null,
-    }
-  }
-
-  // Récupérer le contexte complet de la conversation
-  const contexte = extraireContexteHistorique(sessionId)
-
-  // Si la question contient déjà un client explicite, utiliser seulement les critères manquants
-  const clientExplicite = extraireClientMentionne(question)
-  const criteresQuestion = extraireCriteresRecherche(question)
-
-  // Utiliser les critères explicites ou ceux du contexte
-  const clientFinal = clientExplicite || criteresQuestion.client || contexte.client
-  const anneeFinal = criteresQuestion.annee || contexte.annee
-  const risqueFinal = criteresQuestion.risque || contexte.risque
-  const typeDocFinal = criteresQuestion.typeDocument || contexte.typeDocument
-
-  // Si la question contient une référence contextuelle ou est vague, enrichir avec le contexte
-  const estReferenceContextuelle = contientReferenceContextuelle(question)
-
-  // Patterns de requêtes de suivi (demandes qui font référence à quelque chose mentionné avant)
-  const patternsRequeteSuivi = [
-    /^(montre|affiche|voir|ouvre|donne|envoie|telecharge|imprime)/i, // Verbes d'action au début
-    /\b(montre|affiche|voir)\s+(le|la|les|ce|cette|ces|moi)\b/i, // "montre le", "affiche moi"
-    /\b(le|la|les)\s+(document|fichier|avenant|facture)s?\b/i, // "le document", "la facture"
-    /^(oui|ok|d'accord|vas-?y|go)\b/i, // Confirmations
-    /^c'?est\s+(ca|ça|celui|celle)/i, // "c'est ça", "c'est celui-là"
-    /\b(cherche|recherche)\s+encore\b/i, // "cherche encore"
-  ]
-  const estRequeteSuivi = patternsRequeteSuivi.some((p) => p.test(question.trim()))
-
-  if (estReferenceContextuelle || estRequeteSuivi) {
-    // Construire une question enrichie avec tous les critères du contexte
-    const partiesContexte: string[] = []
-    if (clientFinal) partiesContexte.push(`client ${clientFinal}`)
-    if (typeDocFinal) partiesContexte.push(`type ${typeDocFinal}`)
-    if (anneeFinal) partiesContexte.push(`exercice ${anneeFinal}`)
-    if (risqueFinal) partiesContexte.push(`risque ${risqueFinal}`)
-
-    if (partiesContexte.length > 0) {
-      const contexteStr = partiesContexte.join('\n- ')
-      console.log(`=== Contexte résolu: "${question}" ===`)
-      console.log(`=== Critères du contexte: ${partiesContexte.join(', ')} ===`)
-      const questionEnrichie = `${question} (contexte: ${contexteStr})`
-      return {
-        questionEnrichie,
-        clientContexte: clientFinal,
-        anneeContexte: anneeFinal,
-        risqueContexte: risqueFinal,
-        typeDocumentContexte: typeDocFinal,
-      }
-    }
-  }
-
-  return {
-    questionEnrichie: question,
-    clientContexte: clientExplicite,
-    anneeContexte: criteresQuestion.annee,
-    risqueContexte: criteresQuestion.risque,
-    typeDocumentContexte: criteresQuestion.typeDocument,
-  }
-}
-
-import {
-  incrementRequest,
-  incrementLlmSuccess,
-  incrementLlmFallback,
-  incrementErrors,
-  journaliserAssistant,
-} from './telemetry'
-
 type QueryPayload = {
   question?: string
   topK?: number
@@ -257,213 +168,9 @@ type QueryPayload = {
   conversationId?: string | null
 }
 
-// Configuration des tons de réponse
-const TONES = {
-  amical: {
-    intro: (nb: number) => `J'ai retrouvé ${nb === 1 ? 'un document' : `${nb} documents`} qui pourrai${nb > 1 ? 'ent' : 't'} vous être utile${nb > 1 ? 's' : ''}.`,
-    conclusion: "\n\nVous pouvez les consulter ou les télécharger à tout moment.\n\nSi vous avez besoin d'aide pour un autre document ou pour effectuer une recherche, je suis là pour ça !",
-    noResults: "Je n'ai trouvé aucun document correspondant à votre recherche.\n\nVoulez-vous reformuler votre question ou essayer avec d'autres mots-clés ? Je suis là pour vous aider !",
-    useEmojis: true,
-  },
-  formel: {
-    intro: (nb: number) => `${nb} document${nb > 1 ? 's' : ''} correspondant${nb > 1 ? 's' : ''} à votre recherche ${nb > 1 ? 'ont été identifiés' : 'a été identifié'}.`,
-    conclusion: "\n\nCes documents sont disponibles pour consultation et téléchargement. Pour toute assistance supplémentaire, n'hésitez pas à formuler une nouvelle requête.",
-    noResults: "Aucun document ne correspond aux critères de recherche spécifiés. Veuillez reformuler votre demande avec des termes différents.",
-    useEmojis: false,
-  },
-  concis: {
-    intro: (nb: number) => `${nb} document${nb > 1 ? 's' : ''} trouvé${nb > 1 ? 's' : ''}.`,
-    conclusion: '\n\nDisponible au téléchargement.',
-    noResults: "Aucun résultat. Reformulez votre recherche.",
-    useEmojis: false,
-  },
-  premium: {
-    intro: (nb: number) => `Nous avons identifié ${nb} document${nb > 1 ? 's' : ''} pertinent${nb > 1 ? 's' : ''} pour votre demande.`,
-    conclusion: "\n\nCes documents sont à votre disposition pour consultation immédiate ou téléchargement sécurisé.\n\nNotre assistant reste à votre écoute pour toute recherche complémentaire ou assistance personnalisée.",
-    noResults: "Aucun document ne correspond actuellement à votre recherche.\n\nNous vous invitons à affiner vos critères ou à nous solliciter pour une assistance personnalisée.",
-    useEmojis: true,
-  },
-}
-
-function construireInsightsDocuments(pieces: DocumentPiece[]): string[] {
-  if (!pieces.length) {
-    return []
-  }
-
-  const insights: string[] = []
-  const clients = new Map<string, number>()
-
-  pieces.forEach((piece) => {
-    const metadata = piece.metadata ?? {}
-    const client = (metadata.client as string | undefined) ?? 'Client non renseigné'
-    clients.set(client, (clients.get(client) ?? 0) + 1)
-  })
-
-  if (clients.size) {
-    const principal = [...clients.entries()].sort((a, b) => b[1] - a[1])[0]
-    if (principal) {
-      insights.push(`Client le plus représenté : ${principal[0]} (${principal[1]} document${principal[1] > 1 ? 's' : ''}).`)
-    }
-  }
-
-  const total = pieces.length
-  insights.push(`Nombre de pièces pertinentes identifiées : ${total}.`)
-
-  return insights
-}
-
-function construireActionsDocuments(pieces: DocumentPiece[]): string[] {
-  if (!pieces.length) {
-    return []
-  }
-
-  const actions: string[] = []
-  let docsSansDescription = 0
-  let docsAnciennete = 0
-
-  const maintenant = Date.now()
-
-  pieces.forEach((piece) => {
-    const metadata = piece.metadata ?? {}
-    const description = metadata.description as string | null | undefined
-    const dateDoc = metadata.date_document as string | null | undefined
-    if (!description || description.trim().length < 20) {
-      docsSansDescription += 1
-    }
-    if (dateDoc) {
-      const parsed = Date.parse(dateDoc)
-      if (!Number.isNaN(parsed) && maintenant - parsed > FIVE_YEARS_MS) {
-        docsAnciennete += 1
-      }
-    }
-  })
-
-  if (docsSansDescription) {
-    actions.push(`Compléter la description de ${docsSansDescription} document${docsSansDescription > 1 ? 's' : ''} pour faciliter la recherche.`)
-  }
-
-  if (docsAnciennete) {
-    actions.push(`Revoir la conservation de ${docsAnciennete} document${docsAnciennete > 1 ? 's' : ''} âgé${docsAnciennete > 1 ? 's' : ''} de plus de 5 ans.`)
-  }
-
-  if (!actions.length) {
-    actions.push("Aucune action urgente détectée sur les pièces proposées. Vérifier que leur indexation reste à jour.")
-  }
-
-  return actions
-}
-
-function construireNarrationHeuristique(
-  intent: 'documents' | 'statistiques',
-  resume: string,
-  insights?: string[],
-  actions?: string[]
-): string {
-  // Pour les documents, le résumé est déjà rédigé dans un ton conversationnel
-  // (construireResumeDocuments ajoute une conclusion naturelle).
-  if (intent === 'documents') {
-    return resume
-  }
-
-  // Pour les statistiques, créer une réponse plus humaine et engageante
-  let reponse = resume
-  
-  // Ajouter une analyse personnalisée basée sur les insights
-  if (insights && insights.length) {
-    // Éviter de répéter les informations déjà dans le résumé
-    const insightText = insights[0]
-    if (!resume.includes(insightText)) {
-      reponse += `\n\nJ'ai également remarqué que ${insightText.charAt(0).toLowerCase()}${insightText.slice(1)}`
-    }
-  }
-  
-  // Ajouter une recommandation basée sur les actions
-  if (actions && actions.length) {
-    const actionText = actions[0]
-    if (actionText.includes('Maintenir la surveillance')) {
-      reponse += `\n\nTout semble bien se passer avec votre archivage. Je vous suggère simplement de maintenir votre rigueur actuelle.`
-    } else if (actionText.includes('Prioriser')) {
-      reponse += `\n\nJe vous recommande de prioriser la mise à jour des documents en retard pour améliorer votre taux de conformité.`
-    } else if (actionText.includes('Planifier une revue')) {
-      reponse += `\n\nIl serait judicieux de planifier une revue des documents approchant de leur date de péremption.`
-    } else if (!resume.includes(actionText)) {
-      reponse += `\n\n${actionText}`
-    }
-  }
-
-  // Ajouter une conclusion personnalisée et engageante avec une question
-  const conclusions = [
-    "Souhaitez-vous que j'analyse plus en détail un aspect particulier de ces statistiques ?",
-    "Y a-t-il un point spécifique sur lequel vous aimeriez que je me concentre davantage ?",
-    "Je peux vous aider à approfondir n'importe quel aspect de ces données si vous le souhaitez.",
-    "N'hésitez pas à me demander plus de détails sur un point qui vous intéresse particulièrement."
-  ]
-  
-  const conclusion = conclusions[Math.floor(Math.random() * conclusions.length)]
-  reponse += `\n\n${conclusion}`
-
-  return reponse
-}
-
-type DocumentSearchResult = {
-  id: string
-  titre: string
-  reference?: string | null
-  client?: string | null
-  risque?: string | null
-  creeLe?: string | null
-}
-
-type AssistantSearchResult = {
-  id: string
-  titre: string
-  content: string
-  metadata: Record<string, unknown>
-  score: number
-  highlights?: string[] | null
-}
-
-type DocumentDetail = {
-  id: string
-  titre: string
-  description?: string | null
-  type_courrier?: string | null
-  categorie?: string | null
-  categorie_nom?: string | null
-  reference?: string | null
-  date_document?: string | null
-  date_archivage?: string | null
-  est_archive?: boolean
-  cree_le?: string | null
-  fichier_url?: string | null
-  risque_detail?: {
-    exercice_info?: {
-      client?: string | null
-      annee?: number | null
-    }
-    type?: string | null
-  }
-}
-
-const API_BASE_URL = process.env.INTERNAL_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://backend:8000/api'
-const API_BASE = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`
-const DEFAULT_TOP_K = 15 // Optimisé pour des recherches plus rapides tout en gardant assez de résultats pertinents
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
-const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000
-const USE_FAISS = process.env.NEXT_PUBLIC_ASSISTANT_USE_FAISS === 'true'
 const ASSISTANT_ENABLED = (process.env.NEXT_PUBLIC_ASSISTANT_ENABLED ?? 'true').toLowerCase() !== 'false'
 
-const CLIENT_VALIDATION_TTL_MS = Number(process.env.ASSISTANT_CLIENT_VALIDATION_TTL_MS ?? '600000')
-
-type ClientValidationCacheEntry = { ok: boolean; expiresAt: number }
-const clientValidationCache = new Map<string, ClientValidationCacheEntry>()
-
-const ROLES_AUTORISES_DOCUMENTS = new Set<RoleUtilisateur>([
-  RoleUtilisateur.ADMIN,
-  RoleUtilisateur.ARCHIVISTE,
-  RoleUtilisateur.CONSULTANT,
-])
-const ROLES_AUTORISES_STATISTIQUES = new Set<RoleUtilisateur>([
+const ROLES_AUTORISES = new Set<RoleUtilisateur>([
   RoleUtilisateur.ADMIN,
   RoleUtilisateur.ARCHIVISTE,
   RoleUtilisateur.CONSULTANT,
@@ -516,67 +223,6 @@ function construireReponseRestreinte(
   return NextResponse.json(reponse)
 }
 
-class BackendError extends Error {
-  status: number
-
-  constructor(message: string, status: number) {
-    super(message)
-    this.status = status
-  }
-}
-
-function detectIntent(question: string): 'documents' | 'statistiques' {
-  const lower = question.toLowerCase()
-  const normalized = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const statsKeywords = ['combien', 'nombre', 'statistique', 'stats', 'kpi', 'taux', 'top', 'retard', 'alerte', 'volume', 'total']
-  
-  // Patterns spécifiques pour les stats sur les types de documents
-  const statsTypesPatterns = [
-    'types de documents les plus',
-    'types les plus frequents',
-    'documents les plus frequents',
-    'augmente ou diminue',
-    'evolution des archives',
-    'tendance des archives',
-  ]
-
-  // Questions explicites de comptage contextuel
-  if (estQuestionComptageContextuel(question)) {
-    return 'statistiques'
-  }
-
-  // Mots-clés statistiques
-  if (statsKeywords.some((kw) => normalized.includes(kw))) {
-    return 'statistiques'
-  }
-
-  // Phrases typiques de stats sur types de documents
-  if (statsTypesPatterns.some((pattern) => normalized.includes(pattern))) {
-    return 'statistiques'
-  }
-
-  return 'documents'
-}
-
-// DÉTECTION DES QUESTIONS DE COMPTAGE CONTEXTUEL
-// "Combien en a-t-il ?" → statistiques filtrées par le client en contexte
-// ============================================================================
-
-const COMPTAGE_PATTERNS = [
-  /combien\s+(?:en\s+)?a[- ]?t[- ]?il/i,
-  /combien\s+(?:en\s+)?a[- ]?t[- ]?elle/i,
-  /combien\s+(?:en\s+)?a[- ]?t[- ]?on/i,
-  /combien\s+(?:y\s+)?en\s+a/i,
-  /combien\s+(?:il|elle)\s+(?:en\s+)?a/i,
-  /quel\s+(?:est\s+le\s+)?nombre/i,
-  /il\s+(?:y\s+)?en\s+a\s+combien/i,
-]
-
-function estQuestionComptageContextuel(question: string): boolean {
-  const lower = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  return COMPTAGE_PATTERNS.some(pattern => pattern.test(lower))
-}
-
 type SecurityFlags = { promptInjectionSuspect?: boolean; piiSuspect?: boolean }
 
 type SecurityAnalysis = {
@@ -619,9 +265,6 @@ function analyserRisqueQuestion(question: string): SecurityAnalysis {
 // - Type de courrier (ACS vers Client, ACS vers Compagnie...)
 // ============================================================================
 
-// TYPES_RISQUES et CriteresRecherche sont maintenant importés depuis criteria.ts
-type CriteresRecherche = CriteresRechercheCriteria
-
 function libelleCritere(critere: keyof CriteresRecherche): string {
   switch (critere) {
     case 'typeDocument':
@@ -639,96 +282,6 @@ function libelleCritere(critere: keyof CriteresRecherche): string {
     default:
       return critere
   }
-}
-
-// Utilise l'import de criteria.ts
-const extraireCriteresRecherche = extraireCriteresCriteria
-
-// Ancienne fonction maintenue pour compatibilité
-function extraireTypeDocumentDemande(question: string): string | null {
-  return extraireCriteresRecherche(question).typeDocument
-}
-
-// ============================================================================
-// CLASSIFICATION SIMPLIFIÉE - VERSION ROBUSTE
-// Détermine si la question est une recherche de document ou une conversation
-// NOTE: Ces fonctions sont des copies locales de criteria.ts avec des ajustements
-// spécifiques à route.ts. Un refactoring futur pourrait les unifier.
-// ============================================================================
-
-// Utilise le type importé de criteria.ts
-type ModeAssistant = ModeAssistantCriteria
-
-function estQuestionAssuranceCourtage(question: string): boolean {
-  const lower = question
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-
-  if (!lower) return false
-
-  const patterns = [
-    /\bassurance(s)?\b/,
-    /\bassureur(s)?\b/,
-    /\bassur(e|es|s|er|ers|ez|ent|era|eras|erez|erai|erais|erons|erez|eront|ant|ance)\b/,
-    /\bcourtage\b/,
-    /\bcourtier(s)?\b/,
-    /\bprime(s)?\b/,
-    /\bcotisation(s)?\b/,
-    /\brecouvrement(s)?\b/,
-    /\bcotation(s)?\b/,
-    /\bbordereau(x)?\b/,
-    /\bgarantie(s)?\b/,
-    /\bsinistre(s)?\b/,
-    /\bindemnisation(s)?\b/,
-    /\bfranchise(s)?\b/,
-    /\brisque(s)?\b/,
-    /\bresponsabilite civile\b/,
-    /\b(r\.?c\.?|rc)\b/,
-    /\bsouscription\b/,
-    /\bpolice d'?assurance\b/,
-    /\bavenant(s)?\b/,
-    /\bquittance(s)?\b/,
-    /\battestation(s)?\b/,
-    /\bdevis\b/,
-  ]
-
-  return patterns.some((p) => p.test(lower))
-}
-
-function estQuestionAssuranceCourtageAmbigue(question: string, criteresExtraits: CriteresRecherche): boolean {
-  if (!estQuestionAssuranceCourtage(question)) return false
-
-  const lower = question
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-
-  // Si l'utilisateur demande explicitement une recherche (liste/dernier/archives), ce n'est pas ambigu.
-  const mentionneArchives = /\b(documents?|fichiers?|archives?)\b/.test(lower)
-  const actionRechercheDocs = /\b(cherche|trouve|retrouve|montre|affiche|liste|donne|envoie|recupere|rappelle|ouvre)\b/.test(lower)
-  const demandeRecence = /\b(dernier|derniers|derniere|dernieres|recent|recents)\b/.test(lower)
-  const demandeListePieces = /\b(mes|les|tous les|la liste des)\b.*\b(avenants?|factures?|contrats?|attestations?|quittances?|devis|sinistres?)\b/.test(
-    lower
-  )
-
-  if (mentionneArchives || actionRechercheDocs || demandeRecence || demandeListePieces) return false
-
-  // Si on a des critères forts docs, c'est une recherche, pas ambigu.
-  const aCriteresForts = !!(criteresExtraits.client || criteresExtraits.annee || criteresExtraits.reference)
-  if (aCriteresForts) return false
-
-  // Si on n'a pas d'indice fort que c'est une définition/explication, ce n'est pas ambigu.
-  const isDefinitionLike =
-    estQuestionDefinitionGenerale(question) ||
-    estQuestionConseilGeneral(question) ||
-    estQuestionExplicationConcept(question)
-  if (!isDefinitionLike) return false
-
-  // Ici: assurance/courtage + question de type définition/conseil, mais sans intention explicite de recherche → ambigu
-  return true
 }
 
 function extraireChoixClarification(question: string): { choix: 'A' | 'B'; reste: string } | null {
@@ -785,74 +338,6 @@ function recupererDerniereClarification(
   return { questionBase }
 }
 
-function classifierSimple(question: string, criteresExtraits: CriteresRecherche): ModeAssistant {
-  const lower = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
-  
-  // 1. Salutations simples
-  const salutations = ['bonjour', 'salut', 'coucou', 'hello', 'bonsoir', 'hey', 'hi', 'yo']
-  if (salutations.some(s => lower === s || lower === s + '!')) {
-    return 'salutation'
-  }
-  
-  // 2. Confirmations simples (oui, ok, etc.) - utiliser le contexte
-  //    Inclut "vas y" ou "vas-y" (espace ou tiret)
-  if (/^(oui|ok|d'?accord|vas[-\s]?y|go|ouais|yep|yes|non|nan|nope|a|b)$/i.test(lower)) {
-    return 'confirmation'
-  }
-  
-  // 3. Détecter une recherche de documents
-  // - Les critères "forts" (client/année/référence) sont typiquement des requêtes de recherche.
-  // - Les critères "faibles" (type de document/risque) ne suffisent PAS, car ils peuvent être utilisés
-  //   dans des questions d’assurance/courtage (définition, explication, conseils).
-  const aCriteresForts = !!(criteresExtraits.client || criteresExtraits.annee || criteresExtraits.reference)
-  const aCriteresFaibles = !!(criteresExtraits.typeDocument || criteresExtraits.risque)
-  const aCriteres = aCriteresForts || aCriteresFaibles
-
-  const mentionneArchives = /\b(documents?|fichiers?|archives?)\b/.test(lower)
-  const actionRechercheDocs = /\b(cherche|trouve|retrouve|montre|affiche|liste|donne|envoie|recupere|rappelle|ouvre)\b/.test(lower)
-  const demandeRecence = /\b(dernier|derniers|derniere|dernieres|recent|recents)\b/.test(lower)
-
-  const demandeListePieces = /\b(mes|les|tous les|la liste des)\b.*\b(avenants?|factures?|contrats?|attestations?|quittances?|devis|sinistres?)\b/.test(
-    lower
-  )
-  const demandeDernierePiece = /\b(dernier|derniers|derniere|dernieres|recent|recents)\b.*\b(avenant|facture|contrat|attestation|quittance|devis|sinistre)\b/.test(
-    lower
-  )
-
-  if (aCriteresForts) {
-    return 'recherche_document'
-  }
-
-  if ((demandeListePieces || demandeDernierePiece) && (aCriteres || mentionneArchives)) {
-    return 'recherche_document'
-  }
-
-  if (actionRechercheDocs && (mentionneArchives || demandeListePieces || demandeDernierePiece || aCriteres)) {
-    return 'recherche_document'
-  }
-
-  if (demandeRecence && (mentionneArchives || demandeListePieces || demandeDernierePiece || aCriteres)) {
-    return 'recherche_document'
-  }
-
-  if (mentionneArchives && aCriteres) {
-    return 'recherche_document'
-  }
-
-  // 4. Questions sur les statistiques → recherche
-  if (/\b(combien|statistique|stats|nombre|total|compte)\b/.test(lower)) {
-    return 'recherche_document'
-  }
-  
-  // 5. Mots-clés assurance/documents → recherche de documents (simplifié)
-  if (estQuestionAssuranceCourtage(question)) {
-    return 'recherche_document'
-  }
-  
-  // 6. Par défaut → recherche de documents (l'assistant est focalisé sur les archives)
-  return 'recherche_document'
-}
-
 function estReponseLlmFiller(content: string): boolean {
   const trimmed = content.trim()
   if (!trimmed) return true
@@ -869,200 +354,6 @@ function estReponseLlmFiller(content: string): boolean {
 
   return false
 }
-
-// Génère une narration simple et directe pour les résultats de recherche
-function genererNarrationSimple(
-  pieces: DocumentPiece[], 
-  criteres: CriteresRecherche,
-  contexte: { client?: string | null, annee?: string | null, risque?: string | null }
-): string {
-  const nbPieces = pieces.length
-  const client = criteres.client || contexte.client
-  const annee = criteres.annee || contexte.annee
-  const type = criteres.typeDocument
-  const risque = criteres.risque || contexte.risque
-  
-  // Construire une description des critères
-  const parties: string[] = []
-  if (type) parties.push(type)
-  if (annee) parties.push(`de ${annee}`)
-  if (client) parties.push(`pour ${client}`)
-  if (risque) parties.push(`risque ${risque}`)
-  
-  const description = parties.length > 0 ? parties.join(' ') : 'correspondant à ta recherche'
-  
-  if (nbPieces === 0) {
-    return `Je n'ai pas trouvé de document ${description} dans les archives.`
-  } else if (nbPieces === 1) {
-    return `J'ai trouvé 1 document ${description}. Le voici ci-dessous.`
-  } else {
-    return `J'ai trouvé ${nbPieces} documents ${description}. Les voici ci-dessous.`
-  }
-}
-
-// Vérifie si un document correspond à un critère
-function documentCorrespondAuCritere(piece: DocumentPiece, critere: string, valeur: string): boolean {
-  const metadata = piece.metadata || {}
-  const titre = (piece.source || '').toLowerCase()
-  const contenu = (piece.content || '').toLowerCase()
-  
-  switch (critere) {
-    case 'typeDocument': {
-      const keywords = TYPE_DOCUMENT_KEYWORDS[valeur] ?? [valeur]
-      const typeCourrier = ((metadata.type_courrier as string) || '').toLowerCase()
-      const typeDoc = ((metadata.type as string) || '').toLowerCase()
-      return keywords.some(kw => 
-        titre.includes(kw) || contenu.includes(kw) || typeCourrier.includes(kw) || typeDoc.includes(kw)
-      )
-    }
-    
-    case 'client': {
-      const clientDoc = ((metadata.client as string) || '').toUpperCase()
-      return clientDoc === valeur.toUpperCase() || clientDoc.includes(valeur.toUpperCase())
-    }
-    
-    case 'annee': {
-      // L'exercice EST l'année de référence du document.
-      // La date d'ajout ou les dates dans le contenu ne doivent pas influencer ce critère.
-      const exercice = String(metadata.exercice || '')
-      const exerciceStr = exercice.trim()
-
-      // On considère le document correspondant si l'année d'exercice est égale
-      // ou contient l'année demandée (ex : "2018" ou "EXO 2018").
-      const matchExercice = exerciceStr === valeur || exerciceStr.includes(valeur)
-      console.log(`  → Vérification année ${valeur}: exercice="${exerciceStr}" → ${matchExercice}`)
-      return matchExercice
-    }
-    
-    case 'risque': {
-      const risqueDoc = ((metadata.risque as string) || '').toLowerCase()
-      const keywords = TYPES_RISQUES[valeur] ?? [valeur]
-      return keywords.some(kw => risqueDoc.includes(kw) || titre.includes(kw) || contenu.includes(kw))
-    }
-    
-    case 'typeCourrier': {
-      // Filtrage strict : égalité exacte après normalisation (pas includes)
-      const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
-      const typeCourrier = normalize((metadata.type_courrier as string) || '')
-      const typeDoc = normalize((metadata.type as string) || '')
-      const critere = normalize(valeur)
-      return typeCourrier === critere || typeDoc === critere
-    }
-    
-    case 'reference': {
-      const ref = ((metadata.reference as string) || '').toUpperCase()
-      return ref.includes(valeur) || titre.toUpperCase().includes(valeur) || contenu.toUpperCase().includes(valeur)
-    }
-    
-    default:
-      return true
-  }
-}
-
-// Résultat du filtrage multi-critères
-type ResultatFiltrage = {
-  pertinents: DocumentPiece[]
-  nonPertinents: DocumentPiece[]
-  tousNonPertinents: boolean
-  criteresNonTrouves: string[] // Liste des critères demandés mais non trouvés
-  criteresUtilises: CriteresRecherche
-}
-
-// Fonction principale de filtrage multi-critères
-function filtrerParPertinence(pieces: DocumentPiece[], question: string): ResultatFiltrage {
-  const criteres = extraireCriteresRecherche(question)
-  
-  // Si aucun critère spécifique, retourner tous les résultats
-  const hasCriteres = Object.values(criteres).some(v => v !== null)
-  if (!hasCriteres || pieces.length === 0) {
-    return { 
-      pertinents: pieces, 
-      nonPertinents: [], 
-      tousNonPertinents: false, 
-      criteresNonTrouves: [],
-      criteresUtilises: criteres
-    }
-  }
-  
-  const pertinents: DocumentPiece[] = []
-  const nonPertinents: DocumentPiece[] = []
-  const criteresNonTrouves: Set<string> = new Set()
-  
-  for (const piece of pieces) {
-    let estPertinent = true
-    
-    // Vérifier chaque critère non-null
-    for (const [critere, valeur] of Object.entries(criteres)) {
-      if (valeur === null) continue
-      
-      if (!documentCorrespondAuCritere(piece, critere, valeur)) {
-        estPertinent = false
-        criteresNonTrouves.add(critere)
-      }
-    }
-    
-    if (estPertinent) {
-      pertinents.push(piece)
-    } else {
-      nonPertinents.push(piece)
-    }
-  }
-  
-  // Log pour debug
-  console.log(`=== Filtrage multi-critères ===`)
-  console.log(`Critères: type=${criteres.typeDocument}, client=${criteres.client}, année=${criteres.annee}, risque=${criteres.risque}`)
-  console.log(`Résultat: ${pertinents.length} pertinents, ${nonPertinents.length} non pertinents`)
-  if (criteresNonTrouves.size > 0) {
-    console.log(`Critères non trouvés: ${[...criteresNonTrouves].join(', ')}`)
-  }
-  
-  return {
-    pertinents,
-    nonPertinents,
-    tousNonPertinents: pertinents.length === 0 && nonPertinents.length > 0,
-    criteresNonTrouves: [...criteresNonTrouves],
-    criteresUtilises: criteres
-  }
-}
-
-// Ancienne fonction maintenue pour compatibilité
-function verifierPertinenceResultats(pieces: DocumentPiece[], typeDemande: string | null): {
-  pertinents: DocumentPiece[]
-  nonPertinents: DocumentPiece[]
-  tousNonPertinents: boolean
-} {
-  if (!typeDemande || pieces.length === 0) {
-    return { pertinents: pieces, nonPertinents: [], tousNonPertinents: false }
-  }
-
-  const keywords = TYPE_DOCUMENT_KEYWORDS[typeDemande] ?? [typeDemande]
-  
-  const pertinents: DocumentPiece[] = []
-  const nonPertinents: DocumentPiece[] = []
-  
-  for (const piece of pieces) {
-    const titre = (piece.source || '').toLowerCase()
-    const contenu = (piece.content || '').toLowerCase()
-    const typeCourrier = ((piece.metadata?.type_courrier as string) || '').toLowerCase()
-    
-    const estPertinent = keywords.some(kw => 
-      titre.includes(kw) || contenu.includes(kw) || typeCourrier.includes(kw)
-    )
-    
-    if (estPertinent) {
-      pertinents.push(piece)
-    } else {
-      nonPertinents.push(piece)
-    }
-  }
-  
-  return {
-    pertinents,
-    nonPertinents,
-    tousNonPertinents: pertinents.length === 0 && nonPertinents.length > 0
-  }
-}
-
 
 type QuestionClientsType = 'tous' | 'particuliers' | 'entreprises' | 'client_specifique'
 
@@ -1083,15 +374,12 @@ function analyserQuestionClients(question: string): ResultatAnalyseClient {
 
 	if (!normalized) return null
 	
-	// Détecter les questions sur un client spécifique
 	const clientRegex = /(?:client|nom(?:\s+de)?|pour)\s+(?:du|de|la)?\s*([a-z0-9]{2,4})/i;
 	const clientMatch = normalized.match(clientRegex);
 	
 	if (clientMatch && clientMatch[1]) {
 	  const nomClient = clientMatch[1].toUpperCase();
-	  console.log(`=== Détection client spécifique: ${nomClient} ===`);
 	  
-	  // Détecter le type de document recherché
 	  let typeDocument = undefined;
 	  if (normalized.includes('facture')) {
 	    typeDocument = 'facture';
@@ -1110,7 +398,6 @@ function analyserQuestionClients(question: string): ResultatAnalyseClient {
 	  };
 	}
 
-	// Analyse standard pour les statistiques générales de clients
 	const mentionsClients = normalized.includes('client') || normalized.includes('clients')
 	const mentionsCompte = ['combien', 'nombre', 'total'].some((keyword) => normalized.includes(keyword))
 	if (!mentionsClients || !mentionsCompte) return null
@@ -1121,1067 +408,6 @@ function analyserQuestionClients(question: string): ResultatAnalyseClient {
 	if (isParticuliers) return 'particuliers'
 	if (isEntreprises) return 'entreprises'
 	return 'tous'
-}
-
-// Extrait le nom du client mentionné dans la question (ex: "3CB", "2FZ")
-function extraireClientMentionne(question: string): string | null {
-	const normalized = question
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.trim()
-
-	if (!normalized) return null
-
-	// Mots à ignorer (articles, prépositions)
-	const motsIgnores = new Set(['le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'pour', 'et', 'ou', 'en', 'au', 'aux'])
-	
-	// Mots réservés à ne pas confondre avec des codes clients
-	const motsReserves = new Set([
-		'acs', 'pdf', 'doc', 'ref', 'type', 'date', 'cfa', 'eur', 'usd',
-		'montre', 'affiche', 'ouvre', 'donne', 'envoie', 'voir', 'cherche', 'trouve',
-		'telecharge', 'imprime', 'copie', 'partage', 'ouvrir', 'ferme',
-		'moi', 'toi', 'lui', 'elle', 'nous', 'vous', 'eux', 'ici', 'cela', 'ceci',
-		'document', 'fichier', 'piece', 'archive', 'dossier',
-		'avenant', 'facture', 'contrat', 'sinistre', 'devis', 'quittance',
-		'sante', 'auto', 'vie', 'flotte', 'rc', 'mrh',
-	])
-
-	// Patterns pour détecter un client mentionné
-	const patterns = [
-		// "client 2FZ", "client le 2FZ", "pour le client 2FZ"
-		/(?:client)\s+(?:le\s+|la\s+)?([a-z0-9]{2,4})(?:\s|$|,|\.|\?)/i,
-		// "avenants de 2FZ", "factures du client 2FZ", "documents pour 2FZ"
-		/(?:avenants?|factures?|documents?|courriers?|contrats?)\s+(?:de|du|pour)\s+(?:le\s+|la\s+)?(?:client\s+)?([a-z0-9]{2,4})(?:\s|$|,|\.|\?)/i,
-		// "avenants 2FZ" (code client directement après le type de doc)
-		/(?:avenants?|factures?|documents?|courriers?|contrats?)\s+([a-z0-9]{2,4})(?:\s|$|,|\.|\?)/i,
-	]
-
-	for (const pattern of patterns) {
-		const match = normalized.match(pattern)
-		if (match && match[1]) {
-			const candidat = match[1].toUpperCase()
-			const candidatLower = candidat.toLowerCase()
-			
-			// Ignorer les mots courants qui ne sont pas des codes clients
-			if (motsIgnores.has(candidatLower)) continue
-			
-			// Ignorer les mots réservés (verbes, types de documents, etc.)
-			if (motsReserves.has(candidatLower)) continue
-			
-			// Ne pas confondre une année avec un code client
-			if (/^(19|20)\d{2}$/.test(candidat)) continue
-			
-			return candidat
-		}
-	}
-
-	return null
-}
-
-function buildBackendUrl(path: string): URL {
-  return new URL(path, API_BASE)
-}
-
-type ClientLookup = {
-  nom?: string
-  numero_client?: string | null
-}
-
-async function verifierCodeClientBackend(code: string, token: string | null): Promise<boolean | null> {
-  const normalized = code.trim().toUpperCase()
-  if (!normalized) return false
-
-  const cached = clientValidationCache.get(normalized)
-  const now = Date.now()
-  if (cached && cached.expiresAt > now) {
-    return cached.ok
-  }
-
-  let data: unknown
-  try {
-    const url = buildBackendUrl('clients/')
-    url.searchParams.set('simple', '1')
-    url.searchParams.set('search', normalized)
-    data = await fetchJson<unknown>(url, token)
-  } catch {
-    return null
-  }
-
-  const results = Array.isArray(data)
-    ? (data as ClientLookup[])
-    : Array.isArray((data as any)?.results)
-      ? ((data as any).results as ClientLookup[])
-      : []
-
-  const ok = results.some((client) => {
-    const nom = (client?.nom ?? '').toString().trim().toUpperCase()
-    const numero = (client?.numero_client ?? '').toString().trim().toUpperCase()
-    return nom === normalized || numero === normalized
-  })
-
-  clientValidationCache.set(normalized, { ok, expiresAt: now + CLIENT_VALIDATION_TTL_MS })
-  return ok
-}
-
-/**
- * Journalise l'usage réel d'un appel LLM (télémétrie).
- * Appelé après un appel LLM réussi pour enregistrer les tokens consommés.
- */
-async function logLlmUsage(
-  telemetry: {
-    provider: string
-    model: string
-    tokensInput?: number
-    tokensOutput?: number
-    durationMs?: number
-  },
-  purpose: 'router' | 'answer' | 'summary',
-  token: string | null
-): Promise<void> {
-  if (!token) return
-
-  try {
-    const url = buildBackendUrl('/api/assistant/llm/usage/')
-    await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token,
-      },
-      body: JSON.stringify({
-        provider: telemetry.provider,
-        model: telemetry.model,
-        purpose,
-        tokens_input: telemetry.tokensInput ?? 0,
-        tokens_output: telemetry.tokensOutput ?? 0,
-        timestamp: new Date().toISOString(),
-      }),
-    })
-  } catch (error) {
-    console.warn('Failed to log LLM usage:', error)
-  }
-}
-
-const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.ASSISTANT_BACKEND_FETCH_TIMEOUT_MS ?? '12000')
-
-async function fetchJson<T>(url: URL, token: string | null): Promise<T> {
-  const headers = new Headers()
-  headers.set('Accept', 'application/json')
-  if (token) {
-    headers.set('Authorization', token)
-  }
-
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), BACKEND_FETCH_TIMEOUT_MS)
-
-  let response: Response
-  try {
-    response = await fetch(url, {
-      headers,
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new BackendError(`Timeout backend après ${BACKEND_FETCH_TIMEOUT_MS} ms`, 504)
-    }
-    throw error
-  } finally {
-    clearTimeout(timeoutId)
-  }
-
-  const text = await response.text()
-  
-  // Vérifier si la réponse est du HTML (erreur Django)
-  if (text.includes('<!DOCTYPE html>') || text.includes('<html>')) {
-    console.error('Le backend a retourné du HTML au lieu de JSON:', text.substring(0, 200))
-    throw new BackendError('Erreur interne du serveur Django', 500)
-  }
-  
-  let data = null
-  try {
-    data = text ? (JSON.parse(text) as unknown) : null
-  } catch (error) {
-    console.error('Erreur lors du parsing JSON:', error)
-    console.error('Réponse brute:', text.substring(0, 500))
-    throw new BackendError('Réponse invalide du serveur', 500)
-  }
-
-  if (!response.ok) {
-    const detail = (data as { detail?: string; erreur?: string } | null)?.detail ?? (data as { erreur?: string } | null)?.erreur
-    throw new BackendError(detail ?? `Erreur API (${response.status})`, response.status)
-  }
-
-  return data as T
-}
-
-function toTitle(value: string | null | undefined): string | null {
-  if (!value) return null
-  const formatted = value.replace(/_/g, ' ').toLowerCase()
-  return formatted.charAt(0).toUpperCase() + formatted.slice(1)
-}
-
-function formatDate(value: string | null | undefined): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return new Intl.DateTimeFormat('fr-FR').format(date)
-}
-
-function construireMetadataDocument(doc: DocumentDetail, resultat?: DocumentSearchResult): Record<string, unknown> {
-  const exercice = doc.risque_detail?.exercice_info?.annee
-  const client = doc.risque_detail?.exercice_info?.client ?? resultat?.client ?? null
-  const dateDocument = doc.date_document ?? doc.cree_le ?? resultat?.creeLe ?? null
-  const dateFormatee = formatDate(dateDocument)
-  const type = doc.type_courrier ? toTitle(doc.type_courrier) : null
-
-  return {
-    titre: doc.titre,
-    description: doc.description ?? null,
-    type,
-    client,
-    exercice,
-    reference: doc.reference ?? resultat?.reference ?? null,
-    date_document: dateDocument,
-    date_document_formatee: dateFormatee,
-    statut_archive: doc.est_archive ?? null,
-    derniere_mise_a_jour: doc.cree_le ?? null,
-    fichier_url: doc.fichier_url ?? null,
-  }
-}
-
-function construireHighlights(metadata: Record<string, unknown>): string[] {
-  const highlights: string[] = []
-  const client = metadata.client as string | null
-  const type = metadata.type as string | null
-  const date = metadata.date_document_formatee as string | null
-
-  if (client) {
-    highlights.push(`Client : ${client}`)
-  }
-  if (type) {
-    highlights.push(`Type : ${type}`)
-  }
-  if (date) {
-    highlights.push(`Date : ${date}`)
-  }
-  const reference = metadata.reference as string | null
-  if (reference) {
-    highlights.push(`Référence : ${reference}`)
-  }
-
-  return highlights
-}
-
-function construireContenuDocument(doc: DocumentDetail, resultat?: DocumentSearchResult): string {
-  const lignes: string[] = []
-
-  if (doc.description) {
-    lignes.push(doc.description.trim())
-  }
-
-  const client = doc.risque_detail?.exercice_info?.client ?? resultat?.client
-  if (client) {
-    lignes.push(`Client : ${client}`)
-  }
-
-  if (doc.reference ?? resultat?.reference) {
-    lignes.push(`Référence : ${doc.reference ?? resultat?.reference}`)
-  }
-
-  if (doc.type_courrier) {
-    lignes.push(`Type de courrier : ${toTitle(doc.type_courrier)}`)
-  }
-
-  const date = formatDate(doc.date_document ?? doc.cree_le ?? resultat?.creeLe ?? null)
-  if (date) {
-    lignes.push(`Date : ${date}`)
-  }
-
-  return lignes.join('\n') || 'Informations limitées sur ce document.'
-}
-
-function tokenizeText(value: string): string[] {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/gi)
-    .filter(Boolean)
-}
-
-// Type pour les filtres de recherche
-type FiltresRecherche = {
-  client?: string | null
-  exercice?: string | null
-  risque?: string | null
-  typeDocument?: string | null
-}
-
-// Recherche sémantique avancée (utilise des embeddings multilingues)
-async function rechercherDocumentsSemantic(
-  question: string,
-  token: string | null,
-  topK: number,
-  filtres?: FiltresRecherche
-): Promise<DocumentPiece[] | null> {
-  const url = buildBackendUrl('assistant/documents/search/semantic/')
-  url.searchParams.set('q', question)
-  url.searchParams.set('top_k', String(topK))
-  url.searchParams.set('include_fallback', 'true')
-  
-  // Ajouter les filtres optionnels
-  if (filtres?.client) {
-    url.searchParams.set('client', filtres.client)
-  }
-  if (filtres?.exercice) {
-    url.searchParams.set('exercice', filtres.exercice)
-  }
-  if (filtres?.risque) {
-    url.searchParams.set('risque', filtres.risque)
-  }
-  if (filtres?.typeDocument) {
-    url.searchParams.set('type_document', filtres.typeDocument)
-  }
-
-  try {
-    const data = await fetchJson<{ results?: AssistantSearchResult[]; method?: string }>(url, token)
-    const results = data?.results ?? []
-    const method = data?.method ?? 'unknown'
-    
-    console.log(`=== Recherche: méthode=${method}, résultats=${results.length} ===`)
-    
-    if (!results.length) {
-      return null
-    }
-
-    return results.map((result) => ({
-      id: result.id,
-      source: result.titre,
-      content: result.content,
-      metadata: {
-        ...result.metadata,
-        highlights: result.highlights ?? [],
-        searchMethod: method,
-      },
-      score: result.score,
-      isFallback: result.metadata?.isFallback === true,
-    }))
-  } catch (error) {
-    console.warn('Recherche sémantique indisponible, fallback TF-IDF.', error)
-    return null
-  }
-}
-
-// Recherche avec filtres multiples (client, exercice, risque, type_document)
-async function rechercherDocumentsFiltered(
-  question: string,
-  token: string | null,
-  topK: number,
-  filtres?: FiltresRecherche
-): Promise<DocumentPiece[] | null> {
-  const url = buildBackendUrl('assistant/documents/search/filtered/')
-  if (question) {
-    url.searchParams.set('q', question)
-  }
-  url.searchParams.set('top_k', String(topK))
-
-  // Ajouter les filtres
-  if (filtres?.client) {
-    url.searchParams.set('client', filtres.client)
-  }
-  if (filtres?.exercice) {
-    url.searchParams.set('exercice', filtres.exercice)
-  }
-  if (filtres?.risque) {
-    url.searchParams.set('risque', filtres.risque)
-  }
-  if (filtres?.typeDocument) {
-    url.searchParams.set('type_document', filtres.typeDocument)
-  }
-
-  try {
-    const data = await fetchJson<{ results?: Array<{
-      id: string
-      titre: string
-      reference: string
-      type_courrier: string
-      client: string
-      exercice: string | number
-      risque: string
-      chemin_fichier: string
-      fichier_url: string | null
-    }>; method?: string }>(url, token)
-
-    const results = data?.results ?? []
-    console.log(`=== Recherche filtrée: ${results.length} résultats, méthode=${data?.method} ===`)
-
-    if (!results.length) {
-      return null
-    }
-
-    return results.map((doc) => ({
-      id: doc.id,
-      source: doc.titre,
-      content: '',
-      metadata: {
-        client: doc.client,
-        exercice: doc.exercice,
-        risque: doc.risque,
-        type_courrier: doc.type_courrier,
-        reference: doc.reference,
-        chemin_fichier: doc.chemin_fichier,
-        fichier_url: doc.fichier_url,
-        titre: doc.titre,
-      },
-      score: 1.0,
-      isFallback: false,
-    }))
-  } catch (error) {
-    console.warn('Recherche filtrée indisponible.', error)
-    return null
-  }
-}
-
-// Ancienne recherche FAISS (fallback)
-async function rechercherDocumentsFaiss(
-  question: string,
-  token: string | null,
-  topK: number
-): Promise<DocumentPiece[] | null> {
-  const url = buildBackendUrl('assistant/documents/search/faiss/')
-  url.searchParams.set('q', question)
-  url.searchParams.set('top_k', String(topK))
-  url.searchParams.set('include_fallback', 'true')
-
-  try {
-    const data = await fetchJson<{ results?: AssistantSearchResult[] }>(url, token)
-    const results = data?.results ?? []
-    if (!results.length) {
-      return null
-    }
-
-    return results.map((result) => ({
-      id: result.id,
-      source: result.titre,
-      content: result.content,
-      metadata: {
-        ...result.metadata,
-        highlights: result.highlights ?? [],
-      },
-      score: result.score,
-      isFallback: result.metadata?.isFallback === true,
-    }))
-  } catch (error) {
-    console.warn('Assistant FAISS search unavailable, falling back to TF-IDF.', error)
-    return null
-  }
-}
-
-async function rechercherDocuments(
-  question: string, 
-  token: string | null, 
-  topK: number,
-  filtres?: FiltresRecherche
-): Promise<DocumentPiece[]> {
-  if (!token) {
-    throw new BackendError('Authentification requise pour interroger les documents.', 401)
-  }
-
-  // S'assurer que le cache des clients est chargé avant l'extraction des critères
-  await loadValidClients(token)
-
-  const criteres = extraireCriteresRecherche(question)
-  const referenceDemandee = criteres.reference
-
-  // Extraire le client mentionné dans la question pour filtrer les résultats
-  // MAIS ignorer si c'est en fait une référence (ex: N93 n'est pas un client)
-  let clientMentionne = extraireClientMentionne(question) || criteres.client
-  if (referenceDemandee && clientMentionne) {
-    // Si le client détecté ressemble à une référence (N + chiffres), l'ignorer
-    if (/^N\d+$/i.test(clientMentionne)) {
-      console.log(`=== Client ${clientMentionne} ignoré car c'est une référence ===`)
-      clientMentionne = null
-    }
-  }
-
-  // Utiliser les critères extraits de la question
-  const anneeMentionnee = criteres.annee
-  const risqueMentionne = criteres.risque
-  const typeDocumentMentionne = criteres.typeDocument
-
-  console.log(`=== Critères extraits: client=${clientMentionne}, annee=${anneeMentionnee}, risque=${risqueMentionne}, typeDoc=${typeDocumentMentionne} ===`)
-
-  // Construire les filtres pour la recherche backend
-  const filtresBackend: FiltresRecherche = {
-    client: filtres?.client || clientMentionne || null,
-    exercice: filtres?.exercice || anneeMentionnee || null,
-    risque: filtres?.risque || risqueMentionne || null,
-    typeDocument: typeDocumentMentionne || null,
-  }
-
-  if (filtresBackend.client || filtresBackend.exercice || filtresBackend.risque) {
-    console.log(`=== Filtres backend: client=${filtresBackend.client}, exercice=${filtresBackend.exercice}, risque=${filtresBackend.risque} ===`)
-  }
-
-  let pieces: DocumentPiece[] = []
-
-  // 0. PRIORITÉ ABSOLUE: Si une référence est demandée, recherche exacte par référence
-  if (referenceDemandee) {
-    console.log(`=== Recherche exacte par référence: ${referenceDemandee} ===`)
-    try {
-      const refUrl = buildBackendUrl('assistant/documents/search/by-reference/')
-      refUrl.searchParams.set('reference', referenceDemandee)
-
-      const data = await fetchJson<{ resultats?: Array<{
-        id: string
-        titre: string
-        reference: string
-        type_courrier: string
-        client: string
-        exercice: string | number
-        risque: string
-        chemin_fichier: string
-        metadata: Record<string, unknown>
-      }> }>(refUrl, token)
-
-      const resultats = data?.resultats ?? []
-      if (resultats.length > 0) {
-        console.log(`=== Recherche par référence: ${resultats.length} document(s) exact(s) trouvé(s) ===`)
-        pieces = resultats.map((doc) => ({
-          id: doc.id,
-          source: doc.titre,
-          content: '',
-          metadata: {
-            ...doc.metadata,
-            client: doc.client,
-            exercice: doc.exercice,
-            risque: doc.risque,
-            type_courrier: doc.type_courrier,
-            reference: doc.reference,
-            chemin_fichier: doc.chemin_fichier,
-            fichier_url: doc.chemin_fichier ? `/media/${doc.chemin_fichier}` : null,
-            titre: doc.titre,
-          },
-          score: 1.0,
-          isFallback: false,
-        }))
-        // Retourner directement les résultats exacts sans autres recherches
-        return pieces
-      }
-      console.log(`=== Aucun document trouvé pour la référence ${referenceDemandee} ===`)
-      // Pas de fallback - retourner tableau vide si référence explicite non trouvée
-      return []
-    } catch (err) {
-      console.log(`=== Erreur recherche par référence: ${err} ===`)
-      // RÈGLE MÉTIER: Jamais de fallback si référence explicite détectée
-      // Retourner tableau vide plutôt que des résultats TF-IDF incorrects
-      return []
-    }
-  }
-
-  // 1. Si des filtres sont présents, utiliser la recherche filtrée en priorité
-  const hasSpecificFilters = filtresBackend.client || filtresBackend.exercice || filtresBackend.risque || filtresBackend.typeDocument
-  if (hasSpecificFilters) {
-    console.log(`=== Utilisation de la recherche filtrée ===`)
-    const filteredPieces = await rechercherDocumentsFiltered(question, token, topK * 3, filtresBackend)
-    if (filteredPieces && filteredPieces.length > 0) {
-      pieces = filteredPieces
-      console.log(`=== Recherche filtrée: ${pieces.length} résultats ===`)
-    } else {
-      // RÈGLE MÉTIER (mode strict): si des filtres explicites sont présents et qu'aucun résultat
-      // n'est trouvé, ne pas faire de fallback avec des documents non pertinents
-      const typeInfo = filtresBackend.typeDocument ? ` type="${filtresBackend.typeDocument}"` : ''
-      console.log(`=== Aucun document trouvé (filtres explicites${typeInfo}), pas de fallback ===`)
-      return []
-    }
-  }
-  
-  // 2. Sinon, essayer la recherche sémantique (seulement si pas de filtres spécifiques ou si filtres sans typeDocument)
-  if (!pieces.length && !filtresBackend.typeDocument) {
-    const semanticPieces = await rechercherDocumentsSemantic(question, token, topK * 3, filtresBackend)
-    if (semanticPieces && semanticPieces.length > 0) {
-      pieces = semanticPieces
-      console.log(`=== Recherche sémantique: ${pieces.length} résultats ===`)
-    }
-  }
-
-  // 3. Fallback sur FAISS si la recherche sémantique échoue (seulement si pas de typeDocument spécifique)
-  if (!pieces.length && USE_FAISS && !filtresBackend.typeDocument) {
-    const faissPieces = await rechercherDocumentsFaiss(question, token, topK * 3)
-    if (faissPieces && faissPieces.length > 0) {
-      pieces = faissPieces
-      console.log(`=== Recherche FAISS: ${pieces.length} résultats ===`)
-    }
-  }
-
-  // 4. Fallback TF-IDF (seulement si pas de typeDocument spécifique demandé)
-  if (!pieces.length && !filtresBackend.typeDocument) {
-    const searchUrl = buildBackendUrl('assistant/documents/search/tfidf/')
-    searchUrl.searchParams.set('q', question)
-    searchUrl.searchParams.set('top_k', String(topK * 3))
-
-    const data = await fetchJson<{ results?: AssistantSearchResult[] }>(searchUrl, token)
-    const results = data?.results ?? []
-
-    if (!results.length) {
-      const fallback = await recupererDocumentRecent(token)
-      return fallback ? [fallback] : []
-    }
-
-    pieces = results.map((result) => ({
-      id: result.id,
-      source: result.titre,
-      content: result.content,
-      metadata: {
-        ...result.metadata,
-        highlights: result.highlights ?? [],
-      },
-      score: result.score,
-      isFallback: result.metadata?.isFallback === true,
-    }))
-  }
-
-  // Filtrer par client si un client spécifique est mentionné dans la question
-  if (clientMentionne) {
-    const piecesFiltrees = pieces.filter((piece) => {
-      const clientPiece = (piece.metadata?.client as string)?.toUpperCase()
-      return clientPiece === clientMentionne
-    })
-
-    // Si on a des résultats filtrés, les utiliser ; sinon, garder les résultats originaux
-    // mais signaler qu'on n'a pas trouvé de docs pour ce client spécifique
-    if (piecesFiltrees.length > 0) {
-      console.log(`=== ${piecesFiltrees.length} documents trouvés pour le client ${clientMentionne} ===`)
-      const ordonnees = prioriserPiecesParReference(piecesFiltrees, referenceDemandee)
-      return ordonnees.slice(0, topK)
-    } else {
-      console.log(`=== Aucun document trouvé pour le client ${clientMentionne}, retour des résultats généraux ===`)
-      // Retourner un tableau vide pour signaler qu'on n'a rien trouvé pour ce client
-      return []
-    }
-  }
-
-  const ordonnees = prioriserPiecesParReference(pieces, referenceDemandee)
-  return ordonnees.slice(0, topK)
-}
-
-function prioriserPiecesParReference(pieces: DocumentPiece[], referenceDemandee: string | null): DocumentPiece[] {
-  if (!referenceDemandee) {
-    return pieces
-  }
-
-  const ref = referenceDemandee.toUpperCase()
-  const exact: DocumentPiece[] = []
-  const partial: DocumentPiece[] = []
-  const autres: DocumentPiece[] = []
-
-  for (const piece of pieces) {
-    const refPiece = (piece.metadata?.reference as string | undefined)?.toUpperCase()
-    if (!refPiece) {
-      autres.push(piece)
-      continue
-    }
-    if (refPiece === ref) {
-      exact.push(piece)
-    } else if (refPiece.includes(ref)) {
-      partial.push(piece)
-    } else {
-      autres.push(piece)
-    }
-  }
-
-  if (exact.length > 0) {
-    return [...exact, ...partial, ...autres]
-  }
-  if (partial.length > 0) {
-    return [...partial, ...autres]
-  }
-  return pieces
-}
-
-function construireResumeDocuments(_question: string, pieces: DocumentPiece[], tone: 'amical' | 'formel' | 'concis' | 'premium' = 'amical'): string {
-  const toneConfig = TONES[tone]
-  
-  // Extraire le client mentionné pour personnaliser le message "aucun résultat"
-  const clientMentionne = extraireClientMentionne(_question)
-  
-  if (!pieces || pieces.length === 0) {
-    if (clientMentionne) {
-      return `Je n'ai trouvé aucun document pour le client ${clientMentionne} dans les archives. 🔍\n\nEs-tu sûr du code client ? Sinon, essaie avec d'autres critères de recherche.`
-    }
-    return toneConfig.noResults
-  }
-
-  const premiere = pieces[0]
-  const metadata = premiere.metadata ?? {}
-  const nbDocs = pieces.length
-
-	const normalizedQuestion = _question
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.trim()
-
-	const demandeListeComplete =
-		normalizedQuestion.includes('tous les documents') ||
-		normalizedQuestion.includes('tout les documents') ||
-		normalizedQuestion.includes('liste moi tous les documents') ||
-		normalizedQuestion.includes('liste tous les documents')
-
-  // Introduction naturelle
-  let reponse: string
-	if (demandeListeComplete) {
-		const clientNom = (metadata.client as string | undefined) || 'ce client'
-		if (nbDocs === 1) {
-			reponse = `Tu m'as demandé la liste des documents pour le client ${clientNom}. La liste complète serait trop longue à afficher en une seule fois, donc je te montre le document suivant.`
-		} else {
-			reponse = `Tu m'as demandé la liste des documents pour le client ${clientNom}. La liste complète serait trop longue à afficher en une seule fois, donc je te montre ici ${nbDocs} documents parmi les plus pertinents ou les plus récents.`
-		}
-	} else {
-		reponse = nbDocs === 1
-			? "J'ai retrouvé un document qui pourrait vous être utile."
-			: `J'ai retrouvé ${nbDocs} documents qui pourraient vous être utiles.`
-	}
-  reponse += "\n\n"
-
-  // Emoji selon le type
-  let emoji = ''
-  const type = (metadata.type as string)?.toLowerCase() || ''
-  if (toneConfig.useEmojis) {
-    if (type.includes('sinistre')) emoji = '🚨 '
-    else if (type.includes('contrat')) emoji = '📄 '
-    else if (type.includes('facture')) emoji = '🧾 '
-    else if (type.includes('rapport')) emoji = '📊 '
-    else if (type.includes('courrier')) emoji = '✉️ '
-    else emoji = '📎 '
-  }
-
-  // Titre du document
-  const titre = metadata.titre || 'Document';
-  reponse += `${emoji}${titre}\n`;
-
-  // Infos structurées, sans gras
-  if (metadata.client) reponse += `Client : ${metadata.client}\n`;
-  if (metadata.type) reponse += `Type : ${metadata.type}\n`;
-  if (metadata.date_document) {
-    const date = new Date(metadata.date_document as string);
-    if (!isNaN(date.getTime())) reponse += `Date : ${date.toLocaleDateString('fr-FR')}\n`;
-  }
-  if (metadata.reference) reponse += `Référence : ${metadata.reference}\n`;
-
-  // Résumé naturel
-  const contenu = premiere.content || '';
-  if (contenu.length > 50) {
-    const montantMatch = contenu.match(/\d+[\s\u00A0]?(?:\d{3}[\s\u00A0]?)*[€$¢]|montant[:\s]+\d+/i);
-    const statutMatch = contenu.match(/(?:statut|état|status)[:\s]+([^\n.]+)|(?:en cours|traité|validé|en attente|clos)/i);
-    const details: string[] = [];
-    if (montantMatch) details.push(montantMatch[0]);
-    if (statutMatch) {
-      const statut = statutMatch[1] || statutMatch[0];
-      details.push(statut.trim());
-    }
-    if (details.length > 0) {
-      reponse += `\nRésumé : ${details.join('. ')}.`;
-    } else {
-      const lignes = contenu.split('\n').map(l => l.trim()).filter(l => l.length > 10 && l.length < 150).slice(0, 2);
-      if (lignes.length > 0) reponse += `\nRésumé : ${lignes.join(' ')}`;
-    }
-  }
-
-  // Autres documents
-  if (nbDocs > 1) {
-    const clientPremierDoc = (metadata.client as string)?.toUpperCase()
-    const autresClients = new Set(
-      pieces.slice(1)
-        .map(p => (p.metadata?.client as string)?.toUpperCase())
-        .filter(Boolean)
-    );
-    
-    // Si on a filtré par client, tous les docs sont du même client
-    if (clientMentionne && autresClients.size === 1 && Array.from(autresClients)[0] === clientMentionne) {
-      reponse += `\n\nTous ces documents concernent le client ${clientMentionne}.`;
-    } else if (autresClients.size === 1 && Array.from(autresClients)[0] === clientPremierDoc) {
-      reponse += `\n\nTous ces documents concernent le client ${clientPremierDoc}.`;
-    } else if (autresClients.size === 1) {
-      reponse += `\n\nLes autres documents sont liés au client ${Array.from(autresClients)[0]}.`;
-    } else if (autresClients.size > 1) {
-      reponse += `\n\nLes autres documents concernent : ${Array.from(autresClients).join(', ')}.`;
-    } else {
-      reponse += `\n\n${nbDocs - 1} autre${nbDocs > 2 ? 's' : ''} document${nbDocs > 2 ? 's' : ''} disponible${nbDocs > 2 ? 's' : ''}.`;
-    }
-  }
-
-  // Conclusion naturelle
-  reponse += '\n\nVous pouvez les consulter ou les télécharger à tout moment.';
-  reponse += "\n\nSi vous avez besoin d'aide pour un autre document ou pour une recherche, je suis là pour vous aider !";
-  return reponse;
-}
-
-async function recupererTousLesDocuments(token: string | null): Promise<DocumentDetail[]> {
-  if (!token) {
-    throw new BackendError('Authentification requise pour consulter les statistiques.', 401)
-  }
-
-  const documents: DocumentDetail[] = []
-  let nextUrl: URL | null = buildBackendUrl('documents/')
-  nextUrl.searchParams.set('ordering', '-cree_le')
-  nextUrl.searchParams.set('page_size', '100')
-
-  let pages = 0
-  const maxPages = 5
-
-  while (nextUrl && pages < maxPages) {
-    const data = await fetchJson<any>(nextUrl, token)
-    const results = Array.isArray(data) ? (data as DocumentDetail[]) : ((data?.results ?? []) as DocumentDetail[])
-    documents.push(...results)
-    const nextLink = data?.next as string | null | undefined
-    nextUrl = nextLink ? new URL(nextLink, API_BASE) : null
-    pages += 1
-  }
-
-  return documents
-}
-
-async function recupererDocumentRecent(token: string | null): Promise<DocumentPiece | null> {
-  if (!token) {
-    throw new BackendError('Authentification requise pour consulter les documents.', 401)
-  }
-
-  const url = buildBackendUrl('documents/')
-  url.searchParams.set('ordering', '-cree_le')
-  url.searchParams.set('page_size', '1')
-
-  const data = await fetchJson<any>(url, token)
-  const results = Array.isArray(data) ? (data as DocumentDetail[]) : ((data?.results ?? []) as DocumentDetail[])
-  const doc = results[0]
-  if (!doc) {
-    return null
-  }
-
-  const metadata = construireMetadataDocument(doc)
-  const highlights = construireHighlights(metadata)
-
-  return {
-    id: doc.id,
-    source: doc.titre,
-    content: construireContenuDocument(doc),
-    metadata: {
-      ...metadata,
-      highlights,
-    },
-    score: 0,
-    isFallback: true,
-  }
-}
-
-function calculerStatistiques(documents: DocumentDetail[]): Statistiques {
-  const mois = new Map<string, number>()
-  const clients = new Map<string, number>()
-
-  let documentsEnRetard = 0
-  let alertesPeremption = 0
-  const maintenant = Date.now()
-
-  for (const doc of documents) {
-    const dateSource = doc.date_document ?? doc.cree_le
-    if (dateSource) {
-      const date = new Date(dateSource)
-      if (!Number.isNaN(date.getTime())) {
-        const cle = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-        mois.set(cle, (mois.get(cle) ?? 0) + 1)
-
-        if (!(doc.est_archive ?? false) && maintenant - date.getTime() > THIRTY_DAYS_MS) {
-          documentsEnRetard += 1
-        }
-
-        if (maintenant - date.getTime() > FIVE_YEARS_MS) {
-          alertesPeremption += 1
-        }
-      }
-    }
-
-    const client = doc.risque_detail?.exercice_info?.client ?? 'Client inconnu'
-    clients.set(client, (clients.get(client) ?? 0) + 1)
-  }
-
-  const documents_par_mois = Array.from(mois.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-6)
-    .reduce<Record<string, number>>((acc, [cle, total]) => {
-      acc[cle] = total
-      return acc
-    }, {})
-
-  const top_clients = Array.from(clients.entries())
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 5)
-    .map(([client, compte]) => ({ client, compte }))
-
-  const total = documents.length
-  const taux_conformite = total > 0 ? Math.max(0, Math.min(1, (total - documentsEnRetard) / total)) : 1
-
-  return {
-    documents_par_mois,
-    top_clients,
-    kpi: {
-      taux_conformite,
-      documents_en_retard: documentsEnRetard,
-      alertes_peremption: alertesPeremption,
-    },
-  }
-}
-
-async function collecterStatistiques(token: string | null): Promise<Statistiques> {
-  if (!token) {
-    throw new BackendError('Authentification requise pour consulter les statistiques.', 401)
-  }
-
-  try {
-    const url = buildBackendUrl('assistant/stats/')
-    const data = await fetchJson<any>(url, token)
-
-    const statistiques: Statistiques = {
-      documents_par_mois: (data?.documents_par_mois as Record<string, number>) ?? {},
-      top_clients: (data?.top_clients as { client: string; compte: number }[]) ?? [],
-      kpi: data?.kpi as Statistiques['kpi'],
-      totaux_clients: data?.totaux_clients as Statistiques['totaux_clients'],
-    }
-
-    return statistiques
-  } catch (error) {
-    console.warn('assistant/stats indisponible, fallback sur calcul local', error)
-    const documents = await recupererTousLesDocuments(token)
-    if (!documents.length) {
-      return {
-        documents_par_mois: {},
-        top_clients: [],
-        kpi: {
-          taux_conformite: 1,
-          documents_en_retard: 0,
-          alertes_peremption: 0,
-        },
-      }
-    }
-
-    return calculerStatistiques(documents)
-  }
-}
-
-function construireResumeStatistiques(statistiques: Statistiques): string {
-  // Phrases d'introduction variées pour plus d'humanité
-  const introductions = [
-    "Voici un aperçu de vos archives actuelles :",
-    "J'ai analysé vos documents et voici ce que j'ai trouvé :",
-    "Après analyse de votre base documentaire, voici les points importants :",
-    "Voici le bilan actuel de vos archives :"
-  ]
-  
-  const intro = introductions[Math.floor(Math.random() * introductions.length)]
-  let resume = intro
-  
-  // Nombre total de documents archivés (tous mois confondus)
-  const totalDocuments = Object.values(statistiques.documents_par_mois ?? {}).reduce(
-    (acc, valeur) => acc + (valeur ?? 0),
-    0,
-  )
-  if (totalDocuments > 0) {
-    resume += `\n\nAu total, vous avez actuellement ${totalDocuments} document${totalDocuments > 1 ? 's' : ''} archivés dans ACS.`;
-  }
-
-  // Taux de conformité et retards
-  if (statistiques.kpi) {
-    const tauxPct = (statistiques.kpi.taux_conformite * 100).toFixed(1)
-    const retards = statistiques.kpi.documents_en_retard
-    const peremptions = statistiques.kpi.alertes_peremption
-    
-    // Formulation plus naturelle
-    if (retards === 0 && peremptions === 0) {
-      resume += `\n\nBonne nouvelle ! Votre taux de conformité est excellent (${tauxPct}%), sans aucun document en retard ni alerte de péremption. Tout est parfaitement en ordre.`;
-    } else if (retards === 0) {
-      resume += `\n\nVotre taux de conformité est très bon (${tauxPct}%). Vous n'avez aucun document en retard, mais ${peremptions} document${peremptions > 1 ? 's' : ''} approchent de la péremption.`;
-    } else if (peremptions === 0) {
-      resume += `\n\nVotre taux de conformité est de ${tauxPct}%. Vous avez ${retards} document${retards > 1 ? 's' : ''} en retard, mais aucune alerte de péremption.`;
-    } else {
-      resume += `\n\nVotre taux de conformité est de ${tauxPct}%. J'ai identifié ${retards} document${retards > 1 ? 's' : ''} en retard et ${peremptions} alerte${peremptions > 1 ? 's' : ''} de péremption.`;
-    }
-  }
-
-  // Top clients
-  if (statistiques.top_clients?.length) {
-    const topClients = statistiques.top_clients.slice(0, 3)
-    
-    if (topClients.length === 1) {
-      resume += `\n\nLe client ${topClients[0].client} se démarque avec ${topClients[0].compte} document${topClients[0].compte > 1 ? 's' : ''} archivé${topClients[0].compte > 1 ? 's' : ''}.`;
-    } else {
-      const formatted = topClients
-        .map((client, index) => {
-          if (index === topClients.length - 1) {
-            return `et ${client.client} (${client.compte})`
-          }
-          return `${client.client} (${client.compte})`
-        })
-        .join(', ')
-      resume += `\n\nVos principaux clients en volume d'archives sont ${formatted}.`
-    }
-  }
-
-  if (resume === intro) {
-    return "Je n'ai pas encore assez de données pour vous fournir des statistiques pertinentes. N'hésitez pas à ajouter des documents pour obtenir une analyse plus complète."
-  }
-
-  return resume
-}
-
-function construireInsightsStatistiques(statistiques: Statistiques): string[] {
-  const insights: string[] = []
-
-  if (statistiques.top_clients?.length) {
-    const premiers = statistiques.top_clients
-      .slice(0, 3)
-      .map((client) => `${client.client} (${client.compte})`)
-      .join(', ')
-    insights.push(`Top clients : ${premiers}.`)
-  }
-
-  const evolution = Object.entries(statistiques.documents_par_mois ?? {})
-    .sort(([a], [b]) => a.localeCompare(b))
-  if (evolution.length >= 2) {
-    const [prevKey, prevValue] = evolution[evolution.length - 2]
-    const [lastKey, lastValue] = evolution[evolution.length - 1]
-    if (prevValue && lastValue) {
-      const delta = ((lastValue - prevValue) / prevValue) * 100
-      insights.push(`Variation du volume entre ${prevKey} et ${lastKey} : ${delta >= 0 ? '+' : ''}${delta.toFixed(1)} %.`)
-    }
-  }
-
-  return insights
-}
-
-function construireActionsStatistiques(statistiques: Statistiques): string[] {
-  const actions: string[] = []
-
-  const kpi = statistiques.kpi
-  if (kpi) {
-    if (kpi.taux_conformite < 0.9) {
-      actions.push('Prioriser la réduction des documents en retard pour améliorer le taux de conformité.')
-    } else {
-      actions.push('Maintenir la surveillance : le taux de conformité reste satisfaisant.')
-    }
-
-    if (kpi.alertes_peremption > 0) {
-      actions.push(`Planifier une revue des ${kpi.alertes_peremption} document${kpi.alertes_peremption > 1 ? 's' : ''} proche${kpi.alertes_peremption > 1 ? 's' : ''} de la péremption.`)
-    }
-  }
-
-  if (!actions.length) {
-    actions.push('Aucune action prioritaire détectée. Continuer le suivi régulier des indicateurs.')
-  }
-
-  return actions
 }
 
 export async function POST(request: Request) {
@@ -2294,12 +520,10 @@ export async function POST(request: Request) {
       if (classification.intention === 'suivi_document') {
         isFollowUpOnDocument = true
         requestedIndex = convertLlmIndexToSystemIndex(classification.index_document ?? null, selectionCount)
-        console.log(`=== Classification LLM: suivi_document (index=${requestedIndex}, action=${classification.action}) ===`)
       } else if (classification.intention === 'recherche_document' && classification.criteres) {
         // Utiliser les critères extraits par le LLM (résout automatiquement "même client" → client réel)
         if (classification.criteres.client) {
           criteresQuestion.client = classification.criteres.client
-          console.log(`=== Classification LLM: client résolu → "${classification.criteres.client}" ===`)
         }
         if (classification.criteres.annee) {
           criteresQuestion.annee = classification.criteres.annee
@@ -2316,7 +540,6 @@ export async function POST(request: Request) {
       isFollowUpOnDocument = isDocumentFollowUpQuestion(questionOriginale, currentMemory)
       requestedIndex = extractDocumentIndex(questionOriginale, selectionCount)
       if (isFollowUpOnDocument) {
-        console.log(`=== Fallback patterns: suivi_document détecté ===`)
       }
     }
     
@@ -2335,7 +558,6 @@ export async function POST(request: Request) {
             contenu: docFromSelection.contenu || '',
             metadata: docFromSelection.metadata,
           }
-          console.log(`=== Mode suivi_document: Document ${docFromSelection.numero}/${selectionCount} "${docFromSelection.label}" ===`)
         }
       }
       
@@ -2347,7 +569,6 @@ export async function POST(request: Request) {
           contenu: currentMemory.document_actif.contenu || '',
           metadata: currentMemory.document_actif.metadata || {},
         }
-        console.log(`=== Mode suivi_document: Document actif "${targetDoc.titre}" ===`)
       }
       
       if (targetDoc) {
@@ -2371,7 +592,6 @@ export async function POST(request: Request) {
         
         // Calculer le score de qualité OCR du contenu
         const ocrQuality = calculerScoreQualiteOcr(targetDoc.contenu)
-        console.log(`=== Qualité OCR: ${ocrQuality.score} (${ocrQuality.niveau}) ===`)
         
         // Générer une réponse LLM basée sur le document
         const systemPromptDoc = `Tu es un assistant d'archivage ACS. L'utilisateur te pose une question sur un document qu'il vient de consulter.
@@ -2483,10 +703,8 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
     // Détecter si l'utilisateur corrige une mauvaise détection précédente
     const isUserCorrection = detectUserCorrection(sessionId, subjectAnalysis)
     if (isUserCorrection) {
-      console.log(`=== [TELEMETRY] Correction utilisateur détectée ===`)
     }
     
-    console.log(`=== Routeur de sujet: ${subjectAnalysis.transition} (${Math.round(subjectAnalysis.confidence * 100)}%) - ${subjectAnalysis.reason} ===`)
     
     // Appliquer la transition selon le type et la confiance
     let updatedMemory = currentMemory
@@ -2495,9 +713,7 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       if (subjectAnalysis.confidence >= CONFIDENCE_THRESHOLD) {
         updatedMemory = applySubjectTransition(currentMemory, subjectAnalysis)
         setStructuredMemory(sessionId, updatedMemory)
-        console.log(`=== Mémoire ${subjectAnalysis.transition === 'return_subject' ? 'restaurée' : 'réinitialisée'} (confiance: ${Math.round(subjectAnalysis.confidence * 100)}%) ===`)
       } else {
-        console.log(`=== Transition non appliquée (confiance ${Math.round(subjectAnalysis.confidence * 100)}% < seuil ${Math.round(CONFIDENCE_THRESHOLD * 100)}%) ===`)
       }
     }
     
@@ -2523,7 +739,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
     
     // Classification simplifiée
     const modeAssistant = modeAssistantForce ?? classifierSimple(questionOriginale, criteresFinal)
-    console.log(`=== Mode: ${modeAssistant} | Critères: client=${criteresFinal.client}, année=${criteresFinal.annee}, type=${criteresFinal.typeDocument}, risque=${criteresFinal.risque} ===`)
     
     // Variables de compatibilité avec le code existant
     const question = questionOriginale
@@ -2698,12 +913,10 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       const typeCible = contexteComplet.typeDocument
       const dernierVide = contexteComplet.dernierResultatVide
       
-      console.log(`=== Comptage contextuel: client=${clientCible}, type=${typeCible}, dernierVide=${dernierVide} ===`)
       
       // CAS SPÉCIAL: Si la dernière réponse disait "pas trouvé" pour un type de document
       // Alors "Combien en a-t-il ?" = "Combien de [type] ?" → 0
       if (dernierVide && typeCible && clientCible) {
-        console.log(`=== Contexte: dernière recherche de ${typeCible} était vide → répondre 0 ===`)
         const comptageStartedAt = Date.now()
         incrementRequest('statistiques')
         
@@ -2844,7 +1057,7 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
     })
 
     if (intent === 'statistiques') {
-      if (!ROLES_AUTORISES_STATISTIQUES.has(role)) {
+      if (!ROLES_AUTORISES.has(role)) {
         return construireReponseRestreinte(question, intent, role)
       }
       const statistiques = await collecterStatistiques(token)
@@ -2856,7 +1069,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       
       // Si c'est une question sur un client spécifique, on bascule vers la recherche de documents
       if (typeQuestionClients && typeof typeQuestionClients === 'object' && typeQuestionClients.type === 'client_specifique') {
-        console.log(`=== Question sur client spécifique détectée: ${typeQuestionClients.nomClient} (${typeQuestionClients.typeDocument || 'tous documents'}) ===`)
         
         // Rediriger vers la recherche de documents pour ce client spécifique
         const clientQuery = `${typeQuestionClients.typeDocument || 'documents'} ${typeQuestionClients.nomClient}`;
@@ -2982,7 +1194,7 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       return NextResponse.json(reponse)
     }
 
-    if (!ROLES_AUTORISES_DOCUMENTS.has(role)) {
+    if (!ROLES_AUTORISES.has(role)) {
       return construireReponseRestreinte(question, intent, role)
     }
 
@@ -3005,14 +1217,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
           source: 'heuristique',
         },
       }
-
-      console.info('assistant-demo', {
-        intent: 'documents',
-        questionLongueur: question.length,
-        pieces: 0,
-        statistiques: false,
-        llm: false,
-      })
 
       journaliserAssistant({
         type: 'response',
@@ -3081,14 +1285,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
                 narration,
       }
 
-      console.info('assistant-demo', {
-        intent: 'documents',
-        questionLongueur: question.length,
-        pieces: 0,
-        statistiques: false,
-        llm: narration.source === 'llm',
-      })
-
       journaliserAssistant({
         type: 'response',
         intent: 'documents',
@@ -3108,7 +1304,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
     const anneeFinal = criteresPreRecherche.annee || anneeContexte
     const risqueFinal = criteresPreRecherche.risque || risqueContexte
     
-    console.log(`=== Critères finaux (question + contexte): client=${clientFinal}, année=${anneeFinal}, risque=${risqueFinal}, type=${criteresPreRecherche.typeDocument || typeDocumentContexte} ===`)
     
     // Construire les filtres pour la recherche backend (filtrage direct dans la base)
     const filtresRecherche: FiltresRecherche = {
@@ -3140,7 +1335,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
     if (filtrage.pertinents.length > 0) {
       // On a trouvé des documents qui correspondent à tous les critères
       pieces = filtrage.pertinents
-      console.log(`=== Filtrage: ${filtrage.pertinents.length} docs pertinents, ${filtrage.nonPertinents.length} ignorés ===`)
     } else {
       // Aucun document ne respecte tous les critères, mais on ne masque pas les résultats.
       // On renvoie quand même les documents trouvés par la recherche de base pour permettre
@@ -3149,7 +1343,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       if (piecesRecherche.length > 0) {
         messageNonTrouve = true
         criteresManquants = filtrage.criteresNonTrouves
-        console.log(`=== Filtrage souple: aucun document ne respecte tous les critères, mais ${piecesRecherche.length} docs candidats sont renvoyés ===`)
       }
     }
     
@@ -3403,15 +1596,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
         console.warn('Échec mise à jour mémoire structurée:', err)
       })
     }
-
-    console.info('assistant-demo', {
-      intent,
-      questionLongueur: question.length,
-      pieces: pieces.length,
-      statistiques: false,
-      llm: narration?.source === 'llm',
-      interactionId,
-    })
 
     journaliserAssistant({
       type: 'response',

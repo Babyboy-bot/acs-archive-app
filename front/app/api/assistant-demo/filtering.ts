@@ -1,19 +1,15 @@
 /**
- * Système de filtrage multi-critères pour les documents
- * Vérifie que les documents correspondent à TOUS les critères demandés
+ * Module de filtrage multi-critères des documents
+ * Vérifie que les documents correspondent aux critères demandés
  */
 
 import type { DocumentPiece } from './types'
-import { 
-  TYPE_DOCUMENT_KEYWORDS, 
-  TYPES_RISQUES, 
-  extraireCriteresRecherche,
-  type CriteresRecherche 
-} from './context'
+import { type CriteresRecherche, TYPE_DOCUMENT_KEYWORDS, TYPES_RISQUES, extraireCriteresRecherche } from './criteria'
 
-/**
- * Résultat du filtrage multi-critères
- */
+// ============================================================================
+// TYPES
+// ============================================================================
+
 export type ResultatFiltrage = {
   pertinents: DocumentPiece[]
   nonPertinents: DocumentPiece[]
@@ -22,9 +18,10 @@ export type ResultatFiltrage = {
   criteresUtilises: CriteresRecherche
 }
 
-/**
- * Vérifie si un document correspond à un critère spécifique
- */
+// ============================================================================
+// FILTRAGE
+// ============================================================================
+
 export function documentCorrespondAuCritere(piece: DocumentPiece, critere: string, valeur: string): boolean {
   const metadata = piece.metadata || {}
   const titre = (piece.source || '').toLowerCase()
@@ -49,7 +46,6 @@ export function documentCorrespondAuCritere(piece: DocumentPiece, critere: strin
       const exercice = String(metadata.exercice || '')
       const exerciceStr = exercice.trim()
       const matchExercice = exerciceStr === valeur || exerciceStr.includes(valeur)
-      console.log(`  → Vérification année ${valeur}: exercice="${exerciceStr}" → ${matchExercice}`)
       return matchExercice
     }
     
@@ -77,9 +73,6 @@ export function documentCorrespondAuCritere(piece: DocumentPiece, critere: strin
   }
 }
 
-/**
- * Fonction principale de filtrage multi-critères
- */
 export function filtrerParPertinence(pieces: DocumentPiece[], question: string): ResultatFiltrage {
   const criteres = extraireCriteresRecherche(question)
   
@@ -117,11 +110,7 @@ export function filtrerParPertinence(pieces: DocumentPiece[], question: string):
     }
   }
   
-  console.log(`=== Filtrage multi-critères ===`)
-  console.log(`Critères: type=${criteres.typeDocument}, client=${criteres.client}, année=${criteres.annee}, risque=${criteres.risque}`)
-  console.log(`Résultat: ${pertinents.length} pertinents, ${nonPertinents.length} non pertinents`)
   if (criteresNonTrouves.size > 0) {
-    console.log(`Critères non trouvés: ${[...criteresNonTrouves].join(', ')}`)
   }
   
   return {
@@ -133,9 +122,6 @@ export function filtrerParPertinence(pieces: DocumentPiece[], question: string):
   }
 }
 
-/**
- * Ancienne fonction maintenue pour compatibilité
- */
 export function verifierPertinenceResultats(pieces: DocumentPiece[], typeDemande: string | null): {
   pertinents: DocumentPiece[]
   nonPertinents: DocumentPiece[]
@@ -170,36 +156,5 @@ export function verifierPertinenceResultats(pieces: DocumentPiece[], typeDemande
     pertinents,
     nonPertinents,
     tousNonPertinents: pertinents.length === 0 && nonPertinents.length > 0
-  }
-}
-
-/**
- * Génère une narration simple et directe pour les résultats de recherche
- */
-export function genererNarrationSimple(
-  pieces: DocumentPiece[], 
-  criteres: CriteresRecherche,
-  contexte: { client?: string | null, annee?: string | null, risque?: string | null }
-): string {
-  const nbPieces = pieces.length
-  const client = criteres.client || contexte.client
-  const annee = criteres.annee || contexte.annee
-  const type = criteres.typeDocument
-  const risque = criteres.risque || contexte.risque
-  
-  const parties: string[] = []
-  if (type) parties.push(type)
-  if (annee) parties.push(`de ${annee}`)
-  if (client) parties.push(`pour ${client}`)
-  if (risque) parties.push(`risque ${risque}`)
-  
-  const description = parties.length > 0 ? parties.join(' ') : 'correspondant à ta recherche'
-  
-  if (nbPieces === 0) {
-    return `Je n'ai pas trouvé de document ${description} dans les archives.`
-  } else if (nbPieces === 1) {
-    return `J'ai trouvé 1 document ${description}. Le voici ci-dessous.`
-  } else {
-    return `J'ai trouvé ${nbPieces} documents ${description}. Les voici ci-dessous.`
   }
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getUtilisateurActif } from '@/lib/session'
+import { getUtilisateurActif, verifierSessionServeur, supprimerSession } from '@/lib/session'
 import { RoleUtilisateur } from '@/types'
 
 interface PublicRouteProps {
@@ -21,12 +21,13 @@ export function PublicRoute({ children }: PublicRouteProps) {
   const [chargement, setChargement] = useState(true)
 
   useEffect(() => {
-    const verifierSession = () => {
-      const utilisateur = getUtilisateurActif()
+    let actif = true
 
-      // Si l'utilisateur est connecté, le rediriger vers son espace
-      // Note: L'authentification repose sur les cookies httpOnly, on vérifie seulement la session locale
-      if (utilisateur) {
+    const verifierSession = async () => {
+      const utilisateur = getUtilisateurActif()
+      const sessionValide = await verifierSessionServeur()
+
+      if (utilisateur && sessionValide) {
         const destination = utilisateur.role === RoleUtilisateur.CONSULTANT 
           ? '/assistant-demo' 
           : '/tableau-de-bord'
@@ -34,12 +35,20 @@ export function PublicRoute({ children }: PublicRouteProps) {
         return
       }
 
-      // Pas connecté = peut voir la page publique
+      if (utilisateur && !sessionValide) {
+        supprimerSession()
+      }
+
+      if (!actif) return
       setPeutAfficher(true)
       setChargement(false)
     }
 
     verifierSession()
+
+    return () => {
+      actif = false
+    }
   }, [router])
 
   // Afficher un loader pendant la vérification

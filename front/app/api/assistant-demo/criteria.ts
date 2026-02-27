@@ -1,5 +1,5 @@
 /**
- * 📋 Module d'extraction des critères de recherche
+ * Module d'extraction des critères de recherche
  * - Extraction de type de document, client, année, risque, etc.
  * - Classification des questions (recherche vs conversation)
  * - Détection des références contextuelles
@@ -187,7 +187,6 @@ export async function loadValidClients(token: string | null): Promise<Set<string
     // En contexte serveur (API routes), utiliser l'URL interne Docker
     // Hardcodé car les variables d'environnement ne sont pas toujours disponibles au runtime
     const url = 'http://backend:8000/api/assistant/valid-clients/'
-    console.log(`[loadValidClients] Fetching from: ${url}`)
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) {

@@ -108,7 +108,7 @@ npm install
 npm run dev
 ```
 
-Interface web sur : `http://localhost:3000`
+Interface web sur : `http://localhost:5000`
 
 > ⚠️ En développement local, vous devez avoir PostgreSQL installé et configuré.
 
@@ -210,7 +210,7 @@ ASSISTANT_LLM_QUOTA_DISABLED=true  # quotas LLM applicatifs désactivés (valeur
 
 - **Développement local**
   - Backend Django + PostgreSQL local (voir `backend/.env`)
-  - Frontend Next.js sur `http://localhost:3000` pointant vers `http://127.0.0.1:8000/api`
+  - Frontend Next.js sur `http://localhost:5000` pointant vers `http://127.0.0.1:8000/api`
 - **Base de données**
   - Base principale PostgreSQL, migrations Django gérées par les fichiers `backend/api/migrations/`
   - Des scripts et backups sont prévus dans `backend/backups/` et `backend/scripts/` (non versionnés dans git) pour faciliter les sauvegardes/restaurations

@@ -75,7 +75,6 @@ export async function GET(request: NextRequest) {
   }
 
   const targetUrl = resolveTargetUrl(targetParam)
-  console.log('[proxy/document] target', targetUrl)
 
   const headers = new Headers()
   const authorization = request.headers.get('authorization')

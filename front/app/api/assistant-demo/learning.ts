@@ -2,7 +2,7 @@
  * Système d'apprentissage progressif pour l'assistant ACS
  * 
  * Ce module permet à l'assistant d'apprendre avec le temps en :
- * 1. Collectant les feedbacks utilisateurs (👍/👎)
+ * 1. Collectant les feedbacks utilisateurs (positif/négatif)
  * 2. Stockant les interactions réussies
  * 3. Identifiant les patterns de questions fréquentes
  * 4. Améliorant les réponses futures basées sur l'historique
@@ -321,7 +321,6 @@ export function recordFeedback(
     updatePatternScore(interaction.questionNormalized, -1)
   }
   
-  console.log(`=== Feedback enregistré: ${interactionId} → ${feedback} ===`)
   return true
 }
 

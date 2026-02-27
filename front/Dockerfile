@@ -55,9 +55,9 @@ COPY --from=builder /app/.next/static ./.next/static
 USER nextjs
 
 # Port exposé
-EXPOSE 3000
+EXPOSE 5000
 
-ENV PORT=3000
+ENV PORT=5000
 ENV HOSTNAME="0.0.0.0"
 
 # Lancer l'application

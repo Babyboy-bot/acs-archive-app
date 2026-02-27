@@ -1,4 +1,4 @@
-﻿"""
+"""
 Vues pour l'API Django REST Framework
 """
 from rest_framework import viewsets, status, permissions
@@ -6,13 +6,16 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import api_view, permission_classes, action
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth import authenticate
 from django.utils import timezone
+from urllib.parse import urlparse
+from django.http import JsonResponse
+
+
 from django.utils.dateparse import parse_datetime
 from django.db.models import Q, Count
 from django.db.models.functions import Coalesce, TruncMonth
@@ -20,16 +23,28 @@ from datetime import timedelta
 from django.core.files.storage import default_storage
 from django.conf import settings
 import logging
+
+
 import mimetypes
 import uuid
 import unicodedata
 import re
 from sklearn.metrics.pairwise import linear_kernel
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.svm import LinearSVC
 
 import numpy as np
 import time
+
+
+def should_use_secure_cookie(request):
+    host = (request.get_host() or '').split(':')[0]
+    if settings.DEBUG:
+        return False
+    if host in ('localhost', '127.0.0.1'):
+        return False
+    return request.is_secure()
+
+
 # faiss importé de façon lazy pour ne pas bloquer le démarrage
 _FAISS_MODULE = None
 def get_faiss():
@@ -95,14 +110,14 @@ def is_semantic_search_available():
             _SENTENCE_TRANSFORMERS_AVAILABLE = False
     return _SENTENCE_TRANSFORMERS_AVAILABLE
 
-# Pour compatibilité avec le code existant qui utilise SEMANTIC_SEARCH_AVAILABLE
-SEMANTIC_SEARCH_AVAILABLE = True  # On suppose disponible, vérifié à l'utilisation
+# Vérifie réellement si la recherche sémantique est activée et disponible
+SEMANTIC_SEARCH_AVAILABLE = is_semantic_search_available()
 
 try:
     import PyPDF2
     PDF_EXTRACTION_AVAILABLE = True
 except ImportError:
-    logging.warning("PyPDF2 non disponible, extraction avanc├®e des PDF d├®sactiv├®e")
+    logging.warning("PyPDF2 non disponible, extraction avancée des PDF désactivée")
     PyPDF2 = None  # type: ignore[assignment]
     PDF_EXTRACTION_AVAILABLE = False
 
@@ -283,15 +298,15 @@ QUOTA_DISABLED = str(getattr(settings, 'ASSISTANT_LLM_QUOTA_DISABLED', 'false'))
 
 
 def _llm_year_month(dt: timezone.datetime) -> str:
-    """Retourne une cl├® AAAA-MM pour le mois courant."""
+    """Retourne une clé AAAA-MM pour le mois courant."""
 
     return dt.strftime('%Y-%m')
 
 
 def consume_quota(utilisateur: Utilisateur, estimated_tokens: int, purpose: str, ts=None) -> dict:
-    """V├®rifie et d├®cr├®mente le quota mensuel LLM pour un utilisateur.
+    """Vérifie et décrémente le quota mensuel LLM pour un utilisateur.
 
-    Retourne un dict {allowed, remaining, percentage} conform├®ment au contrat
+    Retourne un dict {allowed, remaining, percentage} conformément au contrat
     attendu par le front.
     """
 
@@ -469,8 +484,8 @@ def login_view(request):
         )
 
         # Déterminer les paramètres des cookies
-        # Avec nginx comme reverse proxy, tout est sur le même domaine donc SameSite=Lax fonctionne
-        secure_cookie = not settings.DEBUG
+        # Éviter les cookies "secure" en environnement local (HTTP)
+        secure_cookie = should_use_secure_cookie(request)
         access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
         refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
         samesite_policy = 'Lax'
@@ -479,20 +494,21 @@ def login_view(request):
         access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
         refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
         
-        # Paramètres identiques pour suppression et création
         cookie_params = {
             'httponly': True,
             'secure': secure_cookie,
             'samesite': samesite_policy,
             'path': '/',
-            'domain': 'acs.localhost'
         }
-        
+
+        # delete_cookie ne supporte pas httponly/secure => utiliser kwargs dédiés
+        delete_cookie_kwargs = {
+            'path': '/',
+        }
+
         # Supprimer d'abord tous les cookies existants pour éviter la duplication
-        response.delete_cookie(access_cookie_name, **cookie_params)
-        response.delete_cookie(refresh_cookie_name, **cookie_params)
-        response.delete_cookie(access_cookie_name, path='/', domain='acs.localhost')  # Au cas où
-        response.delete_cookie(refresh_cookie_name, path='/', domain='acs.localhost')  # Au cas où
+        response.delete_cookie(access_cookie_name, **delete_cookie_kwargs)
+        response.delete_cookie(refresh_cookie_name, **delete_cookie_kwargs)
         
         # Définir les cookies de session avec exactement les mêmes paramètres
         response.set_cookie(
@@ -522,9 +538,7 @@ def login_view(request):
 @permission_classes([AllowAny])
 def refresh_token_view(request):
     """Endpoint de refresh token personnalisé qui lit depuis les cookies HttpOnly"""
-    from rest_framework_simplejwt.tokens import RefreshToken
     from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-    from django.conf import settings
     
     # Récupérer le nom du cookie depuis la configuration
     refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
@@ -548,7 +562,7 @@ def refresh_token_view(request):
         })
         
         # Déterminer les paramètres des cookies
-        secure_cookie = not settings.DEBUG
+        secure_cookie = should_use_secure_cookie(request)
         access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']
         samesite_policy = 'Lax'
         
@@ -563,6 +577,7 @@ def refresh_token_view(request):
             secure=secure_cookie,
             samesite=samesite_policy,
             max_age=int(access_lifetime.total_seconds()),
+            path='/',
         )
         
         return response
@@ -575,14 +590,14 @@ def refresh_token_view(request):
         )
         
         # Supprimer les cookies invalides
-        secure_cookie = not settings.DEBUG
+        secure_cookie = should_use_secure_cookie(request)
         samesite_policy = 'Lax'
         
         access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
         refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
         
-        response.delete_cookie(access_cookie_name, httponly=True, secure=secure_cookie, samesite=samesite_policy)
-        response.delete_cookie(refresh_cookie_name, httponly=True, secure=secure_cookie, samesite=samesite_policy)
+        response.delete_cookie(access_cookie_name, path='/')
+        response.delete_cookie(refresh_cookie_name, path='/')
         
         return response
 
@@ -590,9 +605,9 @@ def refresh_token_view(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def logout_view(request):
-    """D├®connexion : efface les cookies JWT c├┤t├® client."""
+    """Déconnexion : efface les cookies JWT côté client."""
     response = Response(
-        {'success': True, 'message': 'D├®connect├® avec succ├¿s.'},
+        {'success': True, 'message': 'Déconnecté avec succès.'},
         status=status.HTTP_200_OK,
     )
     response.delete_cookie('access_token')
@@ -605,8 +620,8 @@ def logout_view(request):
 def documents_search_view(request):
     """Recherche rapide de documents pour la barre globale.
 
-    Permet de taper un m├®lange de client / exercice / risque / type de courrier /
-    r├®f├®rence / titre, avec une normalisation robuste (suppression des accents,
+    Permet de taper un mélange de client / exercice / risque / type de courrier /
+    référence / titre, avec une normalisation robuste (suppression des accents,
     casse, ponctuation) pour que les combinaisons comme
     "2FZ 2022 responsabilite civile avenant" retrouvent les bons documents.
     """
@@ -698,7 +713,7 @@ def documents_search_view(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def llm_quota_consume(request):
-    """V├®rifie et consomme une partie du quota LLM mensuel de l'utilisateur.
+    """Vérifie et consomme une partie du quota LLM mensuel de l'utilisateur.
 
     Body attendu:
     {
@@ -719,7 +734,7 @@ def llm_quota_consume(request):
 
     if estimated <= 0:
         logging.warning("LLM_QUOTA_CONSUME non_positive_estimated user=%s value=%s", utilisateur.id, estimated)
-        return Response({'detail': 'estimated_tokens doit ├¬tre > 0'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'estimated_tokens doit être > 0'}, status=status.HTTP_400_BAD_REQUEST)
 
     purpose = data.get('purpose') or 'answer'
     ts_str = data.get('timestamp')
@@ -732,7 +747,7 @@ def llm_quota_consume(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def llm_usage_log(request):
-    """Journalise un appel LLM (usage r├®el en tokens).
+    """Journalise un appel LLM (usage réel en tokens).
 
     Body attendu:
     {
@@ -777,9 +792,9 @@ def llm_usage_log(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def llm_quota_status(request):
-    """Retourne l'├®tat du quota LLM courant pour l'utilisateur.
+    """Retourne l'état du quota LLM courant pour l'utilisateur.
 
-    R├®ponse:
+    Réponse:
     {
       "limit": 30000,
       "tokens_used": 12345,
@@ -829,12 +844,12 @@ def llm_quota_status(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def assistant_health(request):
-    """Retourne un ├®tat de sant├® technique de l'assistant LLM.
+    """Retourne un état de santé technique de l'assistant LLM.
 
-    V├®rifie la configuration de base du provider LLM (provider, cl├®s, URLs) et
-    expose aussi l'├®tat de la recherche s├®mantique.
+    Vérifie la configuration de base du provider LLM (provider, clés, URLs) et
+    expose aussi l'état de la recherche sémantique.
 
-    R├®ponse JSON minimale:
+    Réponse JSON minimale:
     {
       "provider": "claude" | "mistral" | "openai" | ...,
       "llm_enabled": true/false,
@@ -846,43 +861,43 @@ def assistant_health(request):
 
     utilisateur = request.user
     if utilisateur.role not in ['ADMIN']:
-        return Response({'detail': 'Acc├¿s r├®serv├® aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     provider = (getattr(settings, 'ASSISTANT_LLM_PROVIDER', 'openai') or 'openai').lower()
     llm_enabled = (str(getattr(settings, 'ASSISTANT_LLM_ENABLED', 'true')).lower() != 'false')
 
     errors: list[str] = []
 
-    # V├®rifier la configuration selon le provider d├®clar├®
+    # Vérifier la configuration selon le provider déclaré
     if not llm_enabled:
-        errors.append('LLM d├®sactiv├® via ASSISTANT_LLM_ENABLED=false')
+        errors.append('LLM désactivé via ASSISTANT_LLM_ENABLED=false')
     else:
         if provider in ('openai',):
             api_key = getattr(settings, 'ASSISTANT_LLM_API_KEY', None) or getattr(settings, 'OPENAI_API_KEY', None)
             base_url = getattr(settings, 'ASSISTANT_LLM_BASE_URL', 'https://api.openai.com/v1')
             if not api_key:
-                errors.append('Cl├® API OpenAI manquante (ASSISTANT_LLM_API_KEY ou OPENAI_API_KEY)')
+                errors.append('Clé API OpenAI manquante (ASSISTANT_LLM_API_KEY ou OPENAI_API_KEY)')
             if not isinstance(base_url, str) or not base_url:
                 errors.append('ASSISTANT_LLM_BASE_URL invalide ou vide')
         elif provider in ('claude', 'anthropic'):
             claude_key = getattr(settings, 'CLAUDE_API_KEY', None) or getattr(settings, 'ANTHROPIC_API_KEY', None)
             claude_url = getattr(settings, 'CLAUDE_BASE_URL', 'https://api.anthropic.com/v1')
             if not claude_key:
-                errors.append('Cl├® API Claude/Anthropic manquante (CLAUDE_API_KEY ou ANTHROPIC_API_KEY)')
+                errors.append('Clé API Claude/Anthropic manquante (CLAUDE_API_KEY ou ANTHROPIC_API_KEY)')
             if not isinstance(claude_url, str) or not claude_url:
                 errors.append('CLAUDE_BASE_URL invalide ou vide')
         elif provider == 'mistral':
             mistral_key = getattr(settings, 'MISTRAL_API_KEY', None)
             mistral_url = getattr(settings, 'MISTRAL_BASE_URL', 'https://api.mistral.ai/v1')
             if not mistral_key:
-                errors.append('Cl├® API Mistral manquante (MISTRAL_API_KEY)')
+                errors.append('Clé API Mistral manquante (MISTRAL_API_KEY)')
             if not isinstance(mistral_url, str) or not mistral_url:
                 errors.append('MISTRAL_BASE_URL invalide ou vide')
         else:
             # Providers compatibles OpenAI custom ou locaux
             base_url = getattr(settings, 'ASSISTANT_LLM_BASE_URL', None)
             if not base_url:
-                errors.append(f'Provider LLM "{provider}" non reconnu et ASSISTANT_LLM_BASE_URL non d├®fini')
+                errors.append(f'Provider LLM "{provider}" non reconnu et ASSISTANT_LLM_BASE_URL non défini')
 
     config_ok = llm_enabled and not errors
 
@@ -920,7 +935,7 @@ def llm_admin_stats(request):
 
     utilisateur = request.user
     if utilisateur.role not in ['ADMIN']:
-        return Response({'detail': 'Acc├¿s r├®serv├® aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     now_dt = timezone.now()
     current_month = _llm_year_month(now_dt)
@@ -968,18 +983,18 @@ def llm_admin_stats(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def llm_admin_history(request):
-    """Historique d├®taill├® des requ├¬tes LLM (admin uniquement).
+    """Historique détaillé des requêtes LLM (admin uniquement).
 
     Query params:
     - utilisateur_id: filtrer par utilisateur
     - provider: filtrer par provider (mistral, openai)
     - purpose: filtrer par purpose (router, answer, summary)
-    - limit: nombre de r├®sultats (d├®faut 100, max 500)
+    - limit: nombre de résultats (défaut 100, max 500)
     """
 
     utilisateur = request.user
     if utilisateur.role not in ['ADMIN']:
-        return Response({'detail': 'Acc├¿s r├®serv├® aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'detail': 'Accès réservé aux administrateurs'}, status=status.HTTP_403_FORBIDDEN)
 
     queryset = LlmUsage.objects.select_related('utilisateur').all()
 
@@ -1032,23 +1047,23 @@ setattr(documents_search_view, 'ressource', 'documents')
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     """
-    ViewSet pour g├®rer les utilisateurs
+    ViewSet pour gérer les utilisateurs
     """
     queryset = Utilisateur.objects.all()
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'utilisateurs'
     
     def get_serializer_class(self):
-        """Utiliser un serializer diff├®rent pour la liste"""
+        """Utiliser un serializer différent pour la liste"""
         if self.action == 'list':
             return UtilisateurListSerializer
         return UtilisateurSerializer
     
     def get_queryset(self):
-        """Filtrer les utilisateurs selon les param├¿tres"""
+        """Filtrer les utilisateurs selon les paramètres"""
         queryset = Utilisateur.objects.all().order_by('prenom', 'nom')
         
-        # Filtrer par r├┤le
+        # Filtrer par rôle
         role = self.request.query_params.get('role', None)
         if role:
             queryset = queryset.filter(role=role)
@@ -1071,19 +1086,19 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
-        """Cr├®er un utilisateur et logger l'activit├®"""
+        """Créer un utilisateur et logger l'activité"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         utilisateur = serializer.save()
 
         return Response({
             'success': True,
-            'message': 'Utilisateur cr├®├® avec succ├¿s',
+            'message': 'Utilisateur créé avec succès',
             'utilisateur': UtilisateurListSerializer(utilisateur).data
         }, status=status.HTTP_201_CREATED)
     
     def update(self, request, *args, **kwargs):
-        """Mettre ├á jour un utilisateur et logger l'activit├®"""
+        """Mettre à jour un utilisateur et logger l'activité"""
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
@@ -1092,21 +1107,21 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
 
         return Response({
             'success': True,
-            'message': 'Profil mis ├á jour avec succ├¿s',
+            'message': 'Profil mis à jour avec succès',
             'utilisateur': UtilisateurListSerializer(utilisateur).data
         })
     
     def destroy(self, request, *args, **kwargs):
-        """Supprimer un utilisateur (soft delete recommand├®)"""
+        """Supprimer un utilisateur (soft delete recommandé)"""
         instance = self.get_object()
         
-        # Plut├┤t que de supprimer, on d├®sactive
+        # Plutôt que de supprimer, on désactive
         instance.est_actif = False
         instance.save()
 
         return Response({
             'success': True,
-            'message': 'Utilisateur d├®sactiv├® avec succ├¿s'
+            'message': 'Utilisateur désactivé avec succès'
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='change-password')
@@ -1124,9 +1139,9 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
             return Response({'erreur': 'Le nouveau mot de passe est requis.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if len(nouveau_mdp) < 8:
-            return Response({'erreur': 'Le nouveau mot de passe doit contenir au moins 8 caract├¿res.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'erreur': 'Le nouveau mot de passe doit contenir au moins 8 caractères.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Si l'administrateur modifie son propre mot de passe, l'ancien est requis par s├®curit├®
+        # Si l'administrateur modifie son propre mot de passe, l'ancien est requis par sécurité
         if str(request.user.id) == str(utilisateur.id):
             if not ancien_mdp:
                 return Response({'erreur': "Merci d'indiquer votre mot de passe actuel."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1136,21 +1151,21 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         utilisateur.set_password(nouveau_mdp)
         utilisateur.save(update_fields=['password'])
 
-        return Response({'success': True, 'message': 'Mot de passe modifi├® avec succ├¿s.'}, status=status.HTTP_200_OK)
+        return Response({'success': True, 'message': 'Mot de passe modifié avec succès.'}, status=status.HTTP_200_OK)
 
 
 class ClientViewSet(viewsets.ModelViewSet):
-    """ViewSet pour g├®rer les clients"""
+    """ViewSet pour gérer les clients"""
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'  # Les clients font partie de la gestion documentaire
 
-    # Pas de pagination c├┤t├® API pour permettre ├á lÔÇÖinterface de g├®rer sa propre pagination
+    # Pas de pagination côté API pour permettre à l'interface de gérer sa propre pagination
     pagination_class = None
 
     def get_serializer_class(self):
-        """Retourner une version l├®g├¿re si ?simple=1 est demand├® pour la liste."""
+        """Retourner une version légère si ?simple=1 est demandé pour la liste."""
         request = getattr(self, 'request', None)
         if self.action == 'list' and request is not None:
             simple = (request.query_params.get('simple') or '').lower()
@@ -1161,7 +1176,7 @@ class ClientViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Client.objects.all()
 
-        # Recherche plein texte sur le nom (param├¿tre ?search=)
+        # Recherche plein texte sur le nom (paramètre ?search=)
         search = (self.request.query_params.get('search') or '').strip()
         if search:
             queryset = queryset.filter(Q(nom__icontains=search) | Q(numero_client__icontains=search))
@@ -1171,7 +1186,7 @@ class ClientViewSet(viewsets.ModelViewSet):
         if type_param:
             queryset = queryset.filter(type=type_param)
 
-        # Respecter le param├¿tre dÔÇÖordering si fourni, sinon trier par nom
+        # Respecter le paramètre d'ordering si fourni, sinon trier par nom
         ordering = self.request.query_params.get('ordering') or None
         if ordering:
             queryset = queryset.order_by(ordering)
@@ -1182,7 +1197,7 @@ class ClientViewSet(viewsets.ModelViewSet):
 
 
 class ExerciceViewSet(viewsets.ModelViewSet):
-    """ViewSet pour g├®rer les exercices"""
+    """ViewSet pour gérer les exercices"""
     queryset = Exercice.objects.all()
     serializer_class = ExerciceSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
@@ -1190,7 +1205,7 @@ class ExerciceViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_serializer_class(self):
-        """Version l├®g├¿re pour les listes avec ?simple=1 (sans risques imbriqu├®s)."""
+        """Version légère pour les listes avec ?simple=1 (sans risques imbriqués)."""
         request = getattr(self, 'request', None)
         if self.action == 'list' and request is not None:
             simple = (request.query_params.get('simple') or '').lower()
@@ -1208,8 +1223,8 @@ class ExerciceViewSet(viewsets.ModelViewSet):
             except Client.DoesNotExist:
                 queryset = Exercice.objects.none()
             else:
-                # Cas sp├®cial flotte/groupe : pour une ENTREPRISE, inclure ├á la fois
-                # ses exercices propres et ceux de ses membres (particuliers rattach├®s).
+                # Cas spécial flotte/groupe : pour une ENTREPRISE, inclure à la fois
+                # ses exercices propres et ceux de ses membres (particuliers rattachés).
                 if client.type == 'ENTREPRISE':
                     queryset = queryset.filter(
                         Q(client=client) | Q(client__entreprise_parente=client)
@@ -1217,8 +1232,8 @@ class ExerciceViewSet(viewsets.ModelViewSet):
                 else:
                     queryset = queryset.filter(client=client)
 
-        # Pour les usages "simples" (recherche avanc├®e), permettre de limiter
-        # le nombre de r├®sultats via ?page_size=...
+        # Pour les usages "simples" (recherche avancée), permettre de limiter
+        # le nombre de résultats via ?page_size=...
         simple = (self.request.query_params.get('simple') or '').lower()
         page_size_param = self.request.query_params.get('page_size')
         if simple in ('1', 'true', 'yes') and page_size_param:
@@ -1233,14 +1248,14 @@ class ExerciceViewSet(viewsets.ModelViewSet):
 
 
 class RisqueViewSet(viewsets.ModelViewSet):
-    """ViewSet pour g├®rer les risques"""
+    """ViewSet pour gérer les risques"""
     queryset = Risque.objects.all()
     serializer_class = RisqueSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'
 
     def get_serializer_class(self):
-        """Version l├®g├¿re pour les listes avec ?simple=1 (type uniquement)."""
+        """Version légère pour les listes avec ?simple=1 (type uniquement)."""
         request = getattr(self, 'request', None)
         if self.action == 'list' and request is not None:
             simple = (request.query_params.get('simple') or '').lower()
@@ -1266,14 +1281,14 @@ class RisqueViewSet(viewsets.ModelViewSet):
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
-    """ViewSet pour g├®rer les documents"""
+    """ViewSet pour gérer les documents"""
     queryset = Document.objects.all()
     serializer_class = DocumentSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     ressource = 'documents'
     
     def get_queryset(self):
-        """Filtrer les documents selon les param├¿tres"""
+        """Filtrer les documents selon les paramètres"""
         queryset = Document.objects.select_related(
             'categorie',
             'auteur',
@@ -1296,7 +1311,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         if auteur_id:
             queryset = queryset.filter(auteur_id=auteur_id)
         
-        # Filtrer par statut archiv├®
+        # Filtrer par statut archivé
         est_archive = self.request.query_params.get('est_archive', None)
         if est_archive is not None:
             queryset = queryset.filter(est_archive=est_archive.lower() == 'true')
@@ -1338,7 +1353,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
 
 class DocumentUploadView(APIView):
-    """T├®l├®verser un document avec fichier"""
+    """Téléverser un document avec fichier"""
 
     permission_classes = [IsAuthenticated, RoleBasedPermission]
     parser_classes = (MultiPartParser, FormParser)
@@ -1379,7 +1394,7 @@ class DocumentUploadView(APIView):
                 date_document=date_document
             )
         except Exception:
-            logging.exception("Erreur lors de la cr├®ation du document")
+            logging.exception("Erreur lors de la création du document")
             default_storage.delete(chemin)
             raise
 
@@ -1401,7 +1416,7 @@ class DocumentUploadView(APIView):
 
 
 class AssistantConversationViewSet(viewsets.ModelViewSet):
-    """ViewSet pour g├®rer les conversations de l'assistant IA"""
+    """ViewSet pour gérer les conversations de l'assistant IA"""
 
     serializer_class = AssistantConversationSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
@@ -1419,7 +1434,7 @@ class AssistantConversationViewSet(viewsets.ModelViewSet):
 
 
 class AssistantMessageViewSet(viewsets.ModelViewSet):
-    """ViewSet pour g├®rer les messages de l'assistant IA"""
+    """ViewSet pour gérer les messages de l'assistant IA"""
 
     serializer_class = AssistantMessageSerializer
     permission_classes = [IsAuthenticated, RoleBasedPermission]
@@ -1439,11 +1454,11 @@ class AssistantMessageViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         conversation = serializer.validated_data.get('conversation')
         if conversation.utilisateur != self.request.user:
-            raise PermissionDenied("Vous ne pouvez pas ├®crire dans une conversation qui ne vous appartient pas.")
+            raise PermissionDenied("Vous ne pouvez pas écrire dans une conversation qui ne vous appartient pas.")
 
         message = serializer.save()
 
-        # 🆕 Si c'est un message utilisateur, générer une réponse avec contexte
+        # Si c'est un message utilisateur, générer une réponse avec contexte
         if message.role == 'USER':
             self.generate_assistant_response(message, conversation)
 
@@ -1489,24 +1504,10 @@ class AssistantMessageViewSet(viewsets.ModelViewSet):
                     }
                 )
             else:
-                # Pas de contexte, réponse intelligente
-                response_content = "Je n'ai pas de contexte documentaire. "
-                
-                # Détecter si l'utilisateur fait référence à un document spécifique
-                user_content = user_message.contenu.lower()
-                if any(phrase in user_content for phrase in ['3eme document', '3ème document', 'troisième document', 'document n°3']):
-                    response_content += "Je vois que vous parlez du 3ème document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche. Cela me permettra de sauvegarder le contexte et de vous donner une réponse pertinente."
-                elif any(phrase in user_content for phrase in ['premier document', '1er document', 'document n°1']):
-                    response_content += "Je vois que vous parlez du premier document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
-                elif any(phrase in user_content for phrase in ['deuxième document', '2eme document', 'document n°2']):
-                    response_content += "Je vois que vous parlez du deuxième document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
-                else:
-                    response_content += "Veuillez d'abord sélectionner un document en cliquant dessus dans les résultats de recherche. Cela me permettra de sauvegarder le contexte et de vous donner une réponse pertinente sur ce document spécifique."
-                
                 AssistantMessage.objects.create(
                     conversation=conversation,
                     role='ASSISTANT',
-                    contenu=response_content,
+                    contenu="Veuillez d'abord sélectionner un document en cliquant dessus dans les résultats de recherche pour que je puisse vous répondre précisément.",
                     metadata={'context_used': False, 'hint_given': True}
                 )
                 
@@ -1538,7 +1539,7 @@ def assistant_feedback(request):
     )
 
     if not qs.exists():
-        return Response({'detail': 'Aucun message correspondant ├á cet interactionId'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': 'Aucun message correspondant à cet interactionId'}, status=status.HTTP_404_NOT_FOUND)
 
     updated = 0
     for msg in qs:
@@ -1570,7 +1571,7 @@ def assistant_feedback(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def stats_view(request):
-    """Statistiques synth├®tiques pour le tableau de bord"""
+    """Statistiques synthétiques pour le tableau de bord"""
     total_documents = Document.objects.count()
     uploads_today = Document.objects.filter(cree_le__date=timezone.now().date()).count()
     total_clients = Client.objects.count()
@@ -1587,8 +1588,6 @@ def stats_view(request):
 setattr(stats_view, 'ressource', 'stats')
 
 
-from django.http import JsonResponse
-
 def assistant_valid_clients_view(request):
     """
     Retourne la liste des codes/noms de clients valides pour validation.
@@ -1599,7 +1598,7 @@ def assistant_valid_clients_view(request):
     - codes: Set de tous les identifiants valides (mots individuels) en majuscules
     - clients: Liste des noms complets de clients pour la recherche floue
     """
-    clients = Client.objects.all().values_list('nom', 'numeroClient')
+    clients = Client.objects.all().values_list('nom', 'numero_client')
     
     valid_codes = set()
     full_names = []
@@ -1662,8 +1661,8 @@ def ocr_quality_report_view(request):
     
     # Limiter aux documents PDF (ceux qui ont potentiellement besoin d'OCR)
     queryset = queryset.filter(
-        models.Q(type_fichier__icontains='pdf') | 
-        models.Q(chemin_fichier__iendswith='.pdf')
+        Q(type_fichier__icontains='pdf') | 
+        Q(chemin_fichier__iendswith='.pdf')
     )
     
     # Analyser les documents
@@ -1731,7 +1730,7 @@ setattr(ocr_quality_report_view, 'ressource', 'documents')
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def assistant_stats_view(request):
-    """Statistiques agr├®g├®es optimis├®es pour l'assistant IA"""
+    """Statistiques agrégées optimisées pour l'assistant IA"""
 
     base_queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
 
@@ -1791,9 +1790,9 @@ def assistant_stats_view(request):
     if total_documents:
         taux_conformite = max(0, min(1, (total_documents - documents_en_retard) / total_documents))
 
-    # Totaux de clients pour permettre ├á l'assistant de r├®pondre de mani├¿re
-    # fiable aux questions de type "combien de clients" sans deviner ├á
-    # partir d'un ├®chantillon de documents.
+    # Totaux de clients pour permettre à l'assistant de répondre de manière
+    # fiable aux questions de type "combien de clients" sans deviner à
+    # partir d'un échantillon de documents.
     total_clients = Client.objects.count()
     total_clients_particuliers = Client.objects.filter(type='PARTICULIER').count()
     total_clients_entreprises = Client.objects.filter(type='ENTREPRISE').count()
@@ -1838,12 +1837,16 @@ def _build_document_payload(document: Document, request=None) -> dict:
     if document.chemin_fichier:
         # Toujours retourner une URL relative /media/... pour que le frontend puisse l'utiliser
         chemin = str(document.chemin_fichier)
+        if chemin.startswith(('http://', 'https://')):
+            parsed = urlparse(chemin)
+            chemin = parsed.path or chemin
+
         if chemin.startswith('/media/'):
             fichier_url = chemin
         elif chemin.startswith('media/'):
             fichier_url = f'/{chemin}'
         else:
-            fichier_url = f'/media/{chemin}'
+            fichier_url = f"/media/{chemin.lstrip('/')}"
 
     # Récupérer le contenu OCR depuis les chunks si disponible
     contenu_complet = document.description or ''
@@ -1875,12 +1878,12 @@ def _build_document_payload(document: Document, request=None) -> dict:
 
 
 def _normalize_text(value: str) -> str:
-    """Normaliser une cha├«ne pour les recherches plein texte (accents, casse, espaces).
+    """Normaliser une chaîne pour les recherches plein texte (accents, casse, espaces).
 
-    Cette fonction est utilis├®e pour la recherche rapide afin de rendre robustes les
-    correspondances sur les noms de clients, ann├®es d'exercice, types de risques et
+    Cette fonction est utilisée pour la recherche rapide afin de rendre robustes les
+    correspondances sur les noms de clients, années d'exercice, types de risques et
     types de courrier, y compris lorsque l'utilisateur tape sans accents ou avec des
-    s├®parateurs diff├®rents.
+    séparateurs différents.
     """
     if value is None:
         return ""
@@ -2046,8 +2049,8 @@ def _build_document_metadata(payload: dict) -> dict:
         'client': payload.get('client'),
         'exercice': payload.get('exercice'),
         'risque': payload.get('risque'),
-        # Ne pas utiliser cree_le comme date_document : seule la date r├®elle (si renseign├®e)
-        # est conserv├®e, et l'ann├®e d'exercice sert de r├®f├®rence principale pour les recherches.
+        # Ne pas utiliser cree_le comme date_document : seule la date réelle (si renseignée)
+        # est conservée, et l'année d'exercice sert de référence principale pour les recherches.
         'date_document': payload.get('date_document'),
         'statut_archive': payload.get('est_archive'),
         'fichier_url': payload.get('fichier_url'),
@@ -2061,11 +2064,11 @@ def _build_document_highlights(metadata: dict) -> list[str]:
     if metadata.get('client'):
         highlights.append(f"Client : {metadata['client']}")
     if metadata.get('categorie'):
-        highlights.append(f"Cat├®gorie : {metadata['categorie']}")
+        highlights.append(f"Catégorie : {metadata['categorie']}")
     if metadata.get('type'):
         highlights.append(f"Type : {metadata['type']}")
     if metadata.get('reference'):
-        highlights.append(f"R├®f├®rence : {metadata['reference']}")
+        highlights.append(f"Référence : {metadata['reference']}")
     if metadata.get('date_document'):
         highlights.append(f"Date : {metadata['date_document'][:10]}")
     return highlights
@@ -2078,14 +2081,14 @@ def _build_document_content(payload: dict, metadata: dict) -> str:
     if metadata.get('client'):
         lignes.append(f"Client : {metadata['client']}")
     if metadata.get('reference'):
-        lignes.append(f"R├®f├®rence : {metadata['reference']}")
+        lignes.append(f"Référence : {metadata['reference']}")
     if metadata.get('type'):
         lignes.append(f"Type de courrier : {metadata['type']}")
     if metadata.get('categorie'):
-        lignes.append(f"Cat├®gorie : {metadata['categorie']}")
+        lignes.append(f"Catégorie : {metadata['categorie']}")
     if metadata.get('date_document'):
         lignes.append(f"Date : {metadata['date_document'][:10]}")
-    return '\n'.join(lignes) or 'Informations limit├®es sur ce document.'
+    return '\n'.join(lignes) or 'Informations limitées sur ce document.'
 
 
 def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = False) -> dict:
@@ -2112,7 +2115,7 @@ def _build_assistant_result(payload: dict, score: float, *, is_fallback: bool = 
         'metadata': metadata,
         'highlights': highlights,
         'content': content,
-        'document_context': document_context,  # ← NOUVEAU
+        'document_context': document_context,  # 
     }
 
 
@@ -2255,7 +2258,7 @@ setattr(assistant_document_search_faiss_view, 'ressource', 'documents')
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def document_search_view(request):
-    """Recherche simplifi├®e de documents"""
+    """Recherche simplifiée de documents"""
     terme = (request.query_params.get('q') or '').strip()
     limite = int(request.query_params.get('limit') or 10)
 
@@ -2302,7 +2305,6 @@ def assistant_document_search_by_reference_view(request):
         return Response({'resultats': [], 'message': 'Paramètre reference requis'})
 
     # Normaliser la référence: extraire le numéro et chercher avec différents formats
-    import re
     # Extraire le numéro de la référence (ex: "N°96" -> "96", "N96" -> "96", "96" -> "96")
     numero_match = re.search(r'(\d+)', reference_param)
     if not numero_match:
@@ -2328,7 +2330,6 @@ def assistant_document_search_by_reference_view(request):
         ])
 
     # Construire la requête avec OR sur tous les formats
-    from django.db.models import Q
     query = Q()
     for fmt in formats_reference:
         # Certains documents ont reference NULL mais contiennent le N° dans le titre
@@ -2418,8 +2419,6 @@ def assistant_document_search_filtered_view(request):
 
     # Filtre par risque (type) - robuste aux variantes (casse/accents/typos)
     if risque_filter:
-        import re
-        import unicodedata
 
         def _norm(s: str) -> str:
             s = (s or '').strip().lower().replace('_', ' ')
@@ -2512,7 +2511,6 @@ def assistant_document_search_filtered_view(request):
 
     # Si une requête textuelle est fournie, filtrer aussi par titre (tokenisation)
     if query:
-        import re
         stopwords = {
             'de', 'du', 'des', 'd', 'la', 'le', 'les', 'un', 'une', 'et', 'ou',
             'client', 'risque', 'annee', 'année', 'exercice', 'type', 'document',
@@ -2592,9 +2590,11 @@ def assistant_semantic_search_view(request):
     if not query:
         return Response({'error': 'La requête est vide'}, status=status.HTTP_400_BAD_REQUEST)
 
+    include_fallback = str(request.data.get('include_fallback', 'false')).lower() == 'true'
+
     # Récupération des paramètres de filtre et de limitation
     client_filter = request.data.get('client')
-    exercice_filter = request.data.get('exercise')
+    exercice_filter = request.data.get('exercice')
     risque_filter = request.data.get('risque')
     top_k = min(int(request.data.get('top_k', 5)), 20)  # Limiter à 20 résultats max
     max_docs = min(int(request.data.get('max_docs', 100)), 500)  # Limiter à 500 documents max
@@ -2612,11 +2612,11 @@ def assistant_semantic_search_view(request):
     )   
 
     # Filtres optionnels pour affiner la recherche
-    # Construire la requ├¬te avec filtres
+    # Construire la requête avec filtres
     queryset = Document.objects.select_related('categorie', 'risque__exercice__client')
     
     if client_filter:
-        # Le client peut ├¬tre identifi├® par son nom ou son numero_client
+        # Le client peut être identifié par son nom ou son numero_client
         queryset = queryset.filter(
             Q(risque__exercice__client__nom__iexact=client_filter) |
             Q(risque__exercice__client__numero_client__iexact=client_filter)
@@ -2632,7 +2632,7 @@ def assistant_semantic_search_view(request):
             pass
     
     if risque_filter:
-        # Le risque est identifi├® par son type
+        # Le risque est identifié par son type
         queryset = queryset.filter(risque__type__icontains=risque_filter)
         logging.info(f"Filtre risque: {risque_filter}")
     
@@ -2783,7 +2783,7 @@ def assistant_semantic_search_view(request):
             )
         )
     except Exception:
-        logging.exception("Erreur lors de la r├®cup├®ration des chunks pour la recherche TF-IDF")
+        logging.exception("Erreur lors de la récupération des chunks pour la recherche TF-IDF")
         chunks = []
 
     if chunks:
@@ -2823,8 +2823,8 @@ def assistant_semantic_search_view(request):
 
     indexed_scores = list(enumerate(scores.tolist()))
 
-    # Agr├®ger les scores au niveau du document pour ├®viter de renvoyer plusieurs
-    # fois le m├¬me document lorsque plusieurs chunks sont pertinents.
+    # Agréger les scores au niveau du document pour éviter de renvoyer plusieurs
+    # fois le même document lorsque plusieurs chunks sont pertinents.
     doc_best = {}
     for idx, score in indexed_scores:
         if score <= 0:
@@ -2837,10 +2837,10 @@ def assistant_semantic_search_view(request):
             continue
         current = doc_best.get(doc_id)
         if current is None or score > current[0]:
-            # Conserver le meilleur chunk (score le plus ├®lev├®) pour chaque document
+            # Conserver le meilleur chunk (score le plus élevé) pour chaque document
             doc_best[doc_id] = (score, payload)
 
-    # Trier les documents par score d├®croissant (meilleur chunk en premier)
+    # Trier les documents par score décroissant (meilleur chunk en premier)
     sorted_docs = sorted(doc_best.items(), key=lambda item: item[1][0], reverse=True)
 
     results = []
@@ -2849,7 +2849,7 @@ def assistant_semantic_search_view(request):
         result['search_method'] = 'tfidf'
         results.append(result)
 
-    # Fallback document si aucun r├®sultat
+    # Fallback document si aucun résultat
     if include_fallback and not results:
         fallback_document = Document.objects.select_related('categorie', 'risque__exercice__client').order_by('-cree_le').first()
         if fallback_document:
@@ -2879,7 +2879,7 @@ def assistant_semantic_search_view(request):
                 apercu,
             )
         except Exception as log_error:
-            logging.error("Erreur lors du logging des r├®sultats TF-IDF: %s", log_error)
+            logging.error("Erreur lors du logging des résultats TF-IDF: %s", log_error)
 
     return Response({'results': results, 'method': 'tfidf' if results else 'none'})
 
@@ -3030,21 +3030,10 @@ def assistant_chat_view(request):
                     })
             
         else:
-            # Pas de contexte documentaire
-            user_content = question.lower()
-            response_content = "Je n'ai pas de contexte documentaire. "
-            
-            if any(phrase in user_content for phrase in ['3eme document', '3ème document', 'troisième document', 'document n°3']):
-                response_content += "Je vois que vous parlez du 3ème document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
-            elif any(phrase in user_content for phrase in ['premier document', '1er document', 'document n°1']):
-                response_content += "Je vois que vous parlez du premier document. Pour que je puisse l'analyser précisément, veuillez cliquer sur ce document dans les résultats de recherche."
-            else:
-                response_content += "Veuillez d'abord sélectionner un document en cliquant dessus dans les résultats de recherche."
-            
             assistant_message = AssistantMessage.objects.create(
                 conversation=conversation,
                 role='ASSISTANT',
-                contenu=response_content,
+                contenu="Veuillez d'abord sélectionner un document en cliquant dessus dans les résultats de recherche pour que je puisse vous répondre précisément.",
                 metadata={'context_used': False}
             )
             

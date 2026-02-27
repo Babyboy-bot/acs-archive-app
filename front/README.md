@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-L’interface est accessible sur http://localhost:3000
+L’interface est accessible sur http://localhost:5000
 
 ## Structure
 

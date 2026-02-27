@@ -838,7 +838,6 @@ async function callMistral(
   // Ajouter la question actuelle
   messages.push({ role: 'user', content: prompt })
 
-  console.log(`=== MISTRAL: ${messages.length} messages dans la conversation ===`)
 
   let response: Response | undefined = undefined
   let lastError: any = null
@@ -952,7 +951,6 @@ async function callMistral(
 
 export async function generateLlmAnswer(payload: LlmPayload): Promise<LlmResult> {
   if (!isLlmConfigured()) {
-    console.log('=== LLM ERROR: LLM non configuré ===')
     throw new Error('LLM non configuré')
   }
 
@@ -972,7 +970,6 @@ export async function generateLlmAnswer(payload: LlmPayload): Promise<LlmResult>
     ? getConversationHistory(payload.sessionId).map(m => ({ role: m.role, content: m.content }))
     : []
 
-  console.log(`=== LLM INFO: Provider = ${PROVIDER}, Historique = ${conversationHistory.length} messages ===`)
 
   const basePrompt = buildPrompt(payload)
   const prompt = isFactual ? basePrompt : enrichPromptWithLearning(basePrompt, payload.question)
@@ -980,7 +977,6 @@ export async function generateLlmAnswer(payload: LlmPayload): Promise<LlmResult>
   const complexity = estimateComplexity(payload)
   const useAdvancedModel = complexity > COMPLEXITY_THRESHOLD
 
-  console.log(`=== MISTRAL: Complexité ${complexity}, modèle ${useAdvancedModel ? MISTRAL_MODEL_ADVANCED : MISTRAL_MODEL_DEFAULT} ===`)
 
   const result = await callMistral(prompt, useAdvancedModel, conversationHistory, {
     historyLimit,
@@ -1220,7 +1216,6 @@ Classifie cette requête en JSON:`
     
     // Si confiance < seuil d'utilisation LLM, retourner null pour fallback regex
     if (confidenceGlobale < SEUILS_CONFIANCE.UTILISER_LLM) {
-      console.log(`=== Classification LLM: confiance trop basse (${confidenceGlobale}) → fallback regex ===`)
       return null
     }
 
@@ -1239,18 +1234,12 @@ Classifie cette requête en JSON:`
     }
 
     // Log pour debug
-    console.log(`=== Classification LLM (${durationMs}ms) ===`)
-    console.log(`  Question: "${question.substring(0, 50)}..."`)
-    console.log(`  Intention: ${parsed.intention} (confiance: ${confidenceGlobale})`)
     if (parsed.action) console.log(`  Action: ${parsed.action}`)
     if (parsed.index_document !== null && parsed.index_document !== undefined) {
-      console.log(`  Index document: ${parsed.index_document}`)
     }
     if (criteres) {
-      console.log(`  Critères: client=${criteres.client}, annee=${criteres.annee}, type=${criteres.type_document}, risque=${criteres.risque} (confiance: ${criteres.confiance_criteres})`)
     }
     if (needsClarification) {
-      console.log(`  ⚠️ Confiance basse → demander clarification`)
     }
 
     return {

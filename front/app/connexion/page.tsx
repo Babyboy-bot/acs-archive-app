@@ -3,8 +3,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
 import { Icon } from '@/components/Icon'
+
 import { motion, useMotionValue, useSpring, useTransform, useAnimation } from 'framer-motion'
 import { apiFetchJson } from '@/lib/api'
 import { enregistrerSession } from '@/lib/session'
@@ -277,14 +277,7 @@ export default function PageConnexion() {
               >
                 <div className="pointer-events-none absolute -inset-10 rounded-[999px] bg-[radial-gradient(ellipse_at_center,rgba(15,23,42,0.78),transparent_78%)] opacity-85" />
                 <div className="relative">
-                  <Image
-                    src="/acs-logo.svg"
-                    alt="ACS Logo"
-                    width={200}
-                    height={80}
-                    className="brightness-0 invert mb-8"
-                    priority
-                  />
+                  <img src="/acs-logo.svg" alt="ACS Logo" width={200} height={80} className="mb-8" />
                   <h2 className="text-5xl font-bold text-white mb-6 leading-tight tracking-tight">
                     Future of <br />
                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-400">

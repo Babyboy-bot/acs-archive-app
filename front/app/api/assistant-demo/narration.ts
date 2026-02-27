@@ -1,12 +1,11 @@
 /**
- * 📝 Module de génération de narration pour l'assistant
- * - Construction des réponses textuelles
- * - Tons de réponse (amical, formel, concis, premium)
- * - Insights et actions sur les documents
+ * Module de génération de narration pour l'assistant
+ * Source unique de vérité pour : TONES, insights, actions, narration
  */
 
 import type { DocumentPiece, Statistiques } from './types'
 import type { CriteresRecherche } from './criteria'
+import { extraireClientMentionne } from './api-client'
 
 // ============================================================================
 // CONFIGURATION DES TONS
@@ -48,101 +47,9 @@ export type ToneName = keyof typeof TONES
 const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000
 
 // ============================================================================
-// GÉNÉRATION DE NARRATION
+// INSIGHTS ET ACTIONS - DOCUMENTS
 // ============================================================================
 
-/**
- * Génère une narration simple et directe pour les résultats de recherche
- */
-export function genererNarrationSimple(
-  pieces: DocumentPiece[], 
-  criteres: CriteresRecherche,
-  contexte: { client?: string | null; annee?: string | null; risque?: string | null }
-): string {
-  const nbPieces = pieces.length
-  const client = criteres.client || contexte.client
-  const annee = criteres.annee || contexte.annee
-  const type = criteres.typeDocument
-  const risque = criteres.risque || contexte.risque
-  
-  // Construire une description des critères
-  const parties: string[] = []
-  if (type) parties.push(type)
-  if (annee) parties.push(`de ${annee}`)
-  if (client) parties.push(`pour ${client}`)
-  if (risque) parties.push(`risque ${risque}`)
-  
-  const description = parties.length > 0 ? parties.join(' ') : 'correspondant à ta recherche'
-  
-  if (nbPieces === 0) {
-    return `Je n'ai pas trouvé de document ${description} dans les archives.`
-  } else if (nbPieces === 1) {
-    return `J'ai trouvé 1 document ${description}. Le voici ci-dessous.`
-  } else {
-    return `J'ai trouvé ${nbPieces} documents ${description}. Les voici ci-dessous.`
-  }
-}
-
-/**
- * Construit une narration heuristique basée sur l'intention et le résumé
- */
-export function construireNarrationHeuristique(
-  intent: 'documents' | 'statistiques',
-  resume: string,
-  insights?: string[],
-  actions?: string[]
-): string {
-  // Pour les documents, le résumé est déjà rédigé dans un ton conversationnel
-  if (intent === 'documents') {
-    return resume
-  }
-
-  // Pour les statistiques, créer une réponse plus humaine et engageante
-  let reponse = resume
-  
-  // Ajouter une analyse personnalisée basée sur les insights
-  if (insights && insights.length) {
-    const insightText = insights[0]
-    if (!resume.includes(insightText)) {
-      reponse += `\n\nJ'ai également remarqué que ${insightText.charAt(0).toLowerCase()}${insightText.slice(1)}`
-    }
-  }
-  
-  // Ajouter une recommandation basée sur les actions
-  if (actions && actions.length) {
-    const actionText = actions[0]
-    if (actionText.includes('Maintenir la surveillance')) {
-      reponse += `\n\nTout semble bien se passer avec votre archivage. Je vous suggère simplement de maintenir votre rigueur actuelle.`
-    } else if (actionText.includes('Prioriser')) {
-      reponse += `\n\nJe vous recommande de prioriser la mise à jour des documents en retard pour améliorer votre taux de conformité.`
-    } else if (actionText.includes('Planifier une revue')) {
-      reponse += `\n\nIl serait judicieux de planifier une revue des documents approchant de leur date de péremption.`
-    } else if (!resume.includes(actionText)) {
-      reponse += `\n\n${actionText}`
-    }
-  }
-
-  // Ajouter une conclusion personnalisée
-  const conclusions = [
-    "Souhaitez-vous que j'analyse plus en détail un aspect particulier de ces statistiques ?",
-    "Y a-t-il un point spécifique sur lequel vous aimeriez que je me concentre davantage ?",
-    "Je peux vous aider à approfondir n'importe quel aspect de ces données si vous le souhaitez.",
-    "N'hésitez pas à me demander plus de détails sur un point qui vous intéresse particulièrement."
-  ]
-  
-  const conclusion = conclusions[Math.floor(Math.random() * conclusions.length)]
-  reponse += `\n\n${conclusion}`
-
-  return reponse
-}
-
-// ============================================================================
-// INSIGHTS ET ACTIONS SUR LES DOCUMENTS
-// ============================================================================
-
-/**
- * Construit des insights sur les documents trouvés
- */
 export function construireInsightsDocuments(pieces: DocumentPiece[]): string[] {
   if (!pieces.length) {
     return []
@@ -170,9 +77,6 @@ export function construireInsightsDocuments(pieces: DocumentPiece[]): string[] {
   return insights
 }
 
-/**
- * Construit des actions recommandées sur les documents
- */
 export function construireActionsDocuments(pieces: DocumentPiece[]): string[] {
   if (!pieces.length) {
     return []
@@ -214,75 +118,152 @@ export function construireActionsDocuments(pieces: DocumentPiece[]): string[] {
   return actions
 }
 
-/**
- * Génère des suggestions intelligentes basées sur le contexte de recherche
- */
-export function genererSuggestionsIntelligentes(
-  pieces: DocumentPiece[],
+// ============================================================================
+// NARRATION
+// ============================================================================
+
+export function construireNarrationHeuristique(
+  intent: 'documents' | 'statistiques',
+  resume: string,
+  insights?: string[],
+  actions?: string[]
+): string {
+  if (intent === 'documents') {
+    return resume
+  }
+
+  let reponse = resume
+  
+  if (insights && insights.length) {
+    const insightText = insights[0]
+    if (!resume.includes(insightText)) {
+      reponse += `\n\nJ'ai également remarqué que ${insightText.charAt(0).toLowerCase()}${insightText.slice(1)}`
+    }
+  }
+  
+  if (actions && actions.length) {
+    const actionText = actions[0]
+    if (actionText.includes('Maintenir la surveillance')) {
+      reponse += `\n\nTout semble bien se passer avec votre archivage. Je vous suggère simplement de maintenir votre rigueur actuelle.`
+    } else if (actionText.includes('Prioriser')) {
+      reponse += `\n\nJe vous recommande de prioriser la mise à jour des documents en retard pour améliorer votre taux de conformité.`
+    } else if (actionText.includes('Planifier une revue')) {
+      reponse += `\n\nIl serait judicieux de planifier une revue des documents approchant de leur date de péremption.`
+    } else if (!resume.includes(actionText)) {
+      reponse += `\n\n${actionText}`
+    }
+  }
+
+  const conclusions = [
+    "Souhaitez-vous que j'analyse plus en détail un aspect particulier de ces statistiques ?",
+    "Y a-t-il un point spécifique sur lequel vous aimeriez que je me concentre davantage ?",
+    "Je peux vous aider à approfondir n'importe quel aspect de ces données si vous le souhaitez.",
+    "N'hésitez pas à me demander plus de détails sur un point qui vous intéresse particulièrement."
+  ]
+  
+  const conclusion = conclusions[Math.floor(Math.random() * conclusions.length)]
+  reponse += `\n\n${conclusion}`
+
+  return reponse
+}
+
+export function genererNarrationSimple(
+  pieces: DocumentPiece[], 
   criteres: CriteresRecherche,
   contexte: { client?: string | null; annee?: string | null; risque?: string | null }
-): string[] {
-  const suggestions: string[] = []
+): string {
+  const nbPieces = pieces.length
+  const client = criteres.client || contexte.client
+  const annee = criteres.annee || contexte.annee
+  const type = criteres.typeDocument
+  const risque = criteres.risque || contexte.risque
   
-  // Si on a trouvé des documents d'un client, proposer d'autres types de documents
-  if (contexte.client && pieces.length > 0) {
-    const typesPresents = new Set(pieces.map(p => p.metadata?.type_document).filter(Boolean))
-    const typesSuggeres = ['facture', 'avenant', 'contrat', 'sinistre', 'attestation']
-    
-    for (const type of typesSuggeres) {
-      if (!typesPresents.has(type) && suggestions.length < 3) {
-        suggestions.push(`Voir les ${type}s de ${contexte.client}`)
-      }
-    }
+  const parties: string[] = []
+  if (type) parties.push(type)
+  if (annee) parties.push(`de ${annee}`)
+  if (client) parties.push(`pour ${client}`)
+  if (risque) parties.push(`risque ${risque}`)
+  
+  const description = parties.length > 0 ? parties.join(' ') : 'correspondant à ta recherche'
+  
+  if (nbPieces === 0) {
+    return `Je n'ai pas trouvé de document ${description} dans les archives.`
+  } else if (nbPieces === 1) {
+    return `J'ai trouvé 1 document ${description}. Le voici ci-dessous.`
+  } else {
+    return `J'ai trouvé ${nbPieces} documents ${description}. Les voici ci-dessous.`
   }
-  
-  // Si on a une année, proposer les années adjacentes
-  if (contexte.annee && pieces.length > 0) {
-    const anneeNum = parseInt(contexte.annee, 10)
-    if (!isNaN(anneeNum)) {
-      const anneePrecedente = anneeNum - 1
-      const anneeSuivante = anneeNum + 1
-      const currentYear = new Date().getFullYear()
-      
-      if (anneePrecedente >= 2010 && suggestions.length < 4) {
-        suggestions.push(`Voir les documents de ${anneePrecedente}`)
-      }
-      if (anneeSuivante <= currentYear && suggestions.length < 4) {
-        suggestions.push(`Voir les documents de ${anneeSuivante}`)
-      }
-    }
-  }
-  
-  // Si aucun document trouvé, proposer des alternatives
-  if (pieces.length === 0) {
-    if (contexte.client) {
-      suggestions.push(`Voir tous les documents de ${contexte.client}`)
-    }
-    suggestions.push("Voir les derniers documents ajoutés")
-    suggestions.push("Afficher les statistiques générales")
-  }
-  
-  // Toujours proposer une action de recherche élargie si on a des résultats limités
-  if (pieces.length > 0 && pieces.length < 5 && contexte.client) {
-    suggestions.push(`Voir tous les documents de ${contexte.client}`)
-  }
-  
-  return suggestions.slice(0, 4)
 }
 
 // ============================================================================
-// INSIGHTS ET ACTIONS SUR LES STATISTIQUES
+// INSIGHTS ET ACTIONS - STATISTIQUES
 // ============================================================================
 
-/**
- * Construit des insights sur les statistiques
- */
+export function construireResumeStatistiques(statistiques: Statistiques): string {
+  const introductions = [
+    "Voici un aperçu de vos archives actuelles :",
+    "J'ai analysé vos documents et voici ce que j'ai trouvé :",
+    "Après analyse de votre base documentaire, voici les points importants :",
+    "Voici le bilan actuel de vos archives :"
+  ]
+  
+  const intro = introductions[Math.floor(Math.random() * introductions.length)]
+  let resume = intro
+  
+  const totalDocuments = Object.values(statistiques.documents_par_mois ?? {}).reduce(
+    (acc, valeur) => acc + (valeur ?? 0),
+    0,
+  )
+  if (totalDocuments > 0) {
+    resume += `\n\nAu total, vous avez actuellement ${totalDocuments} document${totalDocuments > 1 ? 's' : ''} archivés dans ACS.`;
+  }
+
+  if (statistiques.kpi) {
+    const tauxPct = (statistiques.kpi.taux_conformite * 100).toFixed(1)
+    const retards = statistiques.kpi.documents_en_retard
+    const peremptions = statistiques.kpi.alertes_peremption
+    
+    if (retards === 0 && peremptions === 0) {
+      resume += `\n\nBonne nouvelle ! Votre taux de conformité est excellent (${tauxPct}%), sans aucun document en retard ni alerte de péremption. Tout est parfaitement en ordre.`;
+    } else if (retards === 0) {
+      resume += `\n\nVotre taux de conformité est très bon (${tauxPct}%). Vous n'avez aucun document en retard, mais ${peremptions} document${peremptions > 1 ? 's' : ''} approchent de la péremption.`;
+    } else if (peremptions === 0) {
+      resume += `\n\nVotre taux de conformité est de ${tauxPct}%. Vous avez ${retards} document${retards > 1 ? 's' : ''} en retard, mais aucune alerte de péremption.`;
+    } else {
+      resume += `\n\nVotre taux de conformité est de ${tauxPct}%. J'ai identifié ${retards} document${retards > 1 ? 's' : ''} en retard et ${peremptions} alerte${peremptions > 1 ? 's' : ''} de péremption.`;
+    }
+  }
+
+  if (statistiques.top_clients?.length) {
+    const topClients = statistiques.top_clients.slice(0, 3)
+    
+    if (topClients.length === 1) {
+      resume += `\n\nLe client ${topClients[0].client} se démarque avec ${topClients[0].compte} document${topClients[0].compte > 1 ? 's' : ''} archivé${topClients[0].compte > 1 ? 's' : ''}.`;
+    } else {
+      const formatted = topClients
+        .map((client, index) => {
+          if (index === topClients.length - 1) {
+            return `et ${client.client} (${client.compte})`
+          }
+          return `${client.client} (${client.compte})`
+        })
+        .join(', ')
+      resume += `\n\nVos principaux clients en volume d'archives sont ${formatted}.`
+    }
+  }
+
+  if (resume === intro) {
+    return "Je n'ai pas encore assez de données pour vous fournir des statistiques pertinentes. N'hésitez pas à ajouter des documents pour obtenir une analyse plus complète."
+  }
+
+  return resume
+}
+
 export function construireInsightsStatistiques(statistiques: Statistiques): string[] {
   const insights: string[] = []
 
-  const topClients = statistiques.top_clients ?? []
-  if (topClients.length > 0) {
-    const premiers = topClients
+  if (statistiques.top_clients?.length) {
+    const premiers = statistiques.top_clients
       .slice(0, 3)
       .map((client) => `${client.client} (${client.compte})`)
       .join(', ')
@@ -303,9 +284,6 @@ export function construireInsightsStatistiques(statistiques: Statistiques): stri
   return insights
 }
 
-/**
- * Construit des actions recommandées sur les statistiques
- */
 export function construireActionsStatistiques(statistiques: Statistiques): string[] {
   const actions: string[] = []
 
@@ -330,63 +308,114 @@ export function construireActionsStatistiques(statistiques: Statistiques): strin
 }
 
 // ============================================================================
-// RÉSUMÉS
+// RÉSUMÉ DOCUMENTS
 // ============================================================================
 
-/**
- * Construit un résumé des documents trouvés
- */
-export function construireResumeDocuments(
-  pieces: DocumentPiece[],
-  tone: ToneName = 'amical'
-): string {
+export function construireResumeDocuments(_question: string, pieces: DocumentPiece[], tone: 'amical' | 'formel' | 'concis' | 'premium' = 'amical'): string {
   const toneConfig = TONES[tone]
   
-  if (pieces.length === 0) {
+  const clientMentionne = extraireClientMentionne(_question)
+  
+  if (!pieces || pieces.length === 0) {
+    if (clientMentionne) {
+      return `Je n'ai trouvé aucun document pour le client ${clientMentionne} dans les archives.\n\nEs-tu sûr du code client ? Sinon, essaie avec d'autres critères de recherche.`
+    }
     return toneConfig.noResults
   }
-  
-  return toneConfig.intro(pieces.length) + toneConfig.conclusion
-}
 
-/**
- * Construit un résumé des statistiques
- */
-export function construireResumeStatistiques(statistiques: Statistiques): string {
-  // Calculer le total des documents depuis documents_par_mois
-  const documentsParMois = statistiques.documents_par_mois ?? {}
-  const total = Object.values(documentsParMois).reduce((sum, count) => sum + count, 0)
-  const totalClients = statistiques.totaux_clients?.total ?? 0
-  
-  let resume = `Actuellement, l'application ACS contient ${total} document${total > 1 ? 's' : ''} archivé${total > 1 ? 's' : ''}.`
-  
-  if (totalClients > 0) {
-    resume += ` La base compte ${totalClients} client${totalClients > 1 ? 's' : ''}.`
+  const premiere = pieces[0]
+  const metadata = premiere.metadata ?? {}
+  const nbDocs = pieces.length
+
+  const normalizedQuestion = _question
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+
+  const demandeListeComplete =
+    normalizedQuestion.includes('tous les documents') ||
+    normalizedQuestion.includes('tout les documents') ||
+    normalizedQuestion.includes('liste moi tous les documents') ||
+    normalizedQuestion.includes('liste tous les documents')
+
+  let reponse: string
+  if (demandeListeComplete) {
+    const clientNom = (metadata.client as string | undefined) || 'ce client'
+    if (nbDocs === 1) {
+      reponse = `Tu m'as demandé la liste des documents pour le client ${clientNom}. La liste complète serait trop longue à afficher en une seule fois, donc je te montre le document suivant.`
+    } else {
+      reponse = `Tu m'as demandé la liste des documents pour le client ${clientNom}. La liste complète serait trop longue à afficher en une seule fois, donc je te montre ici ${nbDocs} documents parmi les plus pertinents ou les plus récents.`
+    }
+  } else {
+    reponse = nbDocs === 1
+      ? "J'ai retrouvé un document qui pourrait vous être utile."
+      : `J'ai retrouvé ${nbDocs} documents qui pourraient vous être utiles.`
   }
-  
-  return resume
-}
+  reponse += "\n\n"
 
-// ============================================================================
-// UTILITAIRES
-// ============================================================================
-
-/**
- * Vérifie si une réponse LLM est un "filler" (réponse vide ou générique)
- */
-export function estReponseLlmFiller(content: string): boolean {
-  const trimmed = content.trim()
-  if (!trimmed) return true
-
-  if (trimmed.length < 120) {
-    const fillers = [
-      /je vais (t'|te |vous )?(expliquer|te dire|repondre)/i,
-      /laisse[- ]moi (t'|te |vous )?expliquer/i,
-      /voici (ce que|comment)/i,
-      /en (gros|resume|clair)/i,
-    ]
-    if (fillers.some((p) => p.test(trimmed))) return true
+  let emoji = ''
+  const type = (metadata.type as string)?.toLowerCase() || ''
+  if (toneConfig.useEmojis) {
+    if (type.includes('sinistre')) emoji = '🚨 '
+    else if (type.includes('contrat')) emoji = '📄 '
+    else if (type.includes('facture')) emoji = '🧾 '
+    else if (type.includes('rapport')) emoji = '📊 '
+    else if (type.includes('courrier')) emoji = '✉️ '
+    else emoji = '📎 '
   }
 
-  return false
+  const titre = metadata.titre || 'Document';
+  reponse += `${emoji}${titre}\n`;
+
+  if (metadata.client) reponse += `Client : ${metadata.client}\n`;
+  if (metadata.type) reponse += `Type : ${metadata.type}\n`;
+  if (metadata.date_document) {
+    const date = new Date(metadata.date_document as string);
+    if (!isNaN(date.getTime())) reponse += `Date : ${date.toLocaleDateString('fr-FR')}\n`;
+  }
+  if (metadata.reference) reponse += `Référence : ${metadata.reference}\n`;
+
+  const contenu = premiere.content || '';
+  if (contenu.length > 50) {
+    const montantMatch = contenu.match(/\d+[\s\u00A0]?(?:\d{3}[\s\u00A0]?)*[€$¢]|montant[:\s]+\d+/i);
+    const statutMatch = contenu.match(/(?:statut|état|status)[:\s]+([^\n.]+)|(?:en cours|traité|validé|en attente|clos)/i);
+    const details: string[] = [];
+    if (montantMatch) details.push(montantMatch[0]);
+    if (statutMatch) {
+      const statut = statutMatch[1] || statutMatch[0];
+      details.push(statut.trim());
+    }
+    if (details.length > 0) {
+      reponse += `\nRésumé : ${details.join('. ')}.`;
+    } else {
+      const lignes = contenu.split('\n').map(l => l.trim()).filter(l => l.length > 10 && l.length < 150).slice(0, 2);
+      if (lignes.length > 0) reponse += `\nRésumé : ${lignes.join(' ')}`;
+    }
+  }
+
+  if (nbDocs > 1) {
+    const clientPremierDoc = (metadata.client as string)?.toUpperCase()
+    const autresClients = new Set(
+      pieces.slice(1)
+        .map(p => (p.metadata?.client as string)?.toUpperCase())
+        .filter(Boolean)
+    );
+    
+    if (clientMentionne && autresClients.size === 1 && Array.from(autresClients)[0] === clientMentionne) {
+      reponse += `\n\nTous ces documents concernent le client ${clientMentionne}.`;
+    } else if (autresClients.size === 1 && Array.from(autresClients)[0] === clientPremierDoc) {
+      reponse += `\n\nTous ces documents concernent le client ${clientPremierDoc}.`;
+    } else if (autresClients.size === 1) {
+      reponse += `\n\nLes autres documents sont liés au client ${Array.from(autresClients)[0]}.`;
+    } else if (autresClients.size > 1) {
+      reponse += `\n\nLes autres documents concernent : ${Array.from(autresClients).join(', ')}.`;
+    } else {
+      reponse += `\n\n${nbDocs - 1} autre${nbDocs > 2 ? 's' : ''} document${nbDocs > 2 ? 's' : ''} disponible${nbDocs > 2 ? 's' : ''}.`;
+    }
+  }
+
+  reponse += '\n\nVous pouvez les consulter ou les télécharger à tout moment.';
+  reponse += "\n\nSi vous avez besoin d'aide pour un autre document ou pour une recherche, je suis là pour vous aider !";
+  return reponse;
 }

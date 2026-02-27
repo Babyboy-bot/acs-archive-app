@@ -38,8 +38,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Vérifier la présence du cookie access_token
-  const accessToken = request.cookies.get('access_token')?.value
+  const accessTokenName = process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME || 'acs_access_token'
+  const accessToken = request.cookies.get(accessTokenName)?.value
 
   if (!accessToken) {
     // Pas de token = rediriger vers la page de connexion

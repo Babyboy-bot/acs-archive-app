@@ -147,7 +147,7 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Media files
-MEDIA_URL = 'media/'
+MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
@@ -217,8 +217,6 @@ SIMPLE_JWT = {
     # Configuration des cookies pour JWT
     'AUTH_COOKIE': 'acs_access_token',  # Nom unique pour ACS Archive
     'REFRESH_COOKIE': 'acs_refresh_token',  # Nom unique pour ACS Archive
-    'AUTH_COOKIE_DOMAIN': 'acs.localhost',  # Domaine spécifique
-    'REFRESH_COOKIE_DOMAIN': 'acs.localhost',
     'AUTH_COOKIE_PATH': '/',
     'REFRESH_COOKIE_PATH': '/',
 }
@@ -260,7 +258,7 @@ if DEBUG:
 else:
     _cors_allowed_origins_raw = os.getenv(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:3010,http://127.0.0.1:3010,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001'
+        'http://localhost:3010,http://127.0.0.1:3010,http://localhost:5000,http://127.0.0.1:5000,http://localhost:5001,http://127.0.0.1:5001'
     )
     CORS_ALLOWED_ORIGINS = [
         origin.strip()

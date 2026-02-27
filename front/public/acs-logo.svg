@@ -1,15 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 130">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" role="img" aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">ACS Logo</title>
+  <desc id="logoDesc">Logo ACS avec symbole de dossier rouge et texte Assurance Courtage Service.</desc>
+
   <defs>
-    <style>
-      .cls-red { fill: #D32027; }
-      .cls-text { fill: #003366; font-family: Arial, sans-serif; }
-    </style>
+    <linearGradient id="acsRed" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff6a7d" />
+      <stop offset="55%" stop-color="#e6314a" />
+      <stop offset="100%" stop-color="#c10e2f" />
+    </linearGradient>
   </defs>
-  
-  <!-- Lettres ACS en rouge -->
-  <text x="10" y="70" font-family="Arial Black, sans-serif" font-size="65" font-weight="900" class="cls-red">ACS</text>
-  
-  <!-- Textes en bas -->
-  <text x="10" y="100" font-size="10" font-weight="600" class="cls-text" letter-spacing="1">ASSUREURS CONSEILS SERVICE</text>
-  <text x="10" y="115" font-size="8" class="cls-text" opacity="0.7">SOCIÉTÉ DE COURTAGE D'ASSURANCES</text>
+
+  <g transform="translate(94 34)">
+    <path d="M18 34c0-10 7-18 17-18h51c9 0 16 7 16 16v71c0 10-8 18-18 18H31c-7 0-13-6-13-13z" fill="url(#acsRed)" />
+    <path d="M4 50c0-9 7-16 16-16h50c8 0 14 6 14 14v65c0 9-7 16-16 16H24c-11 0-20-9-20-20z" fill="url(#acsRed)" opacity="0.92" />
+    <path d="M-10 66c0-8 6-14 14-14h42c8 0 14 6 14 14v56c0 8-6 14-14 14H4c-8 0-14-6-14-14z" fill="url(#acsRed)" opacity="0.84" />
+
+    <circle cx="18" cy="118" r="24" fill="#ffffff" />
+    <circle cx="18" cy="118" r="20" fill="none" stroke="#d5203a" stroke-width="2.5" />
+    <path d="M9 119l6 6 13-16" fill="none" stroke="#d5203a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+
+  <text x="150" y="225" text-anchor="middle" font-size="38" font-weight="800" font-family="Arial, Helvetica, sans-serif" fill="#d5203a" letter-spacing="2">ACS</text>
+  <text x="150" y="248" text-anchor="middle" font-size="13" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#d5203a" letter-spacing="4">ASSURANCE COURTAGE SERVICE</text>
 </svg>

@@ -86,7 +86,7 @@ export type AssistantResponse = {
   narration?: AssistantNarration
   restriction?: AssistantRestriction
   // Système d'apprentissage
-  interactionId?: string  // ID pour le feedback utilisateur (👍/👎)
+  interactionId?: string
   // Traçabilité métier de la réponse
   trace?: AssistantTrace
 }

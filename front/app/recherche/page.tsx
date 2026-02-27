@@ -4,7 +4,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { apiFetchJson, buildApiUrl } from '@/lib/api'
+import { apiFetchJson, canAccessSection, formatDateRelative, hasPermission, normalizeMediaUrl, buildApiUrl } from '@/lib'
 import { getToken } from '@/lib/session'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
@@ -345,7 +345,7 @@ export default function PageRecherche() {
   // Tous les hooks doivent être appelés AVANT tout return conditionnel
   const { estAuthentifie, chargement: authChargement } = useRequireAuth()
   const utilisateur = useUtilisateurCourant()
-  const peutTelecharger = utilisateur?.role !== 'CONSULTANT' // 🔒 PDG: Consultants ne peuvent pas télécharger
+  const peutTelecharger = utilisateur?.role !== 'CONSULTANT'
 
   const [client, setClient] = useState('')
   const [exercice, setExercice] = useState('')
@@ -688,7 +688,7 @@ export default function PageRecherche() {
       const theme = TYPE_COURRIER_THEMES[doc.type_courrier] ?? DEFAULT_TYPE_COURRIER_THEME
       const risqueTheme = themeRisque(risqueType)
 
-      const fichierUrl = doc.fichier_url ?? doc.fichierUrl ?? null
+      const fichierUrl = normalizeMediaUrl(doc.fichier_url ?? doc.fichierUrl ?? null)
 
       return {
         id: doc.id,
@@ -715,7 +715,22 @@ export default function PageRecherche() {
   }, [resultats])
 
   const extraireUrlDocument = (doc: { fichierUrl?: string | null; fichier_url?: string | null; source?: any }) => {
-    return doc.fichierUrl ?? doc.fichier_url ?? doc.source?.fichier_url ?? doc.source?.fichierUrl ?? null
+    return normalizeMediaUrl(doc.fichierUrl ?? doc.fichier_url ?? doc.source?.fichier_url ?? doc.source?.fichierUrl ?? null)
+  }
+
+  const resoudreUrlDocument = (url: string) => {
+    if (!url) return url
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/media/')) {
+      return url
+    }
+    return buildApiUrl(url)
+  }
+
+  const construireUrlTelechargement = (url: string) => {
+    if (!url) return url
+    const resolved = resoudreUrlDocument(url)
+    if (!resolved) return resolved
+    return resolved.startsWith('/media/') ? resolved : `/api/proxy/document?url=${encodeURIComponent(resolved)}`
   }
 
   const ouvrirDansNouvelOnglet = (doc: (typeof resultatsAffiches)[number]) => {
@@ -726,8 +741,8 @@ export default function PageRecherche() {
     }
 
     if (typeof window !== 'undefined') {
-      const resolvedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : buildApiUrl(url)
-      const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`
+      const resolvedUrl = resoudreUrlDocument(url)
+      const proxyUrl = resolvedUrl?.startsWith('/media/') ? resolvedUrl : `/api/proxy/document?url=${encodeURIComponent(resolvedUrl ?? url)}`
       window.open(proxyUrl, '_blank', 'noopener,noreferrer')
     }
   }
@@ -741,12 +756,11 @@ export default function PageRecherche() {
 
     setErreurTelechargement(null)
     if (typeof window !== 'undefined') {
-      const resolvedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : buildApiUrl(url)
-      const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`
+      const proxyUrl = construireUrlTelechargement(url)
 
       const startDownload = async () => {
         try {
-          const response = await fetch(proxyUrl, {
+          const response = await fetch(proxyUrl ?? url, {
             credentials: 'include',
             headers: { Accept: 'application/pdf,image/*' },
           })
@@ -767,7 +781,74 @@ export default function PageRecherche() {
           URL.revokeObjectURL(objectUrl)
         } catch (error) {
           console.error('Téléchargement recherche', error)
-          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+          const fallback = resoudreUrlDocument(url)
+          if (fallback) {
+            window.open(fallback, '_blank', 'noopener,noreferrer')
+          }
+        }
+      }
+
+      void startDownload()
+    }
+  }
+
+  const extraireUrlMedia = (doc: { mediaUrl?: string | null; media_url?: string | null; source?: any }) => {
+    return normalizeMediaUrl(doc.mediaUrl ?? doc.media_url ?? doc.source?.media_url ?? doc.source?.mediaUrl ?? null)
+  }
+
+  const resoudreUrlMedia = (url: string) => {
+    if (!url) return url
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/media/')) {
+      return url
+    }
+    return buildApiUrl(url)
+  }
+
+  const construireUrlTelechargementMedia = (url: string) => {
+    if (!url) return url
+    const resolved = resoudreUrlMedia(url)
+    if (!resolved) return resolved
+    return resolved.startsWith('/media/') ? resolved : `/api/proxy/media?url=${encodeURIComponent(resolved)}`
+  }
+
+  const telechargerMedia = (doc: { mediaUrl?: string | null; media_url?: string | null; source?: any }) => {
+    const url = extraireUrlMedia(doc)
+    if (!url) {
+      setErreurTelechargement("Media introuvable sur le serveur")
+      return
+    }
+
+    setErreurTelechargement(null)
+    if (typeof window !== 'undefined') {
+      const proxyUrl = construireUrlTelechargementMedia(url)
+
+      const startDownload = async () => {
+        try {
+          const response = await fetch(proxyUrl ?? url, {
+            credentials: 'include',
+            headers: { Accept: 'application/pdf,image/*' },
+          })
+
+          if (!response.ok) {
+            throw new Error(`Erreur ${response.status}`)
+          }
+
+          const blob = await response.blob()
+          const objectUrl = URL.createObjectURL(blob)
+
+          const lien = document.createElement('a')
+          lien.href = objectUrl
+          lien.download = 'media'
+          document.body.appendChild(lien)
+          lien.click()
+          document.body.removeChild(lien)
+          URL.revokeObjectURL(objectUrl)
+        } catch (error) {
+          console.error('Téléchargement media', error)
+          const fallback = resoudreUrlMedia(url)
+          if (fallback) {
+            window.open(fallback, '_blank', 'noopener,noreferrer')
+          }
         }
       }
 

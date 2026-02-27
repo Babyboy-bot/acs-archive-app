@@ -17,7 +17,7 @@ import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
 // PdfThumbnail retiré - on utilise iframe directement avec l'URL media
 
-// 🚀 PRO: Type pour les suggestions de clients
+// Type pour les suggestions de clients
 type ClientSuggestion = {
   id: string;
   nom: string;
@@ -69,7 +69,7 @@ interface AssistantConversationSummary {
   nombre_messages?: number;
 }
 
-// 💡 Générer des suggestions intelligentes basées sur le contexte (conversation en cours)
+// Générer des suggestions intelligentes basées sur le contexte
 function genererSuggestionsIntelligentes(messages: Message[]): string[] {
   const suggestions: string[] = [];
   const now = new Date();
@@ -132,7 +132,7 @@ export default function ConsultantChatPage() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   
-  // 🚀 PRO: Autocomplétion clients
+  // Autocomplétion clients
   const [clientSuggestions, setClientSuggestions] = useState<ClientSuggestion[]>([]);
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
@@ -515,7 +515,7 @@ export default function ConsultantChatPage() {
           ...(token && { Authorization: `Bearer ${token}` }),
           ...(utilisateur?.role && { "x-user-role": utilisateur.role }),
         },
-        // 🔴 FIX: Envoyer le conversationId pour isoler le contexte par discussion
+        // Envoyer le conversationId pour isoler le contexte par discussion
         body: JSON.stringify({ question, conversationId: currentConversationId }),
       });
 
@@ -660,7 +660,7 @@ export default function ConsultantChatPage() {
     setInput(suggestion);
   };
 
-  // 🚀 PRO: Recherche de clients pour autocomplétion
+  // Recherche de clients pour autocomplétion
   const rechercherClients = useCallback(async (query: string) => {
     if (query.length < 2) {
       setClientSuggestions([]);
@@ -682,7 +682,7 @@ export default function ConsultantChatPage() {
     }
   }, []);
 
-  // 🚀 PRO: Gérer le changement d'input avec détection de client
+  // Gérer le changement d'input avec détection de client
   // L'autocomplétion ne se déclenche QUE après des mots-clés spécifiques
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -716,7 +716,7 @@ export default function ConsultantChatPage() {
     }
   };
 
-  // 🚀 PRO: Sélectionner un client suggéré
+  // Sélectionner un client suggéré
   const handleSelectClient = (client: ClientSuggestion) => {
     // Remplacer le dernier mot par le nom du client
     const words = input.split(/\s+/);
@@ -726,7 +726,7 @@ export default function ConsultantChatPage() {
     setClientSuggestions([]);
   };
 
-  // 🚀 PRO: Navigation clavier dans les suggestions
+  // Navigation clavier dans les suggestions
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!showClientSuggestions || clientSuggestions.length === 0) return;
     
@@ -1107,7 +1107,7 @@ export default function ConsultantChatPage() {
                 documents, contrats ou pièces justificatives.
               </p>
 
-              {/* 💡 Suggestions intelligentes */}
+              {/* Suggestions intelligentes */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl w-full px-4">
                 {(messages.length > 0
                   ? genererSuggestionsIntelligentes(messages)
@@ -1304,7 +1304,6 @@ export default function ConsultantChatPage() {
                                             const mediaUrl = fichierUrl.startsWith('/media/')
                                               ? fichierUrl
                                               : `/media/${fichierUrl.replace(/^\//, '')}`;
-                                            console.log('[PDF Thumbnail] fichier_url:', fichierUrl, '-> mediaUrl:', mediaUrl);
                                             return (
                                               <iframe
                                                 src={`${mediaUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
@@ -1512,7 +1511,7 @@ export default function ConsultantChatPage() {
         >
           <form onSubmit={envoyerMessage} className="max-w-3xl mx-auto">
             <div className="relative">
-              {/* 🚀 PRO: Suggestions de clients */}
+              {/* Suggestions de clients */}
               {showClientSuggestions && clientSuggestions.length > 0 && (
                 <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-xl overflow-hidden shadow-xl z-50 ${
                   isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"

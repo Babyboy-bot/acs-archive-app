@@ -21,7 +21,7 @@ interface ClientAutocompleteProps {
 }
 
 /**
- * 🚀 PRO: Autocomplétion clients en temps réel
+ * Autocomplétion clients en temps réel
  * Permet de taper le début d'un nom de client et voir des suggestions
  */
 export function ClientAutocomplete({

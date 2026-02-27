@@ -2,7 +2,6 @@
 'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import React, { useEffect, useMemo } from 'react'
 import { Icon, IconName } from './Icon'
@@ -94,9 +93,7 @@ export function Navigation() {
         <div className="flex items-center justify-between h-16 text-theme-primary">
           {/* Logo et titre ACS */}
           <Link href="/tableau-de-bord" className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
-              A
-            </div>
+            <img src="/acs-logo.svg" alt="Logo ACS" width={40} height={40} className="w-10 h-10 object-contain" />
             <div>
               <div className="text-lg font-bold text-theme-primary">ACS Archive</div>
               <div className="text-xs text-theme-secondary">Gestion d'archives</div>

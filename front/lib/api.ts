@@ -21,7 +21,6 @@ export function buildApiUrl(path: string): string {
  * Fonction de logout automatique en cas d'échec du refresh
  */
 function logoutUser() {
-  console.log('🚨 Refresh échoué → logout automatique')
   
   // Nettoyer le stockage local
   if (typeof window !== 'undefined') {
@@ -86,7 +85,6 @@ export async function apiFetchJson<T = unknown>(path: string, options: ApiFetchO
   // Si la réponse est 401 (Unauthorized), essayer de rafraîchir le token
   // mais seulement si ce n'est pas déjà une requête de refresh ou une tentative de retry
   if (response.status === 401 && !options.skipAuth && !isRefreshRequest && !isRetry) {
-    console.log('🔄 Token expiré, tentative de refresh...')
     try {
       // Appeler l'endpoint de refresh
       const refreshResponse = await fetch(buildApiUrl('/auth/refresh/'), {
@@ -98,19 +96,17 @@ export async function apiFetchJson<T = unknown>(path: string, options: ApiFetchO
       })
 
       if (refreshResponse.ok) {
-        console.log('✅ Refresh réussi, retry de la requête originale')
         // Réessayer la requête originale avec le nouveau token
         const retryResponse: { response: Response; data: T | undefined } = await apiFetchJson(path, { ...options, isRetry: true })
         return retryResponse
       } else {
-        console.log('❌ Refresh échoué, logout automatique')
-        // 🚨 Refresh échoué → logout automatique
+        // Refresh échoué : logout automatique
         logoutUser()
         throw new Error('Refresh token expiré')
       }
     } catch (refreshError) {
-      console.error('💥 Erreur lors du refresh:', refreshError)
-      // 🚨 Refresh échoué → logout automatique
+      console.error('Erreur lors du refresh:', refreshError)
+      // Refresh échoué : logout automatique
       logoutUser()
       throw refreshError
     }
