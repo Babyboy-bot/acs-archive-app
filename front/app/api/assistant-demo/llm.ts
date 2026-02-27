@@ -6,7 +6,6 @@
 
 import type { DocumentPiece } from './types'
 import { setDefaultResultOrder } from 'dns'
-import { enrichPromptWithLearning } from './learning'
 import {
   getConversationHistoryPersistent,
   addMessagePersistent,
@@ -971,8 +970,7 @@ export async function generateLlmAnswer(payload: LlmPayload): Promise<LlmResult>
     : []
 
 
-  const basePrompt = buildPrompt(payload)
-  const prompt = isFactual ? basePrompt : enrichPromptWithLearning(basePrompt, payload.question)
+  const prompt = buildPrompt(payload)
 
   const complexity = estimateComplexity(payload)
   const useAdvancedModel = complexity > COMPLEXITY_THRESHOLD

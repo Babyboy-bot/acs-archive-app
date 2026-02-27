@@ -8,9 +8,6 @@ import {
 import type { AssistantResponse, AssistantTrace, DocumentPiece, Statistiques } from './types'
 import { RoleUtilisateur } from '../../../types'
 import { generateLlmAnswer, isLlmConfigured, validateResponse, addToConversation, getConversationHistory, getConversationHistoryWithPersistence, addToConversationWithPersistence, updateMemoryAfterExchange, detectSubjectTransition, applySubjectTransition, getStructuredMemory, setStructuredMemory, logSubjectTransition, detectUserCorrection, isDocumentFollowUpQuestion, buildDocumentActivePrompt, extractDocumentIndex, getDocumentFromSelection, isContextExpired, getValidContextEntity, updateEntityProtected, CONFIDENCE_THRESHOLD, CONTEXT_EXPIRATION_MS, classifyIntention, convertLlmIndexToSystemIndex, calculerScoreQualiteOcr, SEUILS_CONFIANCE, type DocumentSelection, type ClassificationResult, type ClassificationContext, type OcrQualityResult, type CriteresExtraits } from './llm'
-import { 
-  recordInteraction, 
-} from './learning'
 // Import centralisé depuis criteria.ts (source unique de vérité)
 import {
   type CriteresRecherche,
@@ -711,17 +708,7 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
     const anneeContexte = criteresFinal.annee
     const risqueContexte = criteresFinal.risque
     const typeDocumentContexte = criteresFinal.typeDocument
-    // typeMessage pour compatibilité - transformé en type attendu par l'ancien code
     const typeMessage: string = modeAssistant === 'recherche_document' ? 'document' : modeAssistant
-    const analyseComplete = { 
-      type: typeMessage, 
-      confidence: 0.9, 
-      langue: 'fr' as const, 
-      sentiment: 'neutre' as const, 
-      urgence: false,
-      clientDetecte: criteresFinal.client,
-      typeDocDetecte: criteresFinal.typeDocument,
-    }
     
     const intent = detectIntent(question)
     const role = extraireRole(request)
@@ -1226,21 +1213,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
         }
       }
     }
-    const clientPourSuggestions = clientFinal ?? extraireClientMentionne(question)
-
-    // Enregistrer l'interaction pour l'apprentissage
-    const interactionId = recordInteraction({
-      question: questionOriginale,
-      response: narration.texte,
-      intent: 'documents',
-      typeMessage,
-      clientMentionne: clientPourSuggestions,
-      typeDocMentionne: analyseComplete.typeDocDetecte,
-      responseTimeMs: Date.now() - startedAt,
-      llmUsed: narration.source === 'llm',
-      userId: token ? 'authenticated' : null,
-    })
-
     const trace: AssistantTrace = {
       mode: modeAssistant,
       intent,
@@ -1274,7 +1246,6 @@ IMPORTANT: Réponds de manière concise et précise en te basant UNIQUEMENT sur 
       insights,
       actions,
       narration,
-      interactionId, // Pour permettre le feedback ­ƒæì/­ƒæÄ
       trace,
     }
 
