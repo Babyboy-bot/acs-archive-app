@@ -8,7 +8,7 @@ Ce module est découpé en plusieurs fichiers pour améliorer la maintenabilité
 - llm.py : Gestion des quotas et usage LLM
 - audit.py : Journal d'audit
 - health.py : Healthcheck et monitoring
-- cache.py : Gestion du cache (embeddings, TF-IDF)
+- cache.py : Gestion du cache (TF-IDF)
 - stats.py : Statistiques et KPI
 
 Pour la rétrocompatibilité, toutes les vues sont réexportées depuis ce module.
@@ -38,7 +38,6 @@ from ..views_main import (
     # Assistant / Recherche
     assistant_valid_clients_view,
     assistant_document_search_view,
-    assistant_document_search_faiss_view,
     assistant_semantic_search_view,
     assistant_document_search_by_reference_view,
     assistant_document_search_filtered_view,
@@ -97,7 +96,6 @@ __all__ = [
     # Assistant / Recherche
     'assistant_valid_clients_view',
     'assistant_document_search_view',
-    'assistant_document_search_faiss_view',
     'assistant_semantic_search_view',
     'assistant_document_search_by_reference_view',
     'assistant_document_search_filtered_view',
