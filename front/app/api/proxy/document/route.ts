@@ -66,6 +66,27 @@ function resolveTargetUrl(rawUrl: string): string {
   return `${backendBase}/${sanitizedPath}`
 }
 
+// Hôtes autorisés pour le proxy (prévention SSRF)
+const ALLOWED_HOSTS = new Set([
+  'localhost',
+  '127.0.0.1',
+  'backend',
+  'backend:8000',
+  'nginx',
+  'nginx:80',
+  'frontend',
+  'frontend:5000',
+])
+
+function isAllowedTarget(targetUrl: string): boolean {
+  try {
+    const parsed = new URL(targetUrl)
+    return ALLOWED_HOSTS.has(parsed.hostname) || ALLOWED_HOSTS.has(parsed.host)
+  } catch {
+    return false
+  }
+}
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const targetParam = url.searchParams.get('url')
@@ -75,6 +96,10 @@ export async function GET(request: NextRequest) {
   }
 
   const targetUrl = resolveTargetUrl(targetParam)
+
+  if (!isAllowedTarget(targetUrl)) {
+    return NextResponse.json({ error: 'Target host not allowed' }, { status: 403 })
+  }
 
   const headers = new Headers()
   const authorization = request.headers.get('authorization')

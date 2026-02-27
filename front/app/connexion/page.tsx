@@ -350,15 +350,7 @@ export default function PageConnexion() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative flex items-center">
-                    <input type="checkbox" className="peer sr-only" />
-                    <div className="w-10 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-gray-200 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-                  </div>
-                  <span className="text-sm font-medium text-gray-500 group-hover:text-gray-700 transition-colors">Se souvenir</span>
-                </label>
-
+              <div className="flex items-center justify-end pt-2">
                 <Link href="/mot-de-passe-oublie" className="text-sm font-light text-blue-600 hover:text-blue-800 transition-colors">
                   Mot de passe oublié ?
                 </Link>

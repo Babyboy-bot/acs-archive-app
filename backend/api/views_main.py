@@ -5,6 +5,7 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.throttling import AnonRateThrottle
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -424,11 +425,23 @@ def log_llm_usage(
     )
 
 
+class LoginRateThrottle(AnonRateThrottle):
+    scope = 'login'
+
+
 @csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
     """Vue de connexion avec authentification JWT et gestion des sessions."""
+    # Appliquer le rate limiting manuellement sur cette vue
+    throttle = LoginRateThrottle()
+    if not throttle.allow_request(request, None):
+        wait = throttle.wait()
+        return Response(
+            {'erreur': f'Trop de tentatives de connexion. Réessayez dans {int(wait or 60)} secondes.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
     try:
         # Vérifier les identifiants
         nom_utilisateur = request.data.get('username')
@@ -610,8 +623,10 @@ def logout_view(request):
         {'success': True, 'message': 'Déconnecté avec succès.'},
         status=status.HTTP_200_OK,
     )
-    response.delete_cookie('access_token')
-    response.delete_cookie('refresh_token')
+    access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
+    refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
+    response.delete_cookie(access_cookie_name, path='/')
+    response.delete_cookie(refresh_cookie_name, path='/')
     return response
 
 
