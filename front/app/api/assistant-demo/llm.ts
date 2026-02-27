@@ -1233,15 +1233,6 @@ Classifie cette requête en JSON:`
       }
     }
 
-    // Log pour debug
-    if (parsed.action) console.log(`  Action: ${parsed.action}`)
-    if (parsed.index_document !== null && parsed.index_document !== undefined) {
-    }
-    if (criteres) {
-    }
-    if (needsClarification) {
-    }
-
     return {
       intention: parsed.intention,
       action: parsed.action || null,

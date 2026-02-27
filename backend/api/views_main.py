@@ -1,7 +1,7 @@
 """
 Vues pour l'API Django REST Framework
 """
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import api_view, permission_classes, action
@@ -33,7 +33,6 @@ import re
 from sklearn.metrics.pairwise import linear_kernel
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-import numpy as np
 import time
 
 
@@ -69,7 +68,6 @@ from .models import (
 from .serializers import (
     UtilisateurSerializer,
     UtilisateurListSerializer,
-    LoginSerializer,
     ClientSimpleSerializer,
     ClientSerializer,
     ExerciceSimpleSerializer,
@@ -80,7 +78,7 @@ from .serializers import (
     AssistantConversationSerializer,
     AssistantMessageSerializer,
 )
-from .permissions import RoleBasedPermission, IsOwnerOrAdmin
+from .permissions import RoleBasedPermission
 
 
 # ============================================================================
@@ -2366,13 +2364,6 @@ def assistant_document_search_filtered_view(request):
 
 setattr(assistant_document_search_filtered_view, 'ressource', 'documents')
 
-
-def _log_perf_metric(metric_name: str, duration_ms: float, **extra):
-    """Journalise une métrique de performance avec des tags supplémentaires"""
-    logging.info(
-        f"PERF_METRIC {metric_name} duration_ms={duration_ms:.2f} " + 
-        " ".join(f"{k}={v}" for k, v in extra.items())
-    )
 
 def assistant_semantic_search_view(request):
     """
