@@ -34,6 +34,8 @@ from sklearn.metrics.pairwise import linear_kernel
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 import time
+import httpx
+import json
 
 
 def should_use_secure_cookie(request):
@@ -371,8 +373,8 @@ def login_view(request):
         samesite_policy = 'Lax'
         
         # Récupérer les noms des cookies depuis la configuration
-        access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
-        refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
+        access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
+        refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
         
         cookie_params = {
             'httponly': True,
@@ -421,10 +423,15 @@ def refresh_token_view(request):
     from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
     
     # Récupérer le nom du cookie depuis la configuration
-    refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "refresh_token")
+    refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
     refresh_token = request.COOKIES.get(refresh_cookie_name)
     
     if not refresh_token:
+        logging.warning(
+            "Refresh token absent sur /api/auth/refresh/ (cookie=%s, cookies_present=%s)",
+            refresh_cookie_name,
+            list(request.COOKIES.keys()),
+        )
         return Response(
             {'erreur': 'Aucun refresh token trouvé'},
             status=status.HTTP_401_UNAUTHORIZED
@@ -447,7 +454,7 @@ def refresh_token_view(request):
         samesite_policy = 'Lax'
         
         # Récupérer le nom du cookie access token depuis la configuration
-        access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
+        access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
         
         # Mettre à jour le cookie access_token
         response.set_cookie(
@@ -463,6 +470,11 @@ def refresh_token_view(request):
         return response
         
     except (InvalidToken, TokenError) as e:
+        logging.warning(
+            "Refresh token invalide sur /api/auth/refresh/: %s (%s)",
+            e.__class__.__name__,
+            str(e),
+        )
         # Nettoyer les cookies invalides pour éviter les boucles d'erreur
         response = Response(
             {'erreur': 'Le type de jeton fourni n\'est pas valide'},
@@ -2581,6 +2593,110 @@ def assistant_set_document_context_view(request):
 setattr(assistant_set_document_context_view, 'ressource', 'documents')
 
 
+def call_mistral_api(prompt: str, user_id: str = None) -> dict:
+    """Appelle l'API Mistral avec gestion des quotas et logging."""
+    if not settings.ASSISTANT_LLM_ENABLED or settings.ASSISTANT_LLM_ENABLED.lower() == 'false':
+        return {
+            'success': False,
+            'error': 'LLM désactivé',
+            'content': None
+        }
+    
+    if not settings.MISTRAL_API_KEY:
+        return {
+            'success': False,
+            'error': 'API key Mistral non configurée',
+            'content': None
+        }
+    
+    # Vérifier les quotas si activés
+    if not settings.ASSISTANT_LLM_QUOTA_DISABLED:
+        from .models import LlmMonthlyQuota, LlmUsage
+        
+        quota, created = LlmMonthlyQuota.objects.get_or_create(
+            utilisateur_id=user_id,
+            defaults={'tokens_limit': settings.ASSISTANT_LLM_MONTHLY_LIMIT}
+        )
+        
+        if quota.tokens_remaining <= 0:
+            return {
+                'success': False,
+                'error': 'Quota mensuel dépassé',
+                'content': None
+            }
+    
+    # Appel à l'API Mistral
+    try:
+        headers = {
+            'Authorization': f'Bearer {settings.MISTRAL_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        data = {
+            'model': settings.MISTRAL_MODEL_DEFAULT,
+            'messages': [
+                {
+                    'role': 'system',
+                    'content': 'Tu es un assistant spécialisé dans la gestion d\'archives d\'assurance. Réponds de manière concise et professionnelle en utilisant uniquement les informations fournies.'
+                },
+                {
+                    'role': 'user',
+                    'content': prompt
+                }
+            ],
+            'max_tokens': 1000,
+            'temperature': 0.3
+        }
+        
+        start_time = time.time()
+        
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                f"{settings.MISTRAL_BASE_URL}/chat/completions",
+                headers=headers,
+                json=data
+            )
+        
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            
+            # Logging de l'utilisation
+            if user_id and not settings.ASSISTANT_LLM_QUOTA_DISABLED:
+                LlmUsage.objects.create(
+                    utilisateur_id=user_id,
+                    purpose='assistant_chat',
+                    tokens_input=result['usage']['prompt_tokens'],
+                    tokens_output=result['usage']['completion_tokens'],
+                    tokens_total=result['usage']['total_tokens'],
+                    duration_ms=duration_ms
+                )
+            
+            return {
+                'success': True,
+                'content': content,
+                'duration_ms': duration_ms,
+                'tokens': result['usage']
+            }
+        else:
+            logging.error(f"Erreur Mistral API: {response.status_code} - {response.text}")
+            return {
+                'success': False,
+                'error': f'Erreur API: {response.status_code}',
+                'content': None
+            }
+            
+    except Exception as e:
+        logging.error(f"Erreur lors de l'appel Mistral: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'content': None
+        }
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, RoleBasedPermission])
 def assistant_chat_view(request):
@@ -2612,78 +2728,282 @@ def assistant_chat_view(request):
             metadata={'search_query': question}
         )
         
-        # Générer la réponse avec contexte
+        # Récupérer le contexte documentaire actuel
         current_doc = conversation.memoire_etat.get('current_document')
-        
-        if current_doc:
-            # Utiliser le contexte documentaire
+
+        # Rechercher des documents pertinents
+        # 1) Fallback “référence” (utile pour des requêtes courtes type "N°96")
+        import re
+        search_results = []
+        ref_match = re.search(r"\b(?:n\s*[°o]?|no)\s*[:\-]?\s*([0-9]{1,6})\b", question, re.IGNORECASE)
+        if ref_match:
+            ref_raw = ref_match.group(1)
+            ref_norm = ref_raw.lstrip('0') or ref_raw
+            ref_candidates = []
+            for v in (ref_raw, ref_norm):
+                if v and v not in ref_candidates:
+                    ref_candidates.append(v)
+
+            # Éviter les faux positifs: "96" ne doit pas matcher "966" ou "0596".
+            # On matche le nombre seulement quand il est bordé par des non-chiffres (ou début/fin).
+            from django.db.models import Q
+            query = Q()
+            for v in ref_candidates:
+                # Match strict sur la colonne reference: bornes numériques.
+                boundary_pattern = rf"(^|[^0-9]){re.escape(v)}([^0-9]|$)"
+                query |= Q(reference__regex=boundary_pattern)
+
+                # Match sur titre: exiger un préfixe de référence (évite les montants, ex: "96 120 F").
+                # Exemples acceptés: "N°96", "N 96", "No: 96", "n-96".
+                titre_pattern = rf"\b(?:n\s*[°o]?|no)\s*[:\-]?\s*{re.escape(v)}\b"
+                query |= Q(titre__iregex=titre_pattern)
+
+            docs = (
+                Document.objects
+                .select_related('risque__exercice__client')
+                .filter(query)
+                .order_by('-cree_le')[:5]
+            )
+
+            for doc in docs:
+                try:
+                    client = doc.risque.exercice.client.code if doc.risque and doc.risque.exercice else None
+                    exercice = str(doc.risque.exercice.annee) if doc.risque and doc.risque.exercice else None
+                    risque_type = doc.risque.type if doc.risque else None
+                except Exception:
+                    client = None
+                    exercice = None
+                    risque_type = None
+
+                payload = {
+                    'id': str(doc.id),
+                    'titre': doc.titre,
+                    'description': (doc.description or ''),
+                    'client': client or '',
+                    'exercice': exercice or '',
+                    'type': getattr(doc, 'type_courrier', '') or '',
+                    'date_document': doc.date_document.isoformat() if doc.date_document else '',
+                    'fichier_url': f"/media/{doc.chemin_fichier}" if doc.chemin_fichier else '',
+                    'reference': doc.reference or '',
+                    'risque': risque_type or '',
+                }
+                search_results.append((payload, 1.0))
+
+        # 2) Fallback “critères” (année / type_courrier / risque / client) pour des requêtes structurées
+        if (not search_results) and (not current_doc):
+            try:
+                from django.db.models import Q
+                import unicodedata
+
+                def _norm(s: str) -> str:
+                    s = (s or '').strip().lower().replace('_', ' ')
+                    s = unicodedata.normalize('NFKD', s)
+                    s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+                    s = re.sub(r"[^0-9a-z]+", " ", s)
+                    s = re.sub(r"\s+", " ", s).strip()
+                    return s
+
+                q_norm = _norm(question)
+
+                # Année: on assimile à un exercice (risque__exercice__annee)
+                year = None
+                year_match = re.search(r"\b(19\d{2}|20\d{2})\b", q_norm)
+                if year_match:
+                    try:
+                        year = int(year_match.group(1))
+                    except ValueError:
+                        year = None
+
+                # Type courrier: détection de phrases usuelles
+                type_courrier = None
+                if ('acs' in q_norm and 'compagnie' in q_norm) or 'acs compagnie' in q_norm:
+                    type_courrier = 'ACS_VERS_COMPAGNIE'
+                elif ('acs' in q_norm and 'client' in q_norm) or 'acs vers client' in q_norm:
+                    type_courrier = 'ACS_VERS_CLIENT'
+
+                # Risque (support minimal, on pourra enrichir ensuite)
+                risque_token = None
+                if 'sante' in q_norm:
+                    risque_token = 'sante'
+                elif 'auto' in q_norm or 'automobile' in q_norm:
+                    risque_token = 'auto'
+                elif 'mrp' in q_norm:
+                    risque_token = 'mrp'
+                elif 'mri' in q_norm:
+                    risque_token = 'mri'
+
+                # Client: pattern "client X" (un seul token ou groupe de tokens)
+                client_token = None
+                client_match = re.search(r"\bclient\s+([a-z0-9]{2,})\b", q_norm)
+                if client_match:
+                    client_token = client_match.group(1)
+
+                # Construire la requête ORM
+                qs = Document.objects.select_related('risque__exercice__client')
+                if year is not None:
+                    qs = qs.filter(risque__exercice__annee=year)
+                if type_courrier:
+                    qs = qs.filter(type_courrier=type_courrier)
+                if risque_token:
+                    qs = qs.filter(risque__type__icontains=risque_token)
+                if client_token:
+                    qs = qs.filter(
+                        Q(risque__exercice__client__nom__icontains=client_token)
+                        | Q(risque__exercice__client__numero_client__icontains=client_token)
+                    )
+
+                # Si aucun filtre, ne pas lancer ce fallback (évite de ramener du bruit)
+                if any([year is not None, type_courrier, risque_token, client_token]):
+                    docs = qs.order_by('-cree_le')[:5]
+                    for doc in docs:
+                        try:
+                            client = doc.risque.exercice.client.code if doc.risque and doc.risque.exercice else None
+                            exercice = str(doc.risque.exercice.annee) if doc.risque and doc.risque.exercice else None
+                            risque_type = doc.risque.type if doc.risque else None
+                        except Exception:
+                            client = None
+                            exercice = None
+                            risque_type = None
+
+                        payload = {
+                            'id': str(doc.id),
+                            'titre': doc.titre,
+                            'description': (doc.description or ''),
+                            'client': client or '',
+                            'exercice': exercice or '',
+                            'type': getattr(doc, 'type_courrier', '') or '',
+                            'date_document': doc.date_document.isoformat() if doc.date_document else '',
+                            'fichier_url': f"/media/{doc.chemin_fichier}" if doc.chemin_fichier else '',
+                            'reference': doc.reference or '',
+                            'risque': risque_type or '',
+                        }
+                        search_results.append((payload, 0.95))
+            except Exception:
+                logging.exception("Erreur fallback critères assistant")
+
+        # 3) Sinon, recherche TF-IDF (globale ou restreinte au document courant)
+        if not search_results:
             from .search_index import get_document_index
             index = get_document_index()
-            
-            # Rechercher dans le document spécifique
-            search_results = index.search_tfidf(
-                question, 
-                top_k=3,
-                document_ids=[current_doc['document_id']]
-            )
-            
-            # Construire la réponse
-            response_content = f"Basé sur le document '{current_doc['document_titre']}', voici ce que je peux vous dire :\n\n"
-            
-            if search_results:
-                for payload, score in search_results[:2]:
-                    response_content += f"• {payload.get('titre', 'Section')} : {payload.get('description', '')[:300]}...\n\n"
+
+            if current_doc:
+                # Rechercher dans le document spécifique
+                search_results = index.search_tfidf(question, top_k=3, document_ids=[current_doc['document_id']])
             else:
-                # Fallback : utiliser le contenu du document
-                doc_content = current_doc.get('document_content', '')
-                if doc_content:
-                    response_content += f"Contenu du document :\n{doc_content[:500]}...\n\n"
-                    response_content += "Je n'ai pas trouvé d'information spécifique pour votre question, mais voici le début du document."
-                else:
-                    response_content += "Je n'ai pas pu accéder au contenu détaillé de ce document."
-            
-            # Créer la réponse assistant
-            assistant_message = AssistantMessage.objects.create(
-                conversation=conversation,
-                role='ASSISTANT',
-                contenu=response_content,
-                metadata={
-                    'context_used': True,
-                    'document_id': current_doc['document_id'],
-                    'document_titre': current_doc['document_titre'],
-                    'search_results_count': len(search_results) if search_results else 0
+                # Recherche globale
+                search_results = index.search_tfidf(question, top_k=5)
+        
+        # Préparer le contexte pour Mistral
+        context_docs = []
+        pieces = []
+        
+        if search_results:
+            from .models import DocumentChunk
+            for payload, score in search_results[:3]:  # Top 3 résultats
+                doc_id = payload.get('id')
+                # Récupérer le texte OCR/chunks du document (limité pour le prompt)
+                chunk_text = ''
+                if doc_id:
+                    chunks = DocumentChunk.objects.filter(document_id=doc_id).order_by('ordre')[:3]
+                    chunk_texts = [c.texte or '' for c in chunks if c.texte and c.texte.strip()]
+                    chunk_text = ' '.join(chunk_texts)[:1500]  # Limiter à ~1500 caractères
+                description = payload.get('description', '') or ''
+                # Utiliser le chunk_text si disponible, sinon la description
+                content_for_llm = chunk_text if chunk_text else (description[:500] if description else '')
+                doc_context = {
+                    'titre': payload.get('titre', 'Document sans titre'),
+                    'client': payload.get('client', ''),
+                    'exercice': payload.get('exercice', ''),
+                    'type': payload.get('type', ''),
+                    'date_document': payload.get('date_document', ''),
+                    'description': content_for_llm,
+                    'score': float(score)
                 }
-            )
-            
-            # Retourner les pièces justificatives
-            pieces = []
-            if search_results:
-                for payload, score in search_results:
-                    pieces.append({
-                        'id': payload.get('id', ''),
-                        'source': payload.get('titre', ''),
-                        'content': payload.get('description', ''),
-                        'metadata': {
-                            'titre': payload.get('titre', ''),
-                            'client': payload.get('client', ''),
-                            'exercice': payload.get('exercice', ''),
-                            'type': payload.get('type', ''),
-                            'date_document': payload.get('date_document', ''),
-                            'fichier_url': payload.get('fichier_url', '')
-                        },
-                        'score': float(score),
-                        'document_context': current_doc
-                    })
-            
+                context_docs.append(doc_context)
+                
+                pieces.append({
+                    'id': payload.get('id', ''),
+                    'source': payload.get('titre', ''),
+                    'content': content_for_llm,
+                    'metadata': {
+                        'titre': payload.get('titre', ''),
+                        'client': payload.get('client', ''),
+                        'exercice': payload.get('exercice', ''),
+                        'type': payload.get('type', ''),
+                        'date_document': payload.get('date_document', ''),
+                        'fichier_url': payload.get('fichier_url', '')
+                    },
+                    'score': float(score)
+                })
+        
+        # Construire le prompt pour Mistral
+        prompt_parts = [
+            f"Question de l'utilisateur : {question}",
+            "",
+            "Contexte documentaire disponible :"
+        ]
+        
+        if context_docs:
+            for i, doc in enumerate(context_docs, 1):
+                prompt_parts.append(f"{i}. {doc['titre']} (Client: {doc['client']}, Exercice: {doc['exercice']})")
+                if doc['description']:
+                    prompt_parts.append(f"   Contenu : {doc['description']}")
+                prompt_parts.append("")
         else:
-            assistant_message = AssistantMessage.objects.create(
-                conversation=conversation,
-                role='ASSISTANT',
-                contenu="Veuillez d'abord sélectionner un document en cliquant dessus dans les résultats de recherche pour que je puisse vous répondre précisément.",
-                metadata={'context_used': False}
-            )
+            prompt_parts.append("Aucun document pertinent trouvé pour cette question.")
+            prompt_parts.append("")
+        
+        prompt_parts.extend([
+            "Instructions :",
+            "- Réponds de manière professionnelle et concise",
+            "- Base ta réponse UNIQUEMENT sur les documents fournis dans le contexte",
+            "- Si les informations sont insuffisantes, indique-le clairement",
+            "- Ne jamais inventer d'informations",
+            "",
+            "Réponse :"
+        ])
+        
+        prompt = "\n".join(prompt_parts)
+        
+        # Appeler Mistral
+        mistral_result = call_mistral_api(prompt, str(request.user.id))
+        
+        if mistral_result['success']:
+            response_content = mistral_result['content']
+            metadata = {
+                'context_used': True if context_docs else False,
+                'search_results_count': len(context_docs),
+                'llm_used': True,
+                'llm_duration_ms': mistral_result['duration_ms'],
+                'llm_tokens': mistral_result['tokens']
+            }
+        else:
+            # Fallback si Mistral échoue
+            if context_docs:
+                response_content = f"J'ai trouvé {len(context_docs)} documents pertinents pour votre question :\n\n"
+                for doc in context_docs[:2]:
+                    response_content += f"• {doc['titre']} (Client: {doc['client']}, Exercice: {doc['exercice']})\n"
+                    if doc['description']:
+                        response_content += f"  {doc['description'][:200]}...\n"
+                    response_content += "\n"
+                response_content += "L'assistant IA n'est pas disponible actuellement. Voici les documents trouvés."
+            else:
+                response_content = "Je n'ai pas trouvé de documents pertinents pour votre question. Essayez de reformuler ou d'être plus spécifique sur le client, l'année ou le type de document."
             
-            pieces = []
+            metadata = {
+                'context_used': True if context_docs else False,
+                'search_results_count': len(context_docs),
+                'llm_used': False,
+                'llm_error': mistral_result['error']
+            }
+        
+        # Créer la réponse assistant
+        assistant_message = AssistantMessage.objects.create(
+            conversation=conversation,
+            role='ASSISTANT',
+            contenu=response_content,
+            metadata=metadata
+        )
         
         # Mettre à jour la conversation
         conversation.dernier_message_le = assistant_message.cree_le
@@ -2691,15 +3011,37 @@ def assistant_chat_view(request):
         conversation.save(update_fields=['dernier_message_le', 'nombre_messages'])
         
         # Retourner la réponse
-        return Response({
+        response_data = {
             'question': question,
             'resume': assistant_message.contenu,
             'pieces': pieces,
             'narration': {
                 'texte': assistant_message.contenu,
-                'source': 'contextual' if current_doc else 'no_context'
+                'source': 'llm' if mistral_result['success'] else 'heuristique',
+                'telemetry': {
+                    'provider': 'mistral',
+                    'model': settings.MISTRAL_MODEL_DEFAULT,
+                    'durationMs': mistral_result.get('duration_ms', 0)
+                } if mistral_result['success'] else None
+            },
+            'trace': {
+                'mode': 'recherche_document',
+                'intent': 'documents',
+                'documentSearch': {
+                    'totalFound': len(search_results),
+                    'filteredFound': len(pieces),
+                    'messageNonTrouve': len(pieces) == 0
+                },
+                'llm': {
+                    'used': mistral_result['success'],
+                    'provider': 'mistral',
+                    'model': settings.MISTRAL_MODEL_DEFAULT,
+                    'durationMs': mistral_result.get('duration_ms', 0)
+                }
             }
-        })
+        }
+        
+        return Response(response_data)
         
     except Exception as e:
         logging.error(f"Erreur assistant chat: {e}")

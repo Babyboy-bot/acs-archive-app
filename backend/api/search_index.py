@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 import numpy as np
-import faiss
+try:
+    import faiss  # type: ignore
+    _FAISS_AVAILABLE = True
+except ModuleNotFoundError:
+    faiss = None  # type: ignore
+    _FAISS_AVAILABLE = False
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from django.conf import settings
@@ -50,7 +55,8 @@ class SearchIndex:
         
         self._vectorizer: Optional[TfidfVectorizer] = None
         self._tfidf_matrix: Optional[np.ndarray] = None
-        self._faiss_index: Optional[faiss.Index] = None
+        # L'index FAISS est optionnel (faiss n'est pas installé en environnement standard)
+        self._faiss_index = None
         self._doc_ids: List[str] = []
         self._payloads: List[Dict[str, Any]] = []
         self._corpus_hash: str = ""
@@ -101,8 +107,8 @@ class SearchIndex:
                     self._vectorizer = data.get('vectorizer')
                     self._tfidf_matrix = data.get('tfidf_matrix')
             
-            if self.faiss_path.exists():
-                self._faiss_index = faiss.read_index(str(self.faiss_path))
+            if _FAISS_AVAILABLE and self.faiss_path.exists():
+                self._faiss_index = faiss.read_index(str(self.faiss_path))  # type: ignore[union-attr]
             
             logger.info(f"Index {self.name} chargé depuis le disque ({len(self._doc_ids)} documents)")
             return True
@@ -133,9 +139,9 @@ class SearchIndex:
                 with open(self.index_path, 'wb') as f:
                     pickle.dump(data, f)
             
-            # Sauvegarder l'index FAISS
-            if self._faiss_index is not None:
-                faiss.write_index(self._faiss_index, str(self.faiss_path))
+            # Sauvegarder l'index FAISS (si disponible)
+            if _FAISS_AVAILABLE and self._faiss_index is not None:
+                faiss.write_index(self._faiss_index, str(self.faiss_path))  # type: ignore[union-attr]
             
             logger.info(f"Index {self.name} sauvegardé sur le disque")
             
@@ -192,11 +198,13 @@ class SearchIndex:
             tfidf_sparse = self._vectorizer.fit_transform(corpus)
             self._tfidf_matrix = tfidf_sparse.astype(np.float32).toarray()
             
-            # Construire l'index FAISS
-            if self._tfidf_matrix.shape[1] > 0:
-                faiss.normalize_L2(self._tfidf_matrix)
-                self._faiss_index = faiss.IndexFlatIP(self._tfidf_matrix.shape[1])
+            # Construire l'index FAISS (optionnel)
+            if _FAISS_AVAILABLE and self._tfidf_matrix.shape[1] > 0:
+                faiss.normalize_L2(self._tfidf_matrix)  # type: ignore[union-attr]
+                self._faiss_index = faiss.IndexFlatIP(self._tfidf_matrix.shape[1])  # type: ignore[union-attr]
                 self._faiss_index.add(self._tfidf_matrix)
+            else:
+                self._faiss_index = None
             
             self._corpus_hash = current_hash
             self._last_build = datetime.now()
@@ -253,7 +261,7 @@ class SearchIndex:
         Returns:
             Liste de tuples (payload, score)
         """
-        if self._faiss_index is None or self._vectorizer is None:
+        if (not _FAISS_AVAILABLE) or self._faiss_index is None or self._vectorizer is None:
             return []
         
         with _index_lock:
@@ -262,7 +270,7 @@ class SearchIndex:
             if query_vector.size == 0 or not np.any(query_vector):
                 return []
             
-            faiss.normalize_L2(query_vector)
+            faiss.normalize_L2(query_vector)  # type: ignore[union-attr]
             
             distances, indices = self._faiss_index.search(query_vector, min(top_k, len(self._payloads)))
             
@@ -361,7 +369,7 @@ def hybrid_search(
     tfidf_results = index.search_tfidf(query, top_k=fetch_k)
     
     # Recherche FAISS (si disponible)
-    faiss_results = index.search_faiss(query, top_k=fetch_k)
+    faiss_results = index.search_faiss(query, top_k=fetch_k) if _FAISS_AVAILABLE else []
     
     if not tfidf_results and not faiss_results:
         return []
