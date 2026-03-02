@@ -2838,6 +2838,16 @@ def assistant_chat_view(request):
                 if client_match:
                     client_token = client_match.group(1)
 
+                # Montant: pattern pour les montants (ex: "176 914", "176914", "176.914")
+                montant_token = None
+                montant_match = re.search(r"(\d{1,3}(?:[ .]\d{3})*(?:,\d{2})?)", question)
+                if montant_match:
+                    montant_str = montant_match.group(1).replace(' ', '').replace('.', '').replace(',', '')
+                    try:
+                        montant_token = int(montant_str)
+                    except ValueError:
+                        montant_token = None
+
                 # Construire la requête ORM
                 qs = Document.objects.select_related('risque__exercice__client')
                 if year is not None:
@@ -2851,9 +2861,24 @@ def assistant_chat_view(request):
                         Q(risque__exercice__client__nom__icontains=client_token)
                         | Q(risque__exercice__client__numero_client__icontains=client_token)
                     )
+                if montant_token is not None:
+                    # Filtrer par montant dans le titre ou la description
+                    # Gérer plusieurs formats : "801066", "801 066", "801.066"
+                    montant_variants = [
+                        str(montant_token),  # "801066"
+                        f"{montant_token:,}".replace(",", " "),  # "801 066"
+                        f"{montant_token:,}".replace(",", "."),  # "801.066"
+                    ]
+                    
+                    montant_query = Q()
+                    for variant in montant_variants:
+                        montant_query |= Q(titre__icontains=variant)
+                        montant_query |= Q(description__icontains=variant)
+                    
+                    qs = qs.filter(montant_query)
 
                 # Si aucun filtre, ne pas lancer ce fallback (évite de ramener du bruit)
-                if any([year is not None, type_courrier, risque_token, client_token]):
+                if any([year is not None, type_courrier, risque_token, client_token, montant_token is not None]):
                     docs = qs.order_by('-cree_le')[:5]
                     for doc in docs:
                         try:
