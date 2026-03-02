@@ -534,15 +534,16 @@ export default function PageRecherche() {
     setErreur(null)
 
     try {
-      if (!documentsCharges) {
-        try {
-          await chargerDocuments()
-        } catch (error) {
-          setErreur("Impossible de récupérer les documents.")
-        }
+      // Toujours recharger les documents pour garantir d'avoir la liste à jour
+      const docs = await chargerDocuments()
+
+      if (!docs || docs.length === 0) {
+        setResultats([])
+        setAfficherResultats(true)
+        return
       }
 
-      const resultatFiltre = filtrerDocuments(documentsSource, {
+      const resultatFiltre = filtrerDocuments(docs, {
         client: client || undefined,
         exercice: exercice || undefined,
         risque: risque || undefined,
