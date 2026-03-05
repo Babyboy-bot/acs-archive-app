@@ -7,7 +7,7 @@
     "dev:webpack": "cross-env PORT=5000 next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "test:e2e": "playwright test"
   },
   "author": "KASSI ELIE EMMANUEL & ASSINYO RODRIGUE ",
