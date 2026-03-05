@@ -107,8 +107,8 @@ function genererSuggestionsIntelligentes(messages: Message[]): string[] {
 
 const SUGGESTIONS_DEFAUT = [
   "Avenant N° 0529 2024 de 3CB risque MRP",
-  "Avenant N°0018 exercice 1998 du client ACS risque santé",
-  "Courriers ACS-Compagnie 1998 du client ACS risque santé",
+  "trouve moi le document N°190",
+  "trouve moi le document avec le montant 29 185 franc",
 ];
 
 

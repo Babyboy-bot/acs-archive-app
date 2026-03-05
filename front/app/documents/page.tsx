@@ -481,49 +481,83 @@ export default function PageDocuments() {
       return
     }
 
-    const resolvedUrl = resoudreUrlDocument(url)
-    const fetchUrl = resolvedUrl ? (resolvedUrl.startsWith('/media/') ? resolvedUrl : `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`) : null
+    // Créer une fenêtre d'impression dédiée qui se ferme automatiquement
+    const printWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes,resizable=yes')
 
-    const startPrint = async () => {
-      try {
-        const headers = new Headers({ Accept: 'application/pdf,image/*' })
-        const token = getToken()
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`)
-        }
-
-        const response = await fetch(fetchUrl ?? resolvedUrl!, {
-          credentials: 'include',
-          headers,
-        })
-
-        if (!response.ok) {
-          throw new Error(`Erreur ${response.status}`)
-        }
-
-        const blob = await response.blob()
-
-        await printBlob({
-          blob,
-          title: doc.titre || 'Document',
-          mimeType: response.headers.get('content-type'),
-          sourceUrl: doc.urlFichier ?? resolvedUrl ?? null,
-          fallbackUrl: resolvedUrl,
-        })
-      } catch (error: any) {
-        console.error('Impression document', error)
-        setErreur(error?.message ?? "Impossible d'imprimer le document")
-        if (error instanceof Error && error.name === 'SecurityError') {
-          window.open(resolvedUrl ?? url, '_blank', 'noopener,noreferrer')
-          return
-        }
-        if (resolvedUrl) {
-          window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
-        }
-      }
+    if (!printWindow) {
+      // Popup bloquée, utiliser le comportement par défaut (ouvrir dans nouvel onglet)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return
     }
 
-    void startPrint()
+    // Injecter le contenu dans la fenêtre d'impression
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Impression - ${doc.titre}</title>
+          <style>
+            body {
+              margin: 0;
+              padding: 20px;
+              font-family: Arial, sans-serif;
+              background: white;
+            }
+            .print-header {
+              text-align: center;
+              margin-bottom: 20px;
+              border-bottom: 1px solid #ccc;
+              padding-bottom: 10px;
+            }
+            .print-content {
+              text-align: center;
+            }
+            iframe {
+              width: 100%;
+              height: 80vh;
+              border: none;
+            }
+            .loading {
+              text-align: center;
+              padding: 50px;
+              font-size: 18px;
+              color: #666;
+            }
+            @media print {
+              .print-header { display: none; }
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="print-header">
+            <h1>${doc.titre}</h1>
+            <p>Impression demandée le ${new Date().toLocaleString('fr-FR')}</p>
+            <button onclick="window.print()" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px;">
+              Imprimer maintenant
+            </button>
+          </div>
+          <div class="print-content">
+            <div class="loading">Chargement du document...</div>
+          </div>
+          <script>
+            // Charger le document dans un iframe
+            const iframe = document.createElement('iframe');
+            iframe.src = '${url}';
+            iframe.onload = function() {
+              document.querySelector('.loading').style.display = 'none';
+              // Déclencher l'impression automatiquement après un court délai
+              setTimeout(function() {
+                window.print();
+              }, 1000);
+            };
+            document.querySelector('.print-content').appendChild(iframe);
+          </script>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
   }
 
   const telechargerDocument = (doc: DocumentUI) => {
@@ -541,7 +575,10 @@ export default function PageDocuments() {
         try {
           const response = await fetch(fetchUrl ?? url, {
             credentials: 'include',
-            headers: { Accept: 'application/pdf' },
+            headers: {
+              Accept: 'application/pdf',
+              'Cache-Control': 'no-cache'
+            },
           })
 
           if (!response.ok) {
@@ -549,20 +586,47 @@ export default function PageDocuments() {
           }
 
           const blob = await response.blob()
-          const objectUrl = URL.createObjectURL(blob)
+
+          // Créer un blob PDF explicite si ce n'est pas déjà le cas
+          const pdfBlob = new Blob([blob], { type: 'application/pdf' })
+          const objectUrl = URL.createObjectURL(pdfBlob)
+
+          // Nettoyer et préparer le nom de fichier
+          const titreNettoye = (doc.titre || 'document')
+            .replace(/[<>:"/\\|?*]/g, '_') // Remplacer les caractères interdits
+            .replace(/\s+/g, '_') // Remplacer les espaces par des underscores
+            .substring(0, 100) // Limiter la longueur
+
+          // Toujours ajouter l'extension .pdf
+          const nomFichier = titreNettoye.endsWith('.pdf') ? titreNettoye : `${titreNettoye}.pdf`
 
           const lien = document.createElement('a')
           lien.href = objectUrl
-          lien.download = doc.titre || 'document'
+          lien.download = nomFichier
+          lien.style.display = 'none'
+
           document.body.appendChild(lien)
           lien.click()
           document.body.removeChild(lien)
-          URL.revokeObjectURL(objectUrl)
+
+          // Nettoyer l'URL de l'objet après un délai
+          setTimeout(() => {
+            URL.revokeObjectURL(objectUrl)
+          }, 100)
+
         } catch (error) {
           console.error('Téléchargement document', error)
           const fallback = resoudreUrlDocument(url)
           if (fallback) {
-            window.open(fallback, '_blank', 'noopener,noreferrer')
+            // Fallback : ouvrir dans un nouvel onglet avec téléchargement forcé
+            const lienFallback = document.createElement('a')
+            lienFallback.href = fallback
+            lienFallback.download = `${doc.titre || 'document'}.pdf`
+            lienFallback.target = '_blank'
+            lienFallback.rel = 'noopener,noreferrer'
+            document.body.appendChild(lienFallback)
+            lienFallback.click()
+            document.body.removeChild(lienFallback)
           }
         }
       }
