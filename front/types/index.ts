@@ -146,10 +146,237 @@ export type FiltresRecherche = {
   createurId?: string
 }
 
-// Type pour la réponse API standard
-export type ReponseAPI<T = unknown> = {
-  succes: boolean
-  message?: string
-  donnees?: T
-  erreur?: string
+// ============================================================================
+// TYPES CLIENTS ET ENTREPRISES
+// ============================================================================
+
+export type TypeClientAPI = 'ENTREPRISE' | 'PARTICULIER'
+
+export type StatutExerciceAPI = 'ACTIF' | 'ARCHIVE' | 'CLOTURE'
+
+export interface RisqueResumeAPI {
+  id: string
+  type: string
+  numeroPolice: string | null
+}
+
+export interface ExerciceResumeAPI {
+  id: string
+  annee: number
+  statut: StatutExerciceAPI
+  risques: RisqueResumeAPI[]
+}
+
+export interface ClientDRF {
+  id: string
+  nom: string
+  numero_client: string | null
+  type: TypeClientAPI
+  email: string | null
+  telephone: string | null
+  adresse: string | null
+  cree_le: string
+  modifie_le: string
+  entreprise: string | null
+  entreprise_nom: string | null
+  nombre_personnes_rattachees: number
+  exercices?: ExerciceResumeAPI[]
+}
+
+export interface ClientAPI {
+  id: string
+  nom: string
+  numeroClient: string | null
+  type: TypeClientAPI
+  email: string | null
+  telephone: string | null
+  adresse: string | null
+  creeLe: string
+  modifieLe: string
+  entrepriseId: string | null
+  entrepriseNom: string | null
+  nombrePersonnesRattachees: number
+  exercices: ExerciceResumeAPI[]
+}
+
+export interface FormClient {
+  id?: string
+  nom: string
+  numeroClient: string
+  type: TypeClientAPI
+  email: string
+  telephone: string
+  adresse: string
+  entrepriseId?: string
+}
+
+export interface EntrepriseAPI {
+  id: string
+  nom: string
+  siret: string | null
+  email: string | null
+  telephone: string | null
+  adresse: string | null
+  cree_le: string
+  modifie_le: string
+}
+
+export interface ClientsResponse {
+  count: number
+  next: string | null
+  previous: string | null
+  results: ClientAPI[]
+}
+
+export interface ClientDetailResponse extends ClientAPI {
+  // Additional fields for detailed view
+  notes?: string
+  dateDerniereActivite?: string
+}
+
+export interface NouveauRisqueSelection {
+  type: string
+  numeroPolice: string | null
+}
+
+// ============================================================================
+// TYPES DOCUMENTS
+// ============================================================================
+
+export type StatutDocument = 'TRAITE' | 'EN_COURS' | 'ERREUR'
+
+export interface CategorieDocument {
+  id: string
+  nom: string
+  couleur?: string
+  description?: string
+}
+
+export interface EtiquetteDocument {
+  id: string
+  nom: string
+  couleur?: string
+}
+
+export interface CreateurDocument {
+  id: string
+  nom: string
+  prenom: string
+  email?: string
+}
+
+export interface DocumentDRF {
+  id: string
+  titre: string
+  description?: string
+  nom_fichier: string
+  chemin_fichier: string
+  type_fichier: string
+  taille_fichier: number
+  numero_reference?: string
+  date_document?: string
+  date_creation: string
+  date_modification: string
+  statut: StatutDocument
+  categorie: string
+  createur: string
+  etiquettes: string[]
+  url_telechargement: string
+  url_visualisation: string
+}
+
+export interface DocumentAPI {
+  id: string
+  titre: string
+  description?: string
+  nomFichier: string
+  cheminFichier: string
+  typeFichier: string
+  tailleFichier: number
+  numeroReference?: string
+  dateDocument?: string
+  dateCreation: string
+  dateModification: string
+  statut: StatutDocument
+  categorie: CategorieDocument
+  createur: CreateurDocument
+  etiquettes: EtiquetteDocument[]
+  urlTelechargement: string
+  urlVisualisation: string
+}
+
+export interface DocumentsResponse {
+  count: number
+  next: string | null
+  previous: string | null
+  results: DocumentAPI[]
+}
+
+export interface DocumentDetailResponse extends DocumentAPI {
+  // Additional fields for detailed view
+  metadata?: {
+    pages?: number
+    auteur?: string
+    sujet?: string
+    motsCles?: string[]
+    langue?: string
+  }
+  historique?: {
+    id: string
+    action: string
+    dateAction: string
+    utilisateur: string
+  }[]
+}
+
+export interface UploadDocumentRequest {
+  titre: string
+  description?: string
+  categorieId: string
+  numeroReference?: string
+  dateDocument?: string
+  etiquettes?: string[]
+  // Plus le fichier FormData
+}
+
+export interface UpdateDocumentRequest {
+  titre?: string
+  description?: string
+  categorieId?: string
+  numeroReference?: string
+  dateDocument?: string
+  etiquettes?: string[]
+}
+
+export interface DocumentStatistics {
+  totalDocuments: number
+  totalSizeBytes: number
+  documentsByStatus: Record<StatutDocument, number>
+  documentsByType: Record<string, number>
+  documentsByCategory: Record<string, number>
+  recentUploads: {
+    id: string
+    titre: string
+    dateCreation: string
+    createur: string
+  }[]
+}
+
+export interface BulkDocumentOperation {
+  operation: 'delete' | 'move' | 'tag'
+  documentIds: string[]
+  targetCategoryId?: string
+  tagsToAdd?: string[]
+  tagsToRemove?: string[]
+}
+
+export interface BulkOperationResult {
+  success: boolean
+  processed: number
+  failed: number
+  results: {
+    documentId: string
+    success: boolean
+    error?: string
+  }[]
 }

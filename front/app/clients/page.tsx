@@ -10,78 +10,25 @@ import { useRequireAuth } from '@/hooks/useRequireAuth'
 import { useTheme } from '@/hooks/useTheme'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { FormModal } from '@/components/ui/FormModal'
+import {
+  ClientAPI,
+  ClientsResponse,
+  ClientDetailResponse,
+  FormClient,
+  TypeClientAPI,
+  StatutExerciceAPI,
+  RisqueResumeAPI,
+  ExerciceResumeAPI,
+  NouveauRisqueSelection,
+  ClientDRF
+} from '@/types'
 
-type ClientType = 'ENTREPRISE' | 'PARTICULIER'
-
-type RisqueResume = {
-  id: string
-  type: string
-  numeroPolice: string | null
-}
-
-type ExerciceResume = {
-  id: string
-  annee: number
-  statut: string
-  risques: RisqueResume[]
-}
-
-type NouveauRisqueSelection = {
-  type: string
-  numeroPolice: string | null
-}
-
-type StatutExercice = 'ACTIF' | 'ARCHIVE' | 'CLOTURE'
-
-type ClientDRF = {
-  id: string
-  nom: string
-  numero_client: string | null
-  type: ClientType
-  email: string | null
-  telephone: string | null
-  adresse: string | null
-  cree_le: string
-  modifie_le: string
-  entreprise: string | null
-  entreprise_nom: string | null
-  nombre_personnes_rattachees: number
-  exercices?: ExerciceResume[]
-}
-
-type ClientAPI = {
-  id: string
-  nom: string
-  numeroClient: string | null
-  type: ClientType
-  email: string | null
-  telephone: string | null
-  adresse: string | null
-  creeLe: string
-  modifieLe: string
-  entrepriseId: string | null
-  entrepriseNom: string | null
-  nombrePersonnesRattachees: number
-  exercices: ExerciceResume[]
-}
-
-type FormClient = {
-  id?: string
-  nom: string
-  numeroClient: string
-  type: ClientType
-  email: string
-  telephone: string
-  adresse: string
-  entrepriseId?: string
-}
-
-const TYPES_CLIENT: { value: ClientType; label: string }[] = [
+const TYPES_CLIENT: { value: TypeClientAPI; label: string }[] = [
   { value: 'ENTREPRISE', label: 'Entreprise' },
   { value: 'PARTICULIER', label: 'Particulier' }
 ]
 
-const STATUTS_EXERCICE: { value: StatutExercice; label: string }[] = [
+const STATUTS_EXERCICE: { value: StatutExerciceAPI; label: string }[] = [
   { value: 'ACTIF', label: 'Actif' },
   { value: 'ARCHIVE', label: 'Archivé' },
   { value: 'CLOTURE', label: 'Clôturé' }
@@ -162,7 +109,7 @@ export default function PageClients() {
   const [suppressionExerciceEnCours, setSuppressionExerciceEnCours] = useState<string | null>(null)
   const [soumissionEnCours, setSoumissionEnCours] = useState(false)
   const [recherche, setRecherche] = useState('')
-  const [typeFiltre, setTypeFiltre] = useState<ClientType | ''>('')
+  const [typeFiltre, setTypeFiltre] = useState<TypeClientAPI | ''>('')
   const [afficherFormulaire, setAfficherFormulaire] = useState(false)
   const [pageClients, setPageClients] = useState(1)
   const [clientOuvertId, setClientOuvertId] = useState<string | null>(null)
@@ -172,8 +119,8 @@ export default function PageClients() {
   const [formulaire, setFormulaire] = useState<FormClient>(FORMULAIRE_INITIAL)
   const [clientExerciceId, setClientExerciceId] = useState<string | null>(null)
   const [anneeExercice, setAnneeExercice] = useState<string>(() => String(new Date().getFullYear()))
-  const [statutExercice, setStatutExercice] = useState<StatutExercice>('ACTIF')
-  const [exerciceEdite, setExerciceEdite] = useState<ExerciceResume | null>(null)
+  const [statutExercice, setStatutExercice] = useState<StatutExerciceAPI>('ACTIF')
+  const [exerciceEdite, setExerciceEdite] = useState<ExerciceResumeAPI | null>(null)
   const [chargementExercice, setChargementExercice] = useState(false)
   const [clientRisqueId, setClientRisqueId] = useState<string | null>(null)
   const [exerciceRisqueId, setExerciceRisqueId] = useState<string | null>(null)
@@ -188,14 +135,14 @@ export default function PageClients() {
     open: false,
     client: null
   })
-  const [modaleSuppressionExercice, setModaleSuppressionExercice] = useState<{ open: boolean; client: ClientAPI | null; exercice: ExerciceResume | null }>({
+  const [modaleSuppressionExercice, setModaleSuppressionExercice] = useState<{ open: boolean; client: ClientAPI | null; exercice: ExerciceResumeAPI | null }>({
     open: false,
     client: null,
     exercice: null
   })
 
   // État pour la modale détail exercice
-  const [modaleDetailExercice, setModaleDetailExercice] = useState<{ open: boolean; client: ClientAPI | null; exercice: ExerciceResume | null }>({
+  const [modaleDetailExercice, setModaleDetailExercice] = useState<{ open: boolean; client: ClientAPI | null; exercice: ExerciceResumeAPI | null }>({
     open: false,
     client: null,
     exercice: null
@@ -323,7 +270,7 @@ export default function PageClients() {
     setRisqueNumero('')
   }
 
-  const ouvrirFormulaireRisque = (client: ClientAPI, exercice: ExerciceResume) => {
+  const ouvrirFormulaireRisque = (client: ClientAPI, exercice: ExerciceResumeAPI) => {
     const estOuvert = clientRisqueId === client.id && exerciceRisqueId === exercice.id
     if (estOuvert) {
       fermerFormulaireRisque()
@@ -501,12 +448,12 @@ export default function PageClients() {
     }
   }
 
-  const ouvrirModaleDetailExercice = (client: ClientAPI, exercice: ExerciceResume) => {
+  const ouvrirModaleDetailExercice = (client: ClientAPI, exercice: ExerciceResumeAPI) => {
     setModaleDetailExercice({ open: true, client, exercice })
     // Initialiser les variables pour les formulaires de la modale
     setClientExerciceId(client.id)
     setExerciceEdite(exercice)
-    setStatutExercice(exercice.statut as StatutExercice)
+    setStatutExercice(exercice.statut as StatutExerciceAPI)
     setClientRisqueId(client.id)
     setExerciceRisqueId(exercice.id)
     setRisqueType('')
@@ -516,7 +463,7 @@ export default function PageClients() {
     setMessageSucces('')
   }
 
-  const ouvrirModaleSuppressionExercice = (client: ClientAPI, exercice: ExerciceResume) => {
+  const ouvrirModaleSuppressionExercice = (client: ClientAPI, exercice: ExerciceResumeAPI) => {
     // Fermer d'abord la modale de détail d'exercice
     setModaleDetailExercice({ open: false, client: null, exercice: null })
     // Puis ouvrir la modale de confirmation
@@ -614,21 +561,21 @@ export default function PageClients() {
           ? (data as any).results
           : []
 
-      const exercices: ExerciceResume[] = bruts.map((exercice: any) => ({
+      const exercices: ExerciceResumeAPI[] = bruts.map((exercice: any) => ({
         id: exercice.id as string,
         annee: exercice.annee as number,
-        statut: (exercice.statut as string) ?? 'ACTIF',
+        statut: (exercice.statut as string ?? 'ACTIF') as StatutExerciceAPI,
         risques: Array.isArray(exercice.risques)
           ? exercice.risques.map((risque: any) => ({
-            id: risque.id as string,
-            type: (risque.type as string) ?? '',
-            numeroPolice:
-              (risque.numeroPolice as string | null) ??
-              (risque.numero_police as string | null) ??
-              null,
-          }))
-          : [],
-      }))
+              id: risque.id as string,
+              type: (risque.type as string) ?? '',
+              numeroPolice:
+                (risque.numeroPolice as string | null) ??
+                (risque.numero_police as string | null) ??
+                null
+            } as RisqueResumeAPI))
+          : []
+      } as ExerciceResumeAPI))
 
       setClients((precedent) =>
         precedent.map((client) =>
@@ -778,7 +725,7 @@ export default function PageClients() {
     setMessageSucces('')
   }
 
-  const ouvrirEditionExercice = (client: ClientAPI, exercice: ExerciceResume) => {
+  const ouvrirEditionExercice = (client: ClientAPI, exercice: ExerciceResumeAPI) => {
     const estDejaOuvert = exerciceEdite?.id === exercice.id && clientExerciceId === client.id
     if (estDejaOuvert) {
       fermerFormulaireExercice()
@@ -788,7 +735,7 @@ export default function PageClients() {
     setClientExerciceId(client.id)
     setExerciceEdite(exercice)
     setAnneeExercice(String(exercice.annee))
-    setStatutExercice(exercice.statut as StatutExercice)
+    setStatutExercice(exercice.statut as StatutExerciceAPI)
     setErreur('')
     setMessageSucces('')
     fermerFormulaireRisque()
@@ -1001,7 +948,7 @@ export default function PageClients() {
 
           <select
             value={typeFiltre}
-            onChange={(e) => setTypeFiltre(e.target.value as ClientType | '')}
+            onChange={(e) => setTypeFiltre(e.target.value as TypeClientAPI | '')}
             className="px-4 py-2.5 text-sm bg-theme-card border border-theme rounded-lg focus:border-blue-400 outline-none min-w-[160px]"
           >
             <option value="">Tous les types</option>
@@ -1146,7 +1093,7 @@ export default function PageClients() {
                               <label className="block text-xs font-semibold text-green-900 mb-1">Statut *</label>
                               <select
                                 value={statutExercice}
-                                onChange={(e) => setStatutExercice(e.target.value as StatutExercice)}
+                                onChange={(e) => setStatutExercice(e.target.value as StatutExerciceAPI)}
                                 className="w-full px-4 py-2 border-2 border-green-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-200 text-sm"
                               >
                                 {STATUTS_EXERCICE.map((option) => (
@@ -1318,7 +1265,7 @@ export default function PageClients() {
               <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Type *</label>
               <select
                 value={formulaire.type}
-                onChange={(e) => setFormulaire((prev) => ({ ...prev, type: e.target.value as ClientType }))}
+                onChange={(e) => setFormulaire((prev) => ({ ...prev, type: e.target.value as TypeClientAPI }))}
                 className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-red-400 outline-none ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
                   }`}
                 required
@@ -1504,7 +1451,7 @@ export default function PageClients() {
                 <div className="flex gap-2">
                   <select
                     value={statutExercice}
-                    onChange={(e) => setStatutExercice(e.target.value as StatutExercice)}
+                    onChange={(e) => setStatutExercice(e.target.value as StatutExerciceAPI)}
                     className="flex-1 px-3 py-2 text-sm border rounded-lg bg-theme-card border-theme text-theme-primary"
                   >
                     {STATUTS_EXERCICE.map((opt) => (
