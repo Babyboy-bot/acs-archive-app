@@ -1,26 +1,27 @@
 # tests/api/test_assistant.py
 """
-Tests for assistant/chat endpoints
+Tests for assistant API endpoints
 """
 import pytest
-from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 from rest_framework import status
-from api.models import AssistantConversation
-
-User = get_user_model()
 
 
 @pytest.mark.api
+@pytest.mark.api
+@pytest.mark.django_db
 class AssistantAPITests(APITestCase):
     """Test assistant API functionality"""
 
     def setUp(self):
         """Set up test data"""
-        self.user = User.objects.create_user(
-            username='testuser',
-            email='test@example.com',
+        from api.models import Utilisateur
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='testuser',
+            nom='Test',
+            prenom='User',
             password='testpass123',
+            email='test@example.com',
             role='USER'
         )
 

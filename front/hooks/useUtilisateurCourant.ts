@@ -8,7 +8,7 @@ export function useUtilisateurCourant() {
     setUtilisateur(getUtilisateurActif())
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === 'utilisateurActif' || event.key === 'authToken') {
+      if (event.key === 'utilisateurActif') {
         setUtilisateur(getUtilisateurActif())
       }
     }

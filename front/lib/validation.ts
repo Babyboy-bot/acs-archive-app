@@ -170,13 +170,16 @@ export const ALLOWED_IMAGE_TYPES = [
 ] as const
 
 /**
- * Types MIME autorisés pour les documents
+ * Types MIME autorisés pour les documents (doit correspondre à la whitelist backend)
  */
 export const ALLOWED_DOCUMENT_TYPES = [
   'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain'
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/tiff',
 ] as const
 
 /**

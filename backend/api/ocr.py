@@ -264,8 +264,8 @@ def is_scanned_pdf(pdf_path: str) -> bool:
         True si le PDF est probablement scanné
     """
     try:
-        import PyPDF2
-        
+        import pypdf as PyPDF2
+
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
             
@@ -534,8 +534,8 @@ def is_scanned_pdf(pdf_path: str, sample_pages: int = 3) -> bool:
         True si le PDF semble être scanné
     """
     try:
-        import PyPDF2
-        
+        import pypdf as PyPDF2
+
         with open(pdf_path, 'rb') as f:
             reader = PyPDF2.PdfReader(f)
             total_pages = len(reader.pages)
@@ -593,8 +593,8 @@ def extract_text_with_ocr_fallback(
     # Si le PDF n'est pas scanné et OCR non forcé, essayer l'extraction native
     if not is_scanned and not force_ocr:
         try:
-            import PyPDF2
-            
+            import pypdf as PyPDF2
+
             with open(pdf_path, 'rb') as f:
                 reader = PyPDF2.PdfReader(f)
                 

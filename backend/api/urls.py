@@ -27,6 +27,7 @@ from .views_main import (
     audit_log_list,
     audit_log_detail,
     audit_log_stats,
+    auth_verify_view,
     health_check,
     ready_check,
     version_info,
@@ -89,6 +90,7 @@ urlpatterns = [
     path('audit/stats/', audit_log_stats, name='audit-log-stats'),
     
     # Healthcheck (monitoring/Kubernetes)
+    path('auth/verify/', auth_verify_view, name='auth-verify'),
     path('health/', health_check, name='health-check'),
     path('ready/', ready_check, name='ready-check'),
     path('version/', version_info, name='version-info'),

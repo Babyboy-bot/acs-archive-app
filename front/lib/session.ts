@@ -15,7 +15,7 @@ const UTILISATEUR_KEY = 'utilisateurActif'
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? (typeof window !== 'undefined' ? '/api' : 'http://backend:8000/api')
 
-const REFRESH_ENDPOINT = '/api/auth/refresh/'
+const VERIFY_ENDPOINT = '/api/auth/verify/'
 
 function isBrowser() {
   return typeof window !== 'undefined'
@@ -49,6 +49,15 @@ export function getUtilisateurActif(): SessionUtilisateur | null {
 export function supprimerSession() {
   if (!isBrowser()) return
   localStorage.removeItem(UTILISATEUR_KEY)
+  // Nettoyer les données sensibles de l'assistant (messages contenant des infos clients)
+  const keysToRemove: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (key && key.startsWith('acs-assistant-')) {
+      keysToRemove.push(key)
+    }
+  }
+  keysToRemove.forEach(key => localStorage.removeItem(key))
 }
 
 export async function verifierSessionServeur({ timeoutMs = 8000 }: { timeoutMs?: number } = {}): Promise<boolean> {
@@ -58,12 +67,9 @@ export async function verifierSessionServeur({ timeoutMs = 8000 }: { timeoutMs?:
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(REFRESH_ENDPOINT, {
-      method: 'POST',
+    const response = await fetch(VERIFY_ENDPOINT, {
+      method: 'GET',
       credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       signal: controller.signal,
     })
     return response.ok

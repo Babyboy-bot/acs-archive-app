@@ -3,26 +3,35 @@
 Tests for authentication endpoints
 """
 import pytest
-from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 from rest_framework import status
 
-User = get_user_model()
-
 
 @pytest.mark.api
+@pytest.mark.api
+@pytest.mark.django_db
 class AuthenticationTests(APITestCase):
     """Test authentication functionality"""
 
     def setUp(self):
         """Set up test data"""
+        from api.models import Utilisateur
         self.user_data = {
-            'username': 'testuser',
+            'nom_utilisateur': 'testuser',
+            'nom': 'Test',
+            'prenom': 'User',
             'email': 'test@example.com',
             'password': 'testpass123',
             'role': 'USER'
         }
-        self.user = User.objects.create_user(**self.user_data)
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur=self.user_data['nom_utilisateur'],
+            nom=self.user_data['nom'],
+            prenom=self.user_data['prenom'],
+            password=self.user_data['password'],
+            email=self.user_data['email'],
+            role=self.user_data['role']
+        )
 
     def tearDown(self):
         """Clean up test data"""
@@ -36,8 +45,8 @@ class AuthenticationTests(APITestCase):
         })
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('access', response.data)
-        self.assertIn('refresh', response.data)
+        self.assertIn('success', response.data)
+        self.assertIn('utilisateur', response.data)
 
     def test_login_invalid_credentials(self):
         """Test login with invalid credentials"""

@@ -1,23 +1,31 @@
 # tests/api/test_documents.py
 """
-Tests for document management endpoints
+Tests for document API endpoints
 """
 import pytest
 from django.core.files.base import ContentFile
-from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 from rest_framework import status
-from api.models import Document, Risque, Exercice, Client
 
-User = get_user_model()
+User = None
+Document = None
+Risque = None
+Exercice = None
+Client = None
 
 
 @pytest.mark.api
+@pytest.mark.api
+@pytest.mark.django_db
 class DocumentAPITests(APITestCase):
     """Test document API functionality"""
 
     def setUp(self):
         """Set up test data"""
+        from django.contrib.auth import get_user_model
+        from api.models import Document, Risque, Exercice, Client
+        
+        User = get_user_model()
         # Create test client, exercise, and risk
         self.client_obj = Client.objects.create(
             code='TEST',
@@ -36,10 +44,13 @@ class DocumentAPITests(APITestCase):
         )
 
         # Create test user
-        self.user = User.objects.create_user(
-            username='testuser',
-            email='test@example.com',
+        from api.models import Utilisateur
+        self.user = Utilisateur.objects.create_user(
+            nom_utilisateur='testuser',
+            nom='Test',
+            prenom='User',
             password='testpass123',
+            email='test@example.com',
             role='USER'
         )
 

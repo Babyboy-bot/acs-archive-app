@@ -254,6 +254,9 @@ class Document(models.Model):
             models.Index(fields=['auteur']),
             models.Index(fields=['categorie']),
             models.Index(fields=['cree_le']),
+            models.Index(fields=['type_courrier']),
+            models.Index(fields=['est_archive']),
+            models.Index(fields=['date_document']),
         ]
     
     def __str__(self):

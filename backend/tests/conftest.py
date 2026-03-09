@@ -2,35 +2,18 @@
 """
 Pytest configuration and fixtures for ACS Archive App tests
 """
-import pytest
 import os
-from django.conf import settings
-from django.test.utils import get_runner
 
-# Override Django settings for testing
+# Set Django settings module before any Django imports
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'acs_backend.settings')
 
-# Configure Django
-import django
-django.setup()
+# Import pytest fixtures from pytest-django
+import pytest
+from pytest_django.fixtures import django_db_setup
 
-
-@pytest.fixture(scope='session')
-def django_db_setup():
-    """Setup Django database for testing"""
-    from django.core.management import execute_from_command_line
-    from django.db import connection
-
-    # Create test database tables
-    with connection.schema_editor() as schema_editor:
-        # This will create all tables
-        pass
-
-    yield
-
-    # Cleanup after all tests
-    pass
-
+# Override Django settings for testing
+from django.conf import settings
+from django.test.utils import get_runner
 
 @pytest.fixture
 def api_client():

@@ -2,9 +2,10 @@
 Django settings for acs_backend project.
 """
 
+import os
+import sys
 from pathlib import Path
 from datetime import timedelta
-import os
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -18,6 +19,14 @@ load_dotenv(BASE_DIR / '.env', override=False)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # La clé ne doit jamais avoir de valeur par défaut en clair dans le code.
+# Custom User Model
+AUTH_USER_MODEL = 'api.Utilisateur'
+
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+]
+
 SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY doit être défini dans les variables d'environnement")
@@ -108,14 +117,11 @@ else:
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.getenv('DB_NAME', 'acs_archive'),
             'USER': os.getenv('DB_USER', 'acs_user'),
-            'PASSWORD': os.getenv('DB_PASSWORD', ''),
-            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PASSWORD': os.getenv('DB_PASSWORD', 'acs_password'),
+            'HOST': os.getenv('DB_HOST', 'db'),
             'PORT': os.getenv('DB_PORT', '5432'),
         }
     }
-
-# Custom User Model
-AUTH_USER_MODEL = 'api.Utilisateur'
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -238,8 +244,7 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
 
-    # Protection XSS et type sniffing
-    SECURE_BROWSER_XSS_FILTER = True
+    # Protection type sniffing (X-Content-Type-Options: nosniff)
     SECURE_CONTENT_TYPE_NOSNIFF = True
 
     # HSTS pour forcer HTTPS côté navigateur

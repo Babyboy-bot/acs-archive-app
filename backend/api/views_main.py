@@ -48,10 +48,10 @@ def should_use_secure_cookie(request):
 
 
 try:
-    import PyPDF2
+    import pypdf as PyPDF2
     PDF_EXTRACTION_AVAILABLE = True
 except ImportError:
-    logging.warning("PyPDF2 non disponible, extraction avancée des PDF désactivée")
+    logging.warning("pypdf non disponible, extraction avancée des PDF désactivée")
     PyPDF2 = None  # type: ignore[assignment]
     PDF_EXTRACTION_AVAILABLE = False
 
@@ -1077,8 +1077,9 @@ class ClientViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(type=type_param)
 
         # Respecter le paramètre d'ordering si fourni, sinon trier par nom
+        ALLOWED_CLIENT_ORDERINGS = {'nom', '-nom', 'numero_client', '-numero_client', 'cree_le', '-cree_le'}
         ordering = self.request.query_params.get('ordering') or None
-        if ordering:
+        if ordering and ordering in ALLOWED_CLIENT_ORDERINGS:
             queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('nom')
@@ -1185,8 +1186,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
             'risque__exercice__client',
         ).all()
 
+        ALLOWED_ORDERINGS = {
+            'cree_le', '-cree_le', 'titre', '-titre',
+            'date_document', '-date_document', 'taille_fichier', '-taille_fichier',
+        }
         ordering = self.request.query_params.get('ordering')
-        if ordering:
+        if ordering and ordering in ALLOWED_ORDERINGS:
             queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('-cree_le')
@@ -1262,6 +1267,17 @@ class DocumentUploadView(APIView):
         if not fichier or not titre or not risque_id or not type_courrier:
             return Response(
                 {'erreur': 'Le fichier, le titre, le risque et le type de courrier sont obligatoires.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ALLOWED_MIME_TYPES = {
+            'application/pdf', 'image/jpeg', 'image/jpg', 'image/png',
+            'image/gif', 'image/webp', 'image/tiff',
+        }
+        fichier_mime = (fichier.content_type or '').split(';')[0].strip().lower()
+        if fichier_mime not in ALLOWED_MIME_TYPES:
+            return Response(
+                {'erreur': f'Type de fichier non autorisé : {fichier_mime}. Formats acceptés : PDF, JPEG, PNG, GIF, WEBP, TIFF.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1478,6 +1494,8 @@ def stats_view(request):
 setattr(stats_view, 'ressource', 'stats')
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def assistant_valid_clients_view(request):
     """
     Retourne la liste des codes/noms de clients valides pour validation.
@@ -3082,6 +3100,15 @@ setattr(assistant_chat_view, 'ressource', 'documents')
 # ============================================================================
 # HEALTHCHECK ENDPOINTS
 # ============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def auth_verify_view(request):
+    """Endpoint de vérification d'authentification pour nginx auth_request.
+    Retourne 200 si le token JWT est valide, 401 sinon (géré par DRF automatiquement).
+    """
+    return Response(status=status.HTTP_200_OK)
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
