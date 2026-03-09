@@ -18,8 +18,8 @@
   "description": "Application de gestion d'archives pour ACS - Assureurs Conseils Service",
   "dependencies": {
     "@heroicons/react": "^2.2.0",
-    "@react-three/fiber": "^9.4.2",
-    "@react-three/postprocessing": "^3.0.4",
+    "@react-three/fiber": "^8.17.10",
+    "@react-three/postprocessing": "^2.16.4",
     "date-fns": "^4.1.0",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.23.24",

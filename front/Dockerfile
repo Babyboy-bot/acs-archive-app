@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json* ./
 
 # Installer TOUTES les dépendances (y compris devDependencies pour le build)
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copier le code source
 COPY . .
