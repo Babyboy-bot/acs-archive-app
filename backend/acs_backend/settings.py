@@ -236,11 +236,8 @@ SIMPLE_JWT = {
 
 # Paramètres de sécurité supplémentaires activés automatiquement lorsque DEBUG=False.
 if not DEBUG:
-    # Forcer l'utilisation de HTTPS au niveau Django (en complément du reverse proxy)
-    SECURE_SSL_REDIRECT = True
-
-    # Indiquer à Django de faire confiance au reverse proxy (Render, Nginx, etc.)
-    # pour déterminer si la requête initiale était en HTTPS.
+    # Ne pas rediriger HTTP→HTTPS au niveau Django : Nginx gère le SSL.
+    # SECURE_SSL_REDIRECT=True casse les appels serveur-à-serveur Docker (Next.js→backend).
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
 

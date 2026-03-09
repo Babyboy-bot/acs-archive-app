@@ -15,6 +15,13 @@ from pytest_django.fixtures import django_db_setup
 from django.conf import settings
 from django.test.utils import get_runner
 
+
+@pytest.fixture(autouse=True)
+def disable_ssl_redirect(settings):
+    """Disable HTTPS redirect so test client HTTP requests are not 301-redirected"""
+    settings.SECURE_SSL_REDIRECT = False
+
+
 @pytest.fixture
 def api_client():
     """Django REST Framework API client fixture"""
@@ -32,10 +39,12 @@ def authenticated_client(api_client):
 
     # Create a test user
     user = User.objects.create_user(
-        username='testuser',
+        nom_utilisateur='testuser',
+        nom='Test',
+        prenom='User',
         email='test@example.com',
         password='testpass123',
-        role='USER'
+        role='CONSULTANT'
     )
 
     # Generate tokens
@@ -61,7 +70,9 @@ def admin_client(api_client):
 
     # Create a test admin user
     admin = User.objects.create_user(
-        username='admin',
+        nom_utilisateur='admin',
+        nom='Admin',
+        prenom='User',
         email='admin@example.com',
         password='admin123',
         role='ADMIN'
@@ -87,10 +98,12 @@ def test_user():
 
     User = get_user_model()
     user = User.objects.create_user(
-        username='testuser',
+        nom_utilisateur='testuser',
+        nom='Test',
+        prenom='User',
         email='test@example.com',
         password='testpass123',
-        role='USER'
+        role='CONSULTANT'
     )
 
     yield user
@@ -106,7 +119,9 @@ def test_admin():
 
     User = get_user_model()
     admin = User.objects.create_user(
-        username='testadmin',
+        nom_utilisateur='testadmin',
+        nom='Admin',
+        prenom='Test',
         email='admin@example.com',
         password='admin123',
         role='ADMIN'

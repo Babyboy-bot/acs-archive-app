@@ -2668,7 +2668,7 @@ def call_mistral_api(prompt: str, user_id: str = None) -> dict:
         
         start_time = time.time()
         
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=25.0) as client:
             response = client.post(
                 f"{settings.MISTRAL_BASE_URL}/chat/completions",
                 headers=headers,

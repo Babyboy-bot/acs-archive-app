@@ -4,6 +4,7 @@ Tests for document API endpoints
 """
 import pytest
 from django.core.files.base import ContentFile
+from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework import status
 
@@ -17,6 +18,7 @@ Client = None
 @pytest.mark.api
 @pytest.mark.api
 @pytest.mark.django_db
+@override_settings(SECURE_SSL_REDIRECT=False)
 class DocumentAPITests(APITestCase):
     """Test document API functionality"""
 
@@ -28,7 +30,6 @@ class DocumentAPITests(APITestCase):
         User = get_user_model()
         # Create test client, exercise, and risk
         self.client_obj = Client.objects.create(
-            code='TEST',
             nom='Client Test',
             numero_client='12345'
         )
@@ -51,7 +52,7 @@ class DocumentAPITests(APITestCase):
             prenom='User',
             password='testpass123',
             email='test@example.com',
-            role='USER'
+            role='CONSULTANT'
         )
 
         # Create test document
@@ -59,7 +60,10 @@ class DocumentAPITests(APITestCase):
             titre='Document Test',
             reference='REF001',
             risque=self.risque,
-            fichier_url='/media/test.pdf',
+            auteur=self.user,
+            chemin_fichier='/media/test.pdf',
+            type_fichier='pdf',
+            type_courrier='DIVERS',
             taille_fichier=1024
         )
 
@@ -153,13 +157,17 @@ class DocumentAPITests(APITestCase):
         self.client.force_authenticate(user=self.user)
 
         # Create multiple documents for pagination test
+        from api.models import Document
         documents = []
         for i in range(15):  # More than default page size
             doc = Document.objects.create(
                 titre=f'Document {i}',
                 reference=f'REF{i:03d}',
                 risque=self.risque,
-                fichier_url=f'/media/test{i}.pdf',
+                auteur=self.user,
+                chemin_fichier=f'/media/test{i}.pdf',
+                type_fichier='pdf',
+                type_courrier='DIVERS',
                 taille_fichier=1024
             )
             documents.append(doc)

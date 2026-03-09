@@ -3,6 +3,7 @@
 Tests for assistant API endpoints
 """
 import pytest
+from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework import status
 
@@ -10,6 +11,7 @@ from rest_framework import status
 @pytest.mark.api
 @pytest.mark.api
 @pytest.mark.django_db
+@override_settings(SECURE_SSL_REDIRECT=False)
 class AssistantAPITests(APITestCase):
     """Test assistant API functionality"""
 
@@ -22,7 +24,7 @@ class AssistantAPITests(APITestCase):
             prenom='User',
             password='testpass123',
             email='test@example.com',
-            role='USER'
+            role='CONSULTANT'
         )
 
     def tearDown(self):
@@ -159,12 +161,15 @@ class AssistantAPITests(APITestCase):
 
     def test_assistant_conversation_other_user(self):
         """Test that users cannot access other users' conversations"""
+        from api.models import Utilisateur
         # Create another user
-        other_user = User.objects.create_user(
-            username='otheruser',
+        other_user = Utilisateur.objects.create_user(
+            nom_utilisateur='otheruser',
+            nom='Other',
+            prenom='User',
             email='other@example.com',
             password='other123',
-            role='USER'
+            role='CONSULTANT'
         )
 
         try:
