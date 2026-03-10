@@ -1161,7 +1161,7 @@ export default function ConsultantChatPage() {
                 </span>
                 <span className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  Réponses par IA (Mistral)
+                  Réponses par IA
                 </span>
               </div>
             </div>
