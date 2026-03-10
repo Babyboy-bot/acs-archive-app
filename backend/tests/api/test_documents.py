@@ -8,14 +8,7 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework import status
 
-User = None
-Document = None
-Risque = None
-Exercice = None
-Client = None
 
-
-@pytest.mark.api
 @pytest.mark.api
 @pytest.mark.django_db
 @override_settings(SECURE_SSL_REDIRECT=False)

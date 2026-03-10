@@ -3,12 +3,12 @@
 Tests for assistant API endpoints
 """
 import pytest
+from unittest.mock import patch
 from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework import status
 
 
-@pytest.mark.api
 @pytest.mark.api
 @pytest.mark.django_db
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -66,24 +66,24 @@ class AssistantAPITests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_assistant_chat_success(self):
-        """Test successful assistant chat interaction"""
+    @patch('api.views_main.call_mistral_api', return_value={'success': True, 'content': 'Réponse de test mockée.'})
+    def test_assistant_chat_success(self, mock_mistral):
+        """Test successful assistant chat interaction (Mistral mocké pour éviter appels réels)"""
         self.client.force_authenticate(user=self.user)
 
-        # First create a conversation
+        # Créer une conversation
         conversation_response = self.client.post('/api/assistant/conversations/', {
             'titre': 'Test Conversation'
         })
         self.assertEqual(conversation_response.status_code, status.HTTP_201_CREATED)
         conversation_id = conversation_response.data['id']
 
-        # Then send a chat message
+        # Envoyer un message
         response = self.client.post('/api/assistant/chat/', {
             'question': 'Bonjour, pouvez-vous m\'aider ?',
             'conversation_id': conversation_id
         })
 
-        # Should succeed (even if LLM is not available, fallback should work)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('resume', response.data)
         self.assertIn('narration', response.data)
@@ -144,26 +144,26 @@ class AssistantAPITests(APITestCase):
             status.HTTP_400_BAD_REQUEST  # If title is required
         ])
 
-    def test_assistant_conversation_detail(self):
+    @patch('api.views_main.call_mistral_api', return_value={'success': True, 'content': 'Réponse mockée.'})
+    def test_assistant_conversation_detail(self, mock_mistral):
         """Test viewing conversation details and messages"""
         self.client.force_authenticate(user=self.user)
 
-        # Create conversation
+        # Créer conversation
         create_response = self.client.post('/api/assistant/conversations/', {
             'titre': 'Conversation Detail Test'
         })
         conversation_id = create_response.data['id']
 
-        # Send a message
+        # Envoyer un message (Mistral mocké)
         self.client.post('/api/assistant/chat/', {
             'question': 'Test message',
             'conversation_id': conversation_id
         })
 
-        # Get conversation details
+        # Vérifier le détail
         response = self.client.get(f'/api/assistant/conversations/{conversation_id}/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # The detail view returns nombre_messages, not an embedded messages array
         self.assertIn('id', response.data)
         self.assertIn('titre', response.data)
         self.assertGreater(response.data.get('nombre_messages', 0), 0)
@@ -196,6 +196,12 @@ class AssistantAPITests(APITestCase):
 
         finally:
             other_user.delete()
+
+    def test_consultant_cannot_access_llm_admin_history(self):
+        """Test RBAC : un CONSULTANT ne peut pas accéder à l'historique LLM admin"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/assistant/llm/admin/history/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_assistant_health_check(self):
         """Test assistant health check endpoint (requires ADMIN role)"""

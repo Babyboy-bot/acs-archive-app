@@ -9,7 +9,6 @@ from rest_framework import status
 
 
 @pytest.mark.api
-@pytest.mark.api
 @pytest.mark.django_db
 @override_settings(SECURE_SSL_REDIRECT=False)
 class AuthenticationTests(APITestCase):
@@ -71,23 +70,40 @@ class AuthenticationTests(APITestCase):
 
     def test_refresh_token_success(self):
         """Test successful token refresh via cookie"""
-        # First login - sets acs_refresh_token cookie
+        # First login - sets acs_refresh_token HttpOnly cookie
         login_response = self.client.post('/api/auth/login/', {
             'username': 'testuser',
             'password': 'testpass123'
         })
         self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        # Cookie must be present after login
+        self.assertIn('acs_refresh_token', login_response.cookies)
 
         # Refresh reads the cookie set by login (Django test client tracks cookies)
         response = self.client.post('/api/auth/refresh/')
-
-        # 200 if cookie was sent, 401 if cookie was flagged secure-only in test env
-        self.assertIn(response.status_code, [status.HTTP_200_OK, status.HTTP_401_UNAUTHORIZED])
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('acs_access_token', response.cookies)
 
     def test_refresh_token_invalid(self):
         """Test refresh with invalid token"""
         response = self.client.post('/api/auth/refresh/', {
             'refresh': 'invalid_token'
         })
-
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_auth_verify_authenticated(self):
+        """Test auth/verify returns 200 pour un utilisateur connecté"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/auth/verify/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_auth_verify_unauthenticated(self):
+        """Test auth/verify returns 401 sans authentification"""
+        response = self.client.get('/api/auth/verify/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_consultant_cannot_access_admin_stats(self):
+        """Test RBAC : un CONSULTANT ne peut pas accéder aux stats LLM admin"""
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/assistant/llm/admin/stats/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
