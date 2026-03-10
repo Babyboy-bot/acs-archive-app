@@ -23,6 +23,7 @@ from django.db.models.functions import Coalesce, TruncMonth
 from datetime import timedelta
 from django.core.files.storage import default_storage
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 import logging
 
 
@@ -2735,7 +2736,7 @@ def assistant_chat_view(request):
                 id=conversation_id,
                 utilisateur=request.user
             )
-        except (AssistantConversation.DoesNotExist, ValueError):
+        except (AssistantConversation.DoesNotExist, ValueError, DjangoValidationError):
             return Response({'detail': 'Conversation non trouvée'}, status=status.HTTP_404_NOT_FOUND)
         
         # Créer le message utilisateur

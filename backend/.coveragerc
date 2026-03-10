@@ -4,6 +4,8 @@ omit =
     manage.py
     api/tests.py
     api/ocr.py
+    api/chunking.py
+    api/management/*
     */migrations/*
     */settings*.py
     */__pycache__/*
