@@ -2614,7 +2614,7 @@ setattr(assistant_set_document_context_view, 'ressource', 'documents')
 
 def call_mistral_api(prompt: str, user_id: str = None) -> dict:
     """Appelle l'API Mistral avec gestion des quotas et logging."""
-    if not settings.ASSISTANT_LLM_ENABLED or settings.ASSISTANT_LLM_ENABLED.lower() == 'false':
+    if not settings.ASSISTANT_LLM_ENABLED:
         return {
             'success': False,
             'error': 'LLM désactivé',
@@ -3096,6 +3096,318 @@ def assistant_chat_view(request):
 
 
 setattr(assistant_chat_view, 'ressource', 'documents')
+
+
+# ============================================================================
+# HELPERS PARTAGES CHAT (search + prompt)
+# ============================================================================
+
+def _prepare_chat_context(question: str, conversation) -> tuple:
+    """Recherche documentaire + préparation du contexte pour le chat."""
+    import re as _re
+    from .models import DocumentChunk
+    from .search_index import get_document_index
+
+    current_doc = conversation.memoire_etat.get('current_document')
+    search_results = []
+
+    # 1) Recherche par référence (N°X)
+    ref_match = _re.search(r"\b(?:n\s*[°o]?|no)\s*[:\-]?\s*([0-9]{1,6})\b", question, _re.IGNORECASE)
+    if ref_match:
+        ref_raw = ref_match.group(1)
+        ref_norm = ref_raw.lstrip('0') or ref_raw
+        ref_candidates = list(dict.fromkeys([ref_raw, ref_norm]))
+        from django.db.models import Q as _Q
+        query = _Q()
+        for v in ref_candidates:
+            query |= _Q(reference__regex=rf"(^|[^0-9]){_re.escape(v)}([^0-9]|$)")
+            query |= _Q(titre__iregex=rf"\b(?:n\s*[°o]?|no)\s*[:\-]?\s*{_re.escape(v)}\b")
+        docs = Document.objects.select_related('risque__exercice__client').filter(query).order_by('-cree_le')[:5]
+        for doc in docs:
+            try:
+                client = doc.risque.exercice.client.code if doc.risque and doc.risque.exercice else None
+                exercice = str(doc.risque.exercice.annee) if doc.risque and doc.risque.exercice else None
+                risque_type = doc.risque.type if doc.risque else None
+            except Exception:
+                client = exercice = risque_type = None
+            search_results.append(({
+                'id': str(doc.id), 'titre': doc.titre, 'description': doc.description or '',
+                'client': client or '', 'exercice': exercice or '',
+                'type': getattr(doc, 'type_courrier', '') or '',
+                'date_document': doc.date_document.isoformat() if doc.date_document else '',
+                'fichier_url': f"/media/{doc.chemin_fichier}" if doc.chemin_fichier else '',
+                'reference': doc.reference or '', 'risque': risque_type or '',
+            }, 1.0))
+
+    # 2) Fallback critères (année / type / risque / client / montant)
+    if not search_results and not current_doc:
+        try:
+            def _norm(s):
+                import unicodedata as _ud
+                s = (s or '').strip().lower().replace('_', ' ')
+                s = _ud.normalize('NFKD', s)
+                s = ''.join(ch for ch in s if not _ud.combining(ch))
+                return _re.sub(r"\s+", " ", _re.sub(r"[^0-9a-z]+", " ", s)).strip()
+
+            q_norm = _norm(question)
+            from django.db.models import Q as _Q
+            year = None
+            ym = _re.search(r"\b(19\d{2}|20\d{2})\b", q_norm)
+            if ym:
+                try:
+                    year = int(ym.group(1))
+                except ValueError:
+                    pass
+            type_courrier = None
+            if 'acs' in q_norm and 'compagnie' in q_norm:
+                type_courrier = 'ACS_VERS_COMPAGNIE'
+            elif 'acs' in q_norm and 'client' in q_norm:
+                type_courrier = 'ACS_VERS_CLIENT'
+            risque_token = next((r for r in ['sante', 'auto', 'mrp', 'mri'] if r in q_norm), None)
+            if risque_token == 'auto' and 'automobile' not in q_norm and 'auto' not in q_norm:
+                risque_token = None
+            cm = _re.search(r"\bclient\s+([a-z0-9]{2,})\b", q_norm)
+            client_token = cm.group(1) if cm else None
+            mm = _re.search(r"(\d{1,3}(?:[ .]\d{3})*(?:,\d{2})?)", question)
+            montant_token = None
+            if mm:
+                try:
+                    montant_token = int(mm.group(1).replace(' ', '').replace('.', '').replace(',', ''))
+                except ValueError:
+                    pass
+            if any([year is not None, type_courrier, risque_token, client_token, montant_token is not None]):
+                qs = Document.objects.select_related('risque__exercice__client')
+                if year is not None:
+                    qs = qs.filter(risque__exercice__annee=year)
+                if type_courrier:
+                    qs = qs.filter(type_courrier=type_courrier)
+                if risque_token:
+                    qs = qs.filter(risque__type__icontains=risque_token)
+                if client_token:
+                    qs = qs.filter(_Q(risque__exercice__client__nom__icontains=client_token) |
+                                   _Q(risque__exercice__client__numero_client__icontains=client_token))
+                if montant_token is not None:
+                    variants = [str(montant_token), f"{montant_token:,}".replace(",", " "),
+                                f"{montant_token:,}".replace(",", ".")]
+                    mq = _Q()
+                    for v in variants:
+                        mq |= _Q(titre__icontains=v) | _Q(description__icontains=v)
+                    qs = qs.filter(mq)
+                for doc in qs.order_by('-cree_le')[:5]:
+                    try:
+                        client = doc.risque.exercice.client.code if doc.risque and doc.risque.exercice else None
+                        exercice = str(doc.risque.exercice.annee) if doc.risque and doc.risque.exercice else None
+                        risque_type = doc.risque.type if doc.risque else None
+                    except Exception:
+                        client = exercice = risque_type = None
+                    search_results.append(({
+                        'id': str(doc.id), 'titre': doc.titre, 'description': doc.description or '',
+                        'client': client or '', 'exercice': exercice or '',
+                        'type': getattr(doc, 'type_courrier', '') or '',
+                        'date_document': doc.date_document.isoformat() if doc.date_document else '',
+                        'fichier_url': f"/media/{doc.chemin_fichier}" if doc.chemin_fichier else '',
+                        'reference': doc.reference or '', 'risque': risque_type or '',
+                    }, 0.95))
+        except Exception:
+            logging.exception("Erreur fallback critères _prepare_chat_context")
+
+    # 3) TF-IDF global
+    if not search_results:
+        index = get_document_index()
+        if current_doc:
+            search_results = index.search_tfidf(question, top_k=3, document_ids=[current_doc['document_id']])
+        else:
+            search_results = index.search_tfidf(question, top_k=5)
+
+    # Construire context_docs et pieces
+    context_docs, pieces = [], []
+    for payload, score in search_results[:3]:
+        doc_id = payload.get('id')
+        chunk_text = ''
+        if doc_id:
+            chunks = DocumentChunk.objects.filter(document_id=doc_id).order_by('ordre')[:3]
+            chunk_text = ' '.join(c.texte for c in chunks if c.texte and c.texte.strip())[:1500]
+        description = payload.get('description', '') or ''
+        content_for_llm = chunk_text if chunk_text else description[:500]
+        context_docs.append({
+            'titre': payload.get('titre', 'Document sans titre'),
+            'client': payload.get('client', ''), 'exercice': payload.get('exercice', ''),
+            'type': payload.get('type', ''), 'date_document': payload.get('date_document', ''),
+            'description': content_for_llm, 'score': float(score),
+        })
+        pieces.append({
+            'id': payload.get('id', ''), 'source': payload.get('titre', ''),
+            'content': content_for_llm,
+            'metadata': {
+                'titre': payload.get('titre', ''), 'client': payload.get('client', ''),
+                'exercice': payload.get('exercice', ''), 'type': payload.get('type', ''),
+                'date_document': payload.get('date_document', ''),
+                'fichier_url': payload.get('fichier_url', ''),
+            },
+            'score': float(score),
+        })
+    return search_results, context_docs, pieces
+
+
+def _build_chat_prompt(question: str, context_docs: list) -> str:
+    """Construit le prompt Mistral à partir de la question et du contexte documentaire."""
+    parts = [f"Question de l'utilisateur : {question}", "", "Contexte documentaire disponible :"]
+    if context_docs:
+        for i, doc in enumerate(context_docs, 1):
+            parts.append(f"{i}. {doc['titre']} (Client: {doc['client']}, Exercice: {doc['exercice']})")
+            if doc['description']:
+                parts.append(f"   Contenu : {doc['description']}")
+            parts.append("")
+    else:
+        parts += ["Aucun document pertinent trouvé pour cette question.", ""]
+    parts += [
+        "Instructions :",
+        "- Réponds de manière professionnelle et concise",
+        "- Base ta réponse UNIQUEMENT sur les documents fournis dans le contexte",
+        "- Si les informations sont insuffisantes, indique-le clairement",
+        "- Ne jamais inventer d'informations",
+        "", "Réponse :"
+    ]
+    return "\n".join(parts)
+
+
+def _build_fallback_content(context_docs: list) -> str:
+    """Réponse de secours si le LLM est indisponible."""
+    if context_docs:
+        resp = f"J'ai trouvé {len(context_docs)} document(s) pertinent(s) :\n\n"
+        for doc in context_docs[:2]:
+            resp += f"• {doc['titre']} (Client: {doc['client']}, Exercice: {doc['exercice']})\n"
+        resp += "\nL'assistant IA n'est pas disponible actuellement."
+    else:
+        resp = "Je n'ai pas trouvé de documents pertinents. Essayez de reformuler ou d'être plus spécifique."
+    return resp
+
+
+# ============================================================================
+# ENDPOINT SSE — STREAMING ASSISTANT CHAT
+# ============================================================================
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, RoleBasedPermission])
+def assistant_chat_stream_view(request):
+    """Endpoint SSE : stream la réponse LLM token par token."""
+    from django.http import StreamingHttpResponse as _StreamingHttpResponse
+
+    question = request.data.get('question', '').strip()
+    conversation_id = request.data.get('conversation_id')
+
+    if not question:
+        return Response({'detail': 'question requise'}, status=status.HTTP_400_BAD_REQUEST)
+    if not conversation_id:
+        return Response({'detail': 'conversation_id requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        conversation = AssistantConversation.objects.get(id=conversation_id, utilisateur=request.user)
+    except (AssistantConversation.DoesNotExist, ValueError, DjangoValidationError):
+        return Response({'detail': 'Conversation non trouvée'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Sauvegarder le message utilisateur
+    AssistantMessage.objects.create(
+        conversation=conversation,
+        role='USER',
+        contenu=question,
+        metadata={'search_query': question},
+    )
+
+    # Préparer contexte documentaire et prompt
+    _, context_docs, pieces = _prepare_chat_context(question, conversation)
+    prompt = _build_chat_prompt(question, context_docs)
+
+    llm_ok = bool(
+        getattr(settings, 'ASSISTANT_LLM_ENABLED', False) and
+        getattr(settings, 'MISTRAL_API_KEY', None)
+    )
+
+    def generate():
+        # 1. Envoyer les pièces justificatives immédiatement
+        yield f"data: {json.dumps({'type': 'pieces', 'pieces': pieces})}\n\n"
+
+        full_content = []
+
+        # 2. Streaming Mistral
+        if llm_ok:
+            try:
+                headers = {
+                    'Authorization': f'Bearer {settings.MISTRAL_API_KEY}',
+                    'Content-Type': 'application/json',
+                }
+                payload = {
+                    'model': settings.MISTRAL_MODEL_DEFAULT,
+                    'messages': [
+                        {
+                            'role': 'system',
+                            'content': (
+                                "Tu es un assistant spécialisé dans la gestion d'archives d'assurance. "
+                                "Réponds de manière concise et professionnelle en utilisant uniquement "
+                                "les informations fournies."
+                            ),
+                        },
+                        {'role': 'user', 'content': prompt},
+                    ],
+                    'stream': True,
+                    'max_tokens': 1000,
+                    'temperature': 0.3,
+                }
+                with httpx.stream(
+                    'POST',
+                    f"{settings.MISTRAL_BASE_URL}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=90.0,
+                ) as resp:
+                    for line in resp.iter_lines():
+                        if not line or not line.startswith('data: '):
+                            continue
+                        chunk_data = line[6:].strip()
+                        if chunk_data == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(chunk_data)
+                            content_piece = chunk['choices'][0]['delta'].get('content', '')
+                            if content_piece:
+                                full_content.append(content_piece)
+                                yield f"data: {json.dumps({'type': 'chunk', 'chunk': content_piece})}\n\n"
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+            except Exception as e:
+                logging.error(f"Erreur streaming Mistral: {e}")
+
+        # 3. Fallback si LLM vide
+        if not full_content:
+            fallback = _build_fallback_content(context_docs)
+            full_content = [fallback]
+            yield f"data: {json.dumps({'type': 'chunk', 'chunk': fallback})}\n\n"
+
+        # 4. Sauvegarder le message assistant
+        complete_response = ''.join(full_content)
+        try:
+            assistant_msg = AssistantMessage.objects.create(
+                conversation=conversation,
+                role='ASSISTANT',
+                contenu=complete_response,
+                metadata={'context_used': bool(context_docs), 'streaming': True, 'pieces': pieces},
+            )
+            conversation.dernier_message_le = assistant_msg.cree_le
+            conversation.nombre_messages = (conversation.nombre_messages or 0) + 1
+            conversation.save(update_fields=['dernier_message_le', 'nombre_messages'])
+        except Exception as e:
+            logging.error(f"Erreur sauvegarde message streaming: {e}")
+
+        # 5. Signal de fin
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    streaming_resp = _StreamingHttpResponse(generate(), content_type='text/event-stream')
+    streaming_resp['Cache-Control'] = 'no-cache'
+    streaming_resp['X-Accel-Buffering'] = 'no'
+    return streaming_resp
+
+
+setattr(assistant_chat_stream_view, 'ressource', 'documents')
 
 
 # ============================================================================

@@ -33,6 +33,7 @@ from .views_main import (
     version_info,
     assistant_set_document_context_view,
     assistant_chat_view,
+    assistant_chat_stream_view,
     ocr_quality_report_view,
 )
 
@@ -75,6 +76,7 @@ urlpatterns = [
     path('assistant/documents/search/filtered/', assistant_document_search_filtered_view, name='assistant-document-search-filtered'),
     path('assistant/documents/context/', assistant_set_document_context_view, name='assistant-set-document-context'),
     path('assistant/chat/', assistant_chat_view, name='assistant-chat'),
+    path('assistant/chat/stream/', assistant_chat_stream_view, name='assistant-chat-stream'),
     path('assistant/llm/quota/consume/', llm_quota_consume, name='assistant-llm-quota-consume'),
     path('assistant/llm/usage/', llm_usage_log, name='assistant-llm-usage-log'),
     path('assistant/llm/quota/', llm_quota_status, name='assistant-llm-quota-status'),

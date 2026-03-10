@@ -59,6 +59,7 @@ interface Message {
   timestamp: Date;
   pieces?: PieceJustificative[];
   isError?: boolean;
+  isStreaming?: boolean;
 }
 
 interface AssistantConversationSummary {
@@ -490,18 +491,6 @@ export default function ConsultantChatPage() {
           );
         }
 
-        if (currentConversationId) {
-          await apiFetchJson<any>("assistant/messages/", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              conversation: currentConversationId,
-              role: "USER",
-              contenu: question,
-              metadata: {},
-            }),
-          });
-        }
       } catch (error) {
         console.error(
           "Erreur lors de la sauvegarde de la conversation de l'assistant (message utilisateur):",
@@ -509,68 +498,81 @@ export default function ConsultantChatPage() {
         );
       }
 
-      const response = await fetch("/api/assistant-demo", {
+      if (!currentConversationId) {
+        throw new Error("Conversation introuvable");
+      }
+
+      // Ajouter un message assistant vide en attente du stream
+      const streamingMsgId = `assistant-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: streamingMsgId, role: "assistant", content: "", timestamp: new Date(), isStreaming: true },
+      ]);
+
+      // Appel SSE streaming
+      const streamResponse = await fetch("/api/assistant-demo/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
           ...(utilisateur?.role && { "x-user-role": utilisateur.role }),
         },
-        // Envoyer le conversationId pour isoler le contexte par discussion
         body: JSON.stringify({ question, conversationId: currentConversationId }),
       });
 
-      if (!response.ok) {
-        throw new Error("Erreur serveur");
+      if (!streamResponse.ok || !streamResponse.body) {
+        throw new Error("Erreur serveur streaming");
       }
 
-      const data = await response.json();
+      const reader = streamResponse.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      // Normaliser les pièces justificatives
-      let pieces: PieceJustificative[] = [];
-      if (data.pieces && Array.isArray(data.pieces)) {
-        pieces = data.pieces.map((p: any, i: number) => ({
-          id: p.id || `piece-${i}`,
-          source: p.source || "",
-          content: p.content || "",
-          metadata: p.metadata || {},
-          score: p.score || 0,
-          isFallback: p.isFallback || false,
-        }));
-      }
-
-      const assistantMessage: Message = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content:
-          data.narration?.texte ||
-          data.resume ||
-          "Je n'ai pas trouvé de résultat.",
-        timestamp: new Date(),
-        pieces,
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
-
-      if (currentConversationId) {
-        try {
-          await apiFetchJson<any>("assistant/messages/", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              conversation: currentConversationId,
-              role: "ASSISTANT",
-              contenu: assistantMessage.content,
-              metadata: { pieces },
-            }),
-          });
-        } catch (error) {
-          console.error(
-            "Erreur lors de la sauvegarde de la conversation de l'assistant (réponse):",
-            error
-          );
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const dataStr = line.slice(6).trim();
+          if (!dataStr) continue;
+          try {
+            const event = JSON.parse(dataStr) as { type: string; chunk?: string; pieces?: any[] };
+            if (event.type === "pieces" && Array.isArray(event.pieces)) {
+              const pieces: PieceJustificative[] = event.pieces.map((p: any, i: number) => ({
+                id: p.id || `piece-${i}`,
+                source: p.source || "",
+                content: p.content || "",
+                metadata: p.metadata || {},
+                score: p.score || 0,
+                isFallback: false,
+              }));
+              setMessages((prev) =>
+                prev.map((m) => (m.id === streamingMsgId ? { ...m, pieces } : m))
+              );
+            } else if (event.type === "chunk" && event.chunk) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamingMsgId ? { ...m, content: m.content + event.chunk } : m
+                )
+              );
+            } else if (event.type === "done") {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamingMsgId ? { ...m, isStreaming: false } : m
+                )
+              );
+            }
+          } catch {
+            // chunk SSE non JSON, ignorer
+          }
         }
       }
+      // S'assurer que isStreaming est false en fin de stream
+      setMessages((prev) =>
+        prev.map((m) => (m.id === streamingMsgId ? { ...m, isStreaming: false } : m))
+      );
     } catch (error) {
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
@@ -1209,7 +1211,20 @@ export default function ConsultantChatPage() {
                             className={`text-[15px] leading-relaxed whitespace-pre-wrap ${isDark ? "text-slate-200" : "text-slate-700"
                               }`}
                           >
-                            {message.content}
+                            {message.isStreaming && !message.content ? (
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-4 bg-cyan-500 rounded-sm animate-pulse" />
+                                <span className="w-1.5 h-4 bg-purple-500 rounded-sm animate-pulse delay-75" />
+                                <span className="w-1.5 h-4 bg-cyan-500 rounded-sm animate-pulse delay-150" />
+                              </span>
+                            ) : (
+                              <>
+                                {message.content}
+                                {message.isStreaming && (
+                                  <span className="inline-block w-0.5 h-4 bg-cyan-400 ml-0.5 animate-pulse align-middle" />
+                                )}
+                              </>
+                            )}
                           </p>
 
                           {/* Pièces justificatives modernisées */}

@@ -306,7 +306,7 @@ CORS_ALLOW_HEADERS = [
 # Assistant LLM (configuration via backend/.env)
 # ============================================================================
 
-ASSISTANT_LLM_ENABLED = os.getenv('ASSISTANT_LLM_ENABLED', 'true')
+ASSISTANT_LLM_ENABLED = os.getenv('ASSISTANT_LLM_ENABLED', 'true').lower() == 'true'
 ASSISTANT_LLM_PROVIDER = os.getenv('ASSISTANT_LLM_PROVIDER', 'mistral')
 ASSISTANT_LLM_API_KEY = os.getenv('ASSISTANT_LLM_API_KEY') or os.getenv('OPENAI_API_KEY')
 ASSISTANT_LLM_BASE_URL = os.getenv('ASSISTANT_LLM_BASE_URL')
