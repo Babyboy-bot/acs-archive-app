@@ -315,7 +315,7 @@ ASSISTANT_LLM_MODEL = os.getenv('ASSISTANT_LLM_MODEL')
 ASSISTANT_LLM_MONTHLY_LIMIT = int(os.getenv('ASSISTANT_LLM_MONTHLY_LIMIT', '30000'))
 # Les quotas LLM sont désactivés par défaut. Pour les réactiver explicitement,
 # définir ASSISTANT_LLM_QUOTA_DISABLED=false dans backend/.env.
-ASSISTANT_LLM_QUOTA_DISABLED = os.getenv('ASSISTANT_LLM_QUOTA_DISABLED', 'true')
+ASSISTANT_LLM_QUOTA_DISABLED = os.getenv('ASSISTANT_LLM_QUOTA_DISABLED', 'true').lower() == 'true'
 
 CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
 CLAUDE_BASE_URL = os.getenv('CLAUDE_BASE_URL', 'https://api.anthropic.com/v1')

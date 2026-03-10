@@ -104,9 +104,10 @@ export default function AdminLlmPage() {
   })
 
   const libellePurpose = (p: string) => {
-    if (p === 'router') return 'Routage'
-    if (p === 'answer') return 'Réponse'
-    if (p === 'summary') return 'Résumé'
+    if (p === 'assistant_chat') return 'Chat assistant'
+    if (p === 'router') return 'Routage (ancien)'
+    if (p === 'answer') return 'Réponse (ancien)'
+    if (p === 'summary') return 'Résumé (ancien)'
     return p
   }
 
@@ -511,7 +512,7 @@ export default function AdminLlmPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-theme-primary mb-1">
-                    Type d'appel
+                    Type d&apos;appel
                   </label>
                   <select
                     value={filterPurpose}
@@ -519,9 +520,7 @@ export default function AdminLlmPage() {
                     className="w-full px-3 py-2 border border-theme rounded-lg focus:outline-none focus:ring-2 focus:ring-theme-primary"
                   >
                     <option value="">Tous</option>
-                    <option value="router">Routage</option>
-                    <option value="answer">Réponse</option>
-                    <option value="summary">Résumé</option>
+                    <option value="assistant_chat">Chat assistant</option>
                   </select>
                 </div>
               </div>
