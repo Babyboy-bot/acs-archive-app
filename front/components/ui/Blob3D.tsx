@@ -3,7 +3,6 @@ import React, { useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { createNoise4D } from 'simplex-noise';
-import { EffectComposer, Bloom } from '@react-three/postprocessing'; // Importation des effets
 
 const noise4D = createNoise4D();
 
@@ -66,21 +65,13 @@ function BlobMesh() {
 
 export default function Blob3D() {
   return (
-    <Canvas camera={{ position: [0, 0, 3.5], fov: 55 }}>
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[2, 2, 3]} intensity={1.3} />
-
-      {/* Postprocessing effect */}
-      <EffectComposer>
-        <Bloom
-          intensity={1.5} // Luminosité de l'effet
-          radius={0.4}   // Taille de la lueur
-          threshold={0.5} // Seuil de luminosité avant l'application du bloom
-        />
-      </EffectComposer>
-
-      <BlobMesh />
-    </Canvas>
+    <div style={{ filter: 'drop-shadow(0 0 18px rgba(139,92,246,0.7)) drop-shadow(0 0 40px rgba(6,182,212,0.4))' }}>
+      <Canvas camera={{ position: [0, 0, 3.5], fov: 55 }}>
+        <ambientLight intensity={0.7} />
+        <directionalLight position={[2, 2, 3]} intensity={1.3} />
+        <BlobMesh />
+      </Canvas>
+    </div>
   );
 }
 
