@@ -508,6 +508,7 @@ export default function ConsultantChatPage() {
         ...prev,
         { id: streamingMsgId, role: "assistant", content: "", timestamp: new Date(), isStreaming: true },
       ]);
+      setIsLoading(false);
 
       // Appel SSE streaming
       const streamResponse = await fetch("/api/assistant-demo/stream", {
