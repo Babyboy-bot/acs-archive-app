@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     # Third party apps
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',  # Révocation des refresh tokens
     'corsheaders',
     'drf_spectacular',
     
@@ -208,9 +209,9 @@ SIMPLE_JWT = {
     # Durée de vie du token d'accès (par défaut 1 heure pour la sécurité)
     # Le refresh token permet de renouveler automatiquement sans re-login
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 60))),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
-    'ROTATE_REFRESH_TOKENS': False,  # Désactivé temporairement pour debug
-    'BLACKLIST_AFTER_ROTATION': False,  # Désactivé car pas de rotation
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  # Réduit de 30 à 7 jours
+    'ROTATE_REFRESH_TOKENS': True,   # Chaque refresh génère un nouveau token
+    'BLACKLIST_AFTER_ROTATION': True,  # L'ancien token est blacklisté = révocable
     'UPDATE_LAST_LOGIN': True,
     
     'ALGORITHM': 'HS256',
