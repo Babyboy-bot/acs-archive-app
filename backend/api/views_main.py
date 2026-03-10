@@ -3018,8 +3018,8 @@ def assistant_chat_view(request):
                 'context_used': True if context_docs else False,
                 'search_results_count': len(context_docs),
                 'llm_used': True,
-                'llm_duration_ms': mistral_result['duration_ms'],
-                'llm_tokens': mistral_result['tokens']
+                'llm_duration_ms': mistral_result.get('duration_ms', 0),
+                'llm_tokens': mistral_result.get('tokens', {})
             }
         else:
             # Fallback si Mistral échoue
