@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Icon, IconName } from './Icon'
 import { useUtilisateurCourant } from '../hooks/useUtilisateurCourant'
 import { canAccessSection, hasPermission, PermissionRessource } from '../lib/permissions'
-import { supprimerSession } from '../lib/session'
+import { seDeconnecter } from '../lib/session'
 import { applyTheme, getStoredTheme, ThemeMode } from '../lib/theme'
 import { RoleUtilisateur } from '../types'
 
@@ -95,8 +95,8 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
     })
   }, [role])
 
-  const gererDeconnexion = () => {
-    supprimerSession()
+  const gererDeconnexion = async () => {
+    await seDeconnecter()
     router.push('/connexion')
   }
 

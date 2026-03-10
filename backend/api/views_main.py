@@ -498,13 +498,25 @@ def refresh_token_view(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def logout_view(request):
-    """Déconnexion : efface les cookies JWT côté client."""
+    """Déconnexion : blackliste le refresh token puis efface les cookies JWT."""
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from rest_framework_simplejwt.exceptions import TokenError
+
+    access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
+    refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
+
+    refresh_token_str = request.COOKIES.get(refresh_cookie_name)
+    if refresh_token_str:
+        try:
+            token = RefreshToken(refresh_token_str)
+            token.blacklist()
+        except TokenError:
+            pass  # Déjà expiré ou invalide
+
     response = Response(
         {'success': True, 'message': 'Déconnecté avec succès.'},
         status=status.HTTP_200_OK,
     )
-    access_cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "acs_access_token")
-    refresh_cookie_name = settings.SIMPLE_JWT.get("REFRESH_COOKIE", "acs_refresh_token")
     response.delete_cookie(access_cookie_name, path='/')
     response.delete_cookie(refresh_cookie_name, path='/')
     return response

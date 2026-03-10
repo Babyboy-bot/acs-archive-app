@@ -7,7 +7,7 @@ import {
   getToken,
   getUtilisateurActif,
   SessionUtilisateur,
-  supprimerSession,
+  seDeconnecter,
 } from "@/lib/session";
 import { apiFetchJson } from "@/lib/api";
 import { RoleUtilisateur } from "@/types";
@@ -296,8 +296,8 @@ export default function ConsultantChatPage() {
     }
   }, [messages, conversationId]);
 
-  const handleLogout = () => {
-    supprimerSession();
+  const handleLogout = async () => {
+    await seDeconnecter();
     router.push("/connexion");
   };
 

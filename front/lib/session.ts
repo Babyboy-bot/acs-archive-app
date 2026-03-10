@@ -60,6 +60,19 @@ export function supprimerSession() {
   keysToRemove.forEach(key => localStorage.removeItem(key))
 }
 
+export async function seDeconnecter(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout/', {
+      method: 'POST',
+      credentials: 'include',
+    })
+  } catch {
+    // Continuer même si le backend est inaccessible
+  } finally {
+    supprimerSession()
+  }
+}
+
 export async function verifierSessionServeur({ timeoutMs = 8000 }: { timeoutMs?: number } = {}): Promise<boolean> {
   if (!isBrowser()) return false
 
