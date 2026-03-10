@@ -7,7 +7,6 @@ django-cors-headers==4.3.1
 Pillow==10.2.0
 numpy==1.26.4
 scikit-learn==1.4.2
-faiss-cpu==1.13.0
 PyPDF2==3.0.1
 drf-spectacular==0.27.1
 gunicorn==21.2.0
@@ -16,10 +15,15 @@ sentry-sdk[django]==1.40.0
 # HTTP client pour appels API
 httpx==0.27.0
 
-# Skip heavy ML dependencies for CI
-# sentence-transformers==2.2.2
-# huggingface-hub==0.24.7
-# torch>=2.0.0
-# pytesseract==0.3.10
-# pdf2image==1.16.3
-# opencv-python==4.9.0.80
+# Test dependencies
+pytest==8.1.1
+pytest-django==4.8.0
+pytest-cov==5.0.0
+
+# Skip heavy ML/OCR dependencies in CI
+# faiss-cpu  -- retiré du projet
+# sentence-transformers
+# torch
+# pytesseract
+# pdf2image
+# opencv-python
