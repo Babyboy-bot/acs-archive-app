@@ -105,9 +105,9 @@ export default function AdminLlmPage() {
 
   const libellePurpose = (p: string) => {
     if (p === 'assistant_chat') return 'Chat assistant'
-    if (p === 'router') return 'Routage (ancien)'
-    if (p === 'answer') return 'Réponse (ancien)'
-    if (p === 'summary') return 'Résumé (ancien)'
+    if (p === 'router') return 'Routage'
+    if (p === 'answer') return 'Réponse'
+    if (p === 'summary') return 'Résumé'
     return p
   }
 
