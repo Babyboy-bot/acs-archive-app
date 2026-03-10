@@ -2735,7 +2735,7 @@ def assistant_chat_view(request):
                 id=conversation_id,
                 utilisateur=request.user
             )
-        except AssistantConversation.DoesNotExist:
+        except (AssistantConversation.DoesNotExist, ValueError):
             return Response({'detail': 'Conversation non trouvée'}, status=status.HTTP_404_NOT_FOUND)
         
         # Créer le message utilisateur

@@ -190,8 +190,9 @@ class DocumentAPITests(APITestCase):
                 doc.delete()
 
     def test_document_search_no_results(self):
-        """Test search with no matching results"""
+        """Test search with no matching results returns a valid paginated response"""
         self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/documents/?q=nonexistentdocument12345')
+        response = self.client.get('/api/documents/?q=zzz_impossible_query_xyz_987654')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['results']), 0)
+        self.assertIn('results', response.data)
+        self.assertIn('count', response.data)

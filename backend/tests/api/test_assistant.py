@@ -105,10 +105,17 @@ class AssistantAPITests(APITestCase):
         # List conversations
         response = self.client.get('/api/assistant/conversations/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertGreaterEqual(len(response.data), 3)
+
+        # Handle paginated or plain list response
+        if isinstance(response.data, dict):
+            conversations_list = response.data.get('results', [])
+        else:
+            conversations_list = list(response.data)
+
+        self.assertGreaterEqual(len(conversations_list), 3)
 
         # Verify conversation data structure
-        for conv in response.data[:3]:  # Check first 3
+        for conv in conversations_list[:3]:
             self.assertIn('id', conv)
             self.assertIn('titre', conv)
             self.assertIn('cree_le', conv)
@@ -156,8 +163,10 @@ class AssistantAPITests(APITestCase):
         # Get conversation details
         response = self.client.get(f'/api/assistant/conversations/{conversation_id}/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('messages', response.data)
-        self.assertGreater(len(response.data['messages']), 0)
+        # The detail view returns nombre_messages, not an embedded messages array
+        self.assertIn('id', response.data)
+        self.assertIn('titre', response.data)
+        self.assertGreater(response.data.get('nombre_messages', 0), 0)
 
     def test_assistant_conversation_other_user(self):
         """Test that users cannot access other users' conversations"""
@@ -189,10 +198,20 @@ class AssistantAPITests(APITestCase):
             other_user.delete()
 
     def test_assistant_health_check(self):
-        """Test assistant health check endpoint"""
-        self.client.force_authenticate(user=self.user)
-
-        response = self.client.get('/api/assistant/health/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Health check should return some status information
-        self.assertIsInstance(response.data, dict)
+        """Test assistant health check endpoint (requires ADMIN role)"""
+        from api.models import Utilisateur
+        admin = Utilisateur.objects.create_user(
+            nom_utilisateur='admin_health_test',
+            nom='Admin',
+            prenom='Health',
+            email='adminhealth_test@example.com',
+            password='admin123',
+            role='ADMIN'
+        )
+        try:
+            self.client.force_authenticate(user=admin)
+            response = self.client.get('/api/assistant/health/')
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIsInstance(response.data, dict)
+        finally:
+            admin.delete()
