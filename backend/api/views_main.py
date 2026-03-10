@@ -2687,11 +2687,13 @@ def call_mistral_api(prompt: str, user_id: str = None) -> dict:
                 try:
                     LlmUsage.objects.create(
                         utilisateur_id=user_id,
-                        purpose='assistant_chat',
+                        timestamp=timezone.now(),
+                        provider='mistral',
+                        model=getattr(settings, 'MISTRAL_MODEL_DEFAULT', 'mistral-small'),
+                        purpose='answer',
                         tokens_input=result['usage']['prompt_tokens'],
                         tokens_output=result['usage']['completion_tokens'],
                         tokens_total=result['usage']['total_tokens'],
-                        duration_ms=duration_ms
                     )
                 except Exception as _log_err:
                     logging.warning(f"Impossible de créer LlmUsage: {_log_err}")
@@ -3397,16 +3399,17 @@ def assistant_chat_stream_view(request):
             yield f"data: {json.dumps({'type': 'chunk', 'chunk': fallback})}\n\n"
 
         # 4. Logger l'utilisation LLM (toujours, même si quota désactivé)
-        if llm_ok and usage_data:
+        if llm_ok:
             try:
-                from .models import LlmUsage
                 LlmUsage.objects.create(
                     utilisateur_id=user_id,
-                    purpose='assistant_chat',
+                    timestamp=timezone.now(),
+                    provider='mistral',
+                    model=getattr(settings, 'MISTRAL_MODEL_DEFAULT', 'mistral-small'),
+                    purpose='answer',
                     tokens_input=usage_data.get('prompt_tokens', 0),
                     tokens_output=usage_data.get('completion_tokens', 0),
                     tokens_total=usage_data.get('total_tokens', 0),
-                    duration_ms=duration_ms,
                 )
             except Exception as e:
                 logging.warning(f"Impossible de créer LlmUsage streaming: {e}")
