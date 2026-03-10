@@ -2682,16 +2682,19 @@ def call_mistral_api(prompt: str, user_id: str = None) -> dict:
             result = response.json()
             content = result['choices'][0]['message']['content']
             
-            # Logging de l'utilisation
-            if user_id and not settings.ASSISTANT_LLM_QUOTA_DISABLED:
-                LlmUsage.objects.create(
-                    utilisateur_id=user_id,
-                    purpose='assistant_chat',
-                    tokens_input=result['usage']['prompt_tokens'],
-                    tokens_output=result['usage']['completion_tokens'],
-                    tokens_total=result['usage']['total_tokens'],
-                    duration_ms=duration_ms
-                )
+            # Logging de l'utilisation (toujours, même si quota désactivé)
+            if user_id:
+                try:
+                    LlmUsage.objects.create(
+                        utilisateur_id=user_id,
+                        purpose='assistant_chat',
+                        tokens_input=result['usage']['prompt_tokens'],
+                        tokens_output=result['usage']['completion_tokens'],
+                        tokens_total=result['usage']['total_tokens'],
+                        duration_ms=duration_ms
+                    )
+                except Exception as _log_err:
+                    logging.warning(f"Impossible de créer LlmUsage: {_log_err}")
             
             return {
                 'success': True,
@@ -3323,11 +3326,15 @@ def assistant_chat_stream_view(request):
         getattr(settings, 'MISTRAL_API_KEY', None)
     )
 
+    user_id = str(request.user.id)
+
     def generate():
         # 1. Envoyer les pièces justificatives immédiatement
         yield f"data: {json.dumps({'type': 'pieces', 'pieces': pieces})}\n\n"
 
         full_content = []
+        usage_data = {}
+        start_time = time.time()
 
         # 2. Streaming Mistral
         if llm_ok:
@@ -3336,7 +3343,7 @@ def assistant_chat_stream_view(request):
                     'Authorization': f'Bearer {settings.MISTRAL_API_KEY}',
                     'Content-Type': 'application/json',
                 }
-                payload = {
+                mistral_payload = {
                     'model': settings.MISTRAL_MODEL_DEFAULT,
                     'messages': [
                         {
@@ -3350,6 +3357,7 @@ def assistant_chat_stream_view(request):
                         {'role': 'user', 'content': prompt},
                     ],
                     'stream': True,
+                    'stream_options': {'include_usage': True},
                     'max_tokens': 1000,
                     'temperature': 0.3,
                 }
@@ -3357,7 +3365,7 @@ def assistant_chat_stream_view(request):
                     'POST',
                     f"{settings.MISTRAL_BASE_URL}/chat/completions",
                     headers=headers,
-                    json=payload,
+                    json=mistral_payload,
                     timeout=90.0,
                 ) as resp:
                     for line in resp.iter_lines():
@@ -3368,6 +3376,9 @@ def assistant_chat_stream_view(request):
                             break
                         try:
                             chunk = json.loads(chunk_data)
+                            # Capturer les stats d'usage du dernier chunk
+                            if chunk.get('usage'):
+                                usage_data = chunk['usage']
                             content_piece = chunk['choices'][0]['delta'].get('content', '')
                             if content_piece:
                                 full_content.append(content_piece)
@@ -3377,13 +3388,30 @@ def assistant_chat_stream_view(request):
             except Exception as e:
                 logging.error(f"Erreur streaming Mistral: {e}")
 
+        duration_ms = int((time.time() - start_time) * 1000)
+
         # 3. Fallback si LLM vide
         if not full_content:
             fallback = _build_fallback_content(context_docs)
             full_content = [fallback]
             yield f"data: {json.dumps({'type': 'chunk', 'chunk': fallback})}\n\n"
 
-        # 4. Sauvegarder le message assistant
+        # 4. Logger l'utilisation LLM (toujours, même si quota désactivé)
+        if llm_ok and usage_data:
+            try:
+                from .models import LlmUsage
+                LlmUsage.objects.create(
+                    utilisateur_id=user_id,
+                    purpose='assistant_chat',
+                    tokens_input=usage_data.get('prompt_tokens', 0),
+                    tokens_output=usage_data.get('completion_tokens', 0),
+                    tokens_total=usage_data.get('total_tokens', 0),
+                    duration_ms=duration_ms,
+                )
+            except Exception as e:
+                logging.warning(f"Impossible de créer LlmUsage streaming: {e}")
+
+        # 5. Sauvegarder le message assistant
         complete_response = ''.join(full_content)
         try:
             assistant_msg = AssistantMessage.objects.create(
@@ -3398,7 +3426,7 @@ def assistant_chat_stream_view(request):
         except Exception as e:
             logging.error(f"Erreur sauvegarde message streaming: {e}")
 
-        # 5. Signal de fin
+        # 6. Signal de fin
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     streaming_resp = _StreamingHttpResponse(generate(), content_type='text/event-stream')
