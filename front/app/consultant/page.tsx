@@ -1153,7 +1153,7 @@ export default function ConsultantChatPage() {
               >
                 <span className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  Recherche sémantique
+                  Recherche par mots-clés
                 </span>
                 <span className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
@@ -1161,7 +1161,7 @@ export default function ConsultantChatPage() {
                 </span>
                 <span className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  Réponses contextuelles
+                  Réponses par IA (Mistral)
                 </span>
               </div>
             </div>
