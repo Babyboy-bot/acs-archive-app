@@ -12,7 +12,8 @@ import {
 import { apiFetchJson } from "@/lib/api";
 import { RoleUtilisateur } from "@/types";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
-import Blob3D from "@/components/ui/Blob3D";
+import dynamic from "next/dynamic";
+const Blob3D = dynamic(() => import("@/components/ui/Blob3D"), { ssr: false });
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
 // PdfThumbnail retiré - on utilise iframe directement avec l'URL media
