@@ -1,111 +1,41 @@
-// @ts-nocheck
-import React, { useRef, useEffect } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-import { createNoise4D } from 'simplex-noise';
-
-const noise4D = createNoise4D();
-
-function BlobMesh() {
-  const mesh = useRef<THREE.Mesh>(null!);
-  const materialRef = useRef<THREE.ShaderMaterial | null>(null);
-  const original = useRef<Float32Array | null>(null);
-
-  useEffect(() => {
-    const geom = mesh.current.geometry as THREE.SphereGeometry;
-    original.current = geom.attributes.position.array.slice() as Float32Array;
-  }, []);
-
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime() * 0.8;
-
-    // Vérification pour s'assurer que original.current est bien défini
-    if (!original.current) return;
-
-    const geom = mesh.current.geometry as THREE.SphereGeometry;
-    const pos = geom.attributes.position;
-    const orig = original.current;
-
-    for (let i = 0; i < pos.count; i++) {
-      const ox = orig[i * 3];
-      const oy = orig[i * 3 + 1];
-      const oz = orig[i * 3 + 2];
-
-      // Siri-like noise deformation
-      const n = noise4D(ox * 1.4, oy * 1.4, oz * 1.4, t);
-      const offset = n * 0.25;
-
-      pos.setXYZ(i, ox + ox * offset, oy + oy * offset, oz + oz * offset);
-    }
-
-    pos.needsUpdate = true;
-    geom.computeVertexNormals();
-
-    // Animate the color based on time for the gradient effect
-    if (materialRef.current) {
-      const time = clock.getElapsedTime();
-      materialRef.current.uniforms.uTime.value = time;
-    }
-  });
-
-  return (
-    <mesh ref={mesh}>
-      <sphereGeometry args={[1, 90, 90]} />
-      <shaderMaterial
-        ref={materialRef}
-        vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
-        uniforms={{
-          uTime: { value: 0 },
-        }}
-      />
-    </mesh>
-  );
-}
+import React from 'react';
 
 export default function Blob3D() {
   return (
-    <div style={{ filter: 'drop-shadow(0 0 18px rgba(139,92,246,0.7)) drop-shadow(0 0 40px rgba(6,182,212,0.4))' }}>
-      <Canvas camera={{ position: [0, 0, 3.5], fov: 55 }}>
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[2, 2, 3]} intensity={1.3} />
-        <BlobMesh />
-      </Canvas>
-    </div>
+    <>
+      <style>{`
+        @keyframes blob-morph {
+          0%   { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+          25%  { border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%; }
+          50%  { border-radius: 50% 60% 30% 60% / 30% 70% 60% 40%; }
+          75%  { border-radius: 70% 30% 60% 40% / 60% 40% 50% 70%; }
+          100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+        }
+        @keyframes blob-gradient {
+          0%   { background-position: 0% 50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        @keyframes blob-pulse {
+          0%, 100% { transform: scale(1); }
+          50%       { transform: scale(1.06); }
+        }
+        .acs-blob {
+          width: 180px;
+          height: 180px;
+          background: linear-gradient(135deg, #06b6d4, #8b5cf6, #06b6d4, #a855f7, #22d3ee);
+          background-size: 300% 300%;
+          animation:
+            blob-morph   8s ease-in-out infinite,
+            blob-gradient 6s ease infinite,
+            blob-pulse   4s ease-in-out infinite;
+          box-shadow:
+            0 0 40px rgba(139, 92, 246, 0.6),
+            0 0 80px rgba(6, 182, 212, 0.3),
+            0 0 120px rgba(168, 85, 247, 0.2);
+        }
+      `}</style>
+      <div className="acs-blob" />
+    </>
   );
 }
-
-// Vertex Shader
-const vertexShader = `
-  varying vec3 vNormal;
-  varying vec3 vPosition;
-
-  void main() {
-    vNormal = normal;
-    vPosition = position;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-// Fragment Shader (Dégradé dynamique)
-const fragmentShader = `
-  uniform float uTime;
-  varying vec3 vNormal;
-  varying vec3 vPosition;
-
-  vec3 gradientColor(float p) {
-    // Dégradé cyan -> purple
-    vec3 cyan = vec3(0.0, 1.0, 1.0);  // cyan-500
-    vec3 purple = vec3(0.5, 0.0, 0.5);  // purple-500
-    return mix(cyan, purple, p);
-  }
-
-  void main() {
-    float timeFactor = (sin(uTime) + 1.0) * 0.5; // Normalized between 0.0 and 1.0
-    vec3 color = gradientColor(timeFactor);
-
-    // Basic lighting effect
-    float light = dot(normalize(vNormal), vec3(0.0, 1.0, 0.0));
-    gl_FragColor = vec4(color * light, 1.0);
-  }
-`;
