@@ -507,7 +507,6 @@ export default function AdminLlmPage() {
                   >
                     <option value="">Tous</option>
                     <option value="mistral">Mistral</option>
-                    <option value="openai">OpenAI</option>
                   </select>
                 </div>
                 <div>
