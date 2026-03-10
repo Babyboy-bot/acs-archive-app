@@ -361,63 +361,119 @@ export default function AdminLlmPage() {
         )}
 
         {activeTab === 'users' && (
-          <div className="bg-theme-card border border-theme rounded-lg overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-theme">
-                <thead className="bg-theme-base">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                      Utilisateur
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                      Jetons utilisés
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                      Seuil (indicatif)
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-theme-secondary uppercase tracking-wider">
-                      Taux (indicatif)
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-theme-card divide-y divide-theme">
-                  {safeTokensParUtilisateur.map((user) => (
-                    <tr key={user.utilisateur_id} className="hover:bg-theme-base transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-theme-primary">{user.nom_complet}</div>
-                          <div className="text-xs text-theme-secondary">{user.nom_utilisateur}</div>
+          <div className="space-y-4">
+            {/* Résumé + légende */}
+            <div className="bg-theme-card border border-theme rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-theme-primary">
+                  {safeTokensParUtilisateur.length === 0
+                    ? 'Aucun utilisateur actif ce mois'
+                    : `${safeTokensParUtilisateur.length} utilisateur${safeTokensParUtilisateur.length > 1 ? 's' : ''} actif${safeTokensParUtilisateur.length > 1 ? 's' : ''} ce mois`}
+                </p>
+                <p className="text-xs text-theme-secondary mt-0.5">
+                  Usage de l&apos;assistant IA — mois&nbsp;: <span className="font-medium">{stats.current_month}</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-4 text-xs text-theme-secondary">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 rounded-full bg-green-500" />
+                  Usage normal (&lt;&nbsp;80&nbsp;%)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 rounded-full bg-amber-500" />
+                  Usage élevé (80–95&nbsp;%)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
+                  Seuil atteint (&gt;&nbsp;95&nbsp;%)
+                </span>
+              </div>
+            </div>
+
+            {/* État vide */}
+            {safeTokensParUtilisateur.length === 0 && (
+              <div className="bg-theme-card border border-theme rounded-lg p-12 flex flex-col items-center justify-center text-center gap-4">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                  <Icon name="users" size="lg" className="text-gray-400" />
+                </div>
+                <div>
+                  <p className="text-base font-semibold text-theme-primary">Aucune donnée pour ce mois</p>
+                  <p className="text-sm text-theme-secondary mt-1 max-w-sm">
+                    Dès qu&apos;un utilisateur envoie un message à l&apos;assistant IA, son usage apparaît ici automatiquement.
+                  </p>
+                </div>
+                <p className="text-xs text-theme-secondary bg-theme-base rounded px-3 py-2">
+                  💡 Le suivi démarre au premier appel à l&apos;IA dans le mois en cours.
+                </p>
+              </div>
+            )}
+
+            {/* Cartes utilisateurs */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {safeTokensParUtilisateur.map((user, index) => {
+                const pct = Math.min(user.percentage * 100, 100)
+                const color = user.percentage >= 0.95
+                  ? 'bg-red-500'
+                  : user.percentage >= 0.8
+                    ? 'bg-amber-500'
+                    : 'bg-green-500'
+                const textColor = user.percentage >= 0.95
+                  ? 'text-red-600'
+                  : user.percentage >= 0.8
+                    ? 'text-amber-600'
+                    : 'text-green-600'
+                const initials = user.nom_complet
+                  .split(' ')
+                  .map((n) => n[0])
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase()
+
+                return (
+                  <div key={user.utilisateur_id} className="bg-theme-card border border-theme rounded-lg p-5">
+                    {/* Entête carte */}
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="relative flex-shrink-0">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+                          {initials || '?'}
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-theme-primary">
-                        {user.tokens_used.toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-theme-secondary">
-                        {user.limit.toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-gray-200 rounded-full h-2 max-w-[100px]">
-                            <div
-                              className={`h-2 rounded-full ${
-                                user.percentage >= 0.95
-                                  ? 'bg-red-500'
-                                  : user.percentage >= 0.8
-                                    ? 'bg-amber-500'
-                                    : 'bg-green-500'
-                              }`}
-                              style={{ width: `${Math.min(user.percentage * 100, 100)}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-medium text-theme-primary">
-                            {(user.percentage * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-theme-base border border-theme flex items-center justify-center text-xs font-bold text-theme-secondary">
+                          {index + 1}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-theme-primary truncate">{user.nom_complet}</p>
+                        <p className="text-xs text-theme-secondary truncate">@{user.nom_utilisateur}</p>
+                      </div>
+                      <div className={`text-lg font-bold ${textColor}`}>
+                        {pct.toFixed(0)}&nbsp;%
+                      </div>
+                    </div>
+
+                    {/* Barre de progression large */}
+                    <div className="w-full bg-gray-200 rounded-full h-3 mb-3">
+                      <div
+                        className={`h-3 rounded-full transition-all ${color}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+
+                    {/* Chiffres clés */}
+                    <div className="flex items-center justify-between text-sm">
+                      <div>
+                        <span className="text-2xl font-bold text-theme-primary">
+                          {user.tokens_used.toLocaleString('fr-FR')}
+                        </span>
+                        <span className="text-xs text-theme-secondary ml-1">jetons utilisés</span>
+                      </div>
+                      <div className="text-right text-xs text-theme-secondary">
+                        <p>Seuil indicatif</p>
+                        <p className="font-semibold text-theme-primary">{user.limit.toLocaleString('fr-FR')}</p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
