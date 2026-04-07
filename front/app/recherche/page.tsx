@@ -730,8 +730,7 @@ export default function PageRecherche() {
   const construireUrlTelechargement = (url: string) => {
     if (!url) return url
     const resolved = resoudreUrlDocument(url)
-    if (!resolved) return resolved
-    return resolved.startsWith('/media/') ? resolved : `/api/proxy/document?url=${encodeURIComponent(resolved)}`
+    return resolved
   }
 
   const ouvrirDansNouvelOnglet = (doc: (typeof resultatsAffiches)[number]) => {
@@ -743,8 +742,7 @@ export default function PageRecherche() {
 
     if (typeof window !== 'undefined') {
       const resolvedUrl = resoudreUrlDocument(url)
-      const proxyUrl = resolvedUrl?.startsWith('/media/') ? resolvedUrl : `/api/proxy/document?url=${encodeURIComponent(resolvedUrl ?? url)}`
-      window.open(proxyUrl, '_blank', 'noopener,noreferrer')
+      window.open(resolvedUrl ?? url, '_blank', 'noopener,noreferrer')
     }
   }
 

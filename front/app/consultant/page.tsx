@@ -1300,14 +1300,12 @@ export default function ConsultantChatPage() {
                                           const ext = piece.metadata?.fichier_url?.split('.').pop()?.toLowerCase() || '';
                                           const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
                                           const isPdf = ext === 'pdf';
-                                          const proxyUrl = piece.metadata?.fichier_url
-                                            ? `/api/proxy/document?url=${encodeURIComponent(piece.metadata.fichier_url)}`
-                                            : null;
+                                          const fileUrl = piece.metadata?.fichier_url || null;
 
-                                          if (isImage && proxyUrl) {
+                                          if (isImage && fileUrl) {
                                             return (
                                               <img
-                                                src={proxyUrl}
+                                                src={fileUrl}
                                                 alt={piece.metadata?.titre || "Document"}
                                                 className="w-full h-full object-cover"
                                                 loading="lazy"
@@ -1744,7 +1742,6 @@ export default function ConsultantChatPage() {
             <div className="w-full h-[calc(100%-56px)] overflow-auto">
               {(() => {
                 const fichierUrl = modaleDocument.piece?.metadata?.fichier_url || modaleDocument.url;
-                const proxyUrl = `/api/proxy/document?url=${encodeURIComponent(fichierUrl)}`;
                 const ext = fichierUrl.split('.').pop()?.toLowerCase() || '';
                 const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
                 const isPdf = ext === 'pdf';
@@ -1753,7 +1750,7 @@ export default function ConsultantChatPage() {
                   return (
                     <div className="w-full h-full flex items-center justify-center p-4">
                       <img
-                        src={proxyUrl}
+                        src={fichierUrl}
                         alt={modaleDocument.piece?.metadata?.titre || "Document"}
                         className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
                       />
@@ -1764,7 +1761,7 @@ export default function ConsultantChatPage() {
                 if (isPdf) {
                   return (
                     <iframe
-                      src={`${proxyUrl}#toolbar=0&navpanes=0&scrollbar=1`}
+                      src={`${fichierUrl}#toolbar=0&navpanes=0&scrollbar=1`}
                       className="w-full h-full border-0"
                       title={modaleDocument.piece?.metadata?.titre || "Document PDF"}
                     />

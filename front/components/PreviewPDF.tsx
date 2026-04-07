@@ -39,8 +39,7 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
   }, [urlDocument])
 
   const fetchUrl = useMemo(() => {
-    if (!resolvedUrl) return null
-    return `/api/proxy/document?url=${encodeURIComponent(resolvedUrl)}`
+    return resolvedUrl
   }, [resolvedUrl])
 
   useEffect(() => {

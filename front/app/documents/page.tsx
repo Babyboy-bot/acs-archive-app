@@ -441,8 +441,7 @@ export default function PageDocuments() {
   const construireUrlTelechargement = (url: string) => {
     if (!url) return url
     const resolved = resoudreUrlDocument(url)
-    if (!resolved) return resolved
-    return resolved.startsWith('/media/') ? resolved : `/api/proxy/document?url=${encodeURIComponent(resolved)}`
+    return resolved
   }
 
   const ouvrirPreview = (doc: DocumentUI) => {
