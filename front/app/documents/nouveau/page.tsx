@@ -26,6 +26,10 @@ export default function PageNouveauDocument() {
   const [typeCourrier, setTypeCourrier] = useState('')
   const [reference, setReference] = useState('')
   const [auteurId, setAuteurId] = useState('')
+  // Mode bulk : données par fichier
+  const [titresParFichier, setTitresParFichier] = useState<string[]>([])
+  const [referencesParFichier, setReferencesParFichier] = useState<string[]>([])
+  const [progressBulk, setProgressBulk] = useState<{ done: number; total: number } | null>(null)
   const [messageSucces, setMessageSucces] = useState('')
   const [erreur, setErreur] = useState('')
 
@@ -64,12 +68,25 @@ export default function PageNouveauDocument() {
     ).slice(0, 50)
   }, [clients, rechercheClient])
 
+  const extraireNomSansExtension = (nom: string) => nom.replace(/\.[^/.]+$/, '')
+
+  const extraireReference = (nom: string) => {
+    const nomSansExt = nom.replace(/\.[^/.]+$/, '')
+    return nomSansExt.split(' ')[0]
+  }
+
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFichiers(prev => [...prev, ...acceptedFiles])
+    setTitresParFichier(prev => [...prev, ...acceptedFiles.map(f => f.name.replace(/\.[^/.]+$/, ''))])
+    setReferencesParFichier(prev => [...prev, ...acceptedFiles.map(f => {
+      const nomSansExt = f.name.replace(/\.[^/.]+$/, '')
+      return nomSansExt.split(' ')[0]
+    })])
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    multiple: true,
     accept: {
       'application/pdf': ['.pdf'],
       'application/msword': ['.doc'],
@@ -80,6 +97,16 @@ export default function PageNouveauDocument() {
 
   const retirerFichier = (index: number) => {
     setFichiers(prev => prev.filter((_, i) => i !== index))
+    setTitresParFichier(prev => prev.filter((_, i) => i !== index))
+    setReferencesParFichier(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const mettreAJourTitre = (index: number, valeur: string) => {
+    setTitresParFichier(prev => prev.map((t, i) => i === index ? valeur : t))
+  }
+
+  const mettreAJourReference = (index: number, valeur: string) => {
+    setReferencesParFichier(prev => prev.map((r, i) => i === index ? valeur : r))
   }
 
   const exercicesDisponibles = useMemo(() => {
@@ -222,15 +249,24 @@ export default function PageNouveauDocument() {
       return
     }
 
+    const estBulk = fichiers.length > 1
+    if (estBulk) setProgressBulk({ done: 0, total: fichiers.length })
+
     try {
-      for (const fichier of fichiers) {
+      for (let idx = 0; idx < fichiers.length; idx++) {
+        const fichier = fichiers[idx]
+        const titreFichier = estBulk
+          ? (titresParFichier[idx] || extraireNomSansExtension(fichier.name))
+          : titre
+        const referenceFichier = estBulk ? (referencesParFichier[idx] || '') : reference
+
         const formData = new FormData()
         formData.append('file', fichier)
-        formData.append('titre', titre.trim())
+        formData.append('titre', titreFichier.trim())
         formData.append('description', description.trim())
         formData.append('risque_id', risqueId)
         formData.append('type_courrier', typeCourrier)
-        formData.append('reference', reference.trim())
+        formData.append('reference', referenceFichier.trim())
         formData.append('auteur_id', auteurId)
 
         const { response, data } = await apiFetchJson('/documents/upload/', {
@@ -239,17 +275,22 @@ export default function PageNouveauDocument() {
         })
 
         if (!response.ok) {
-          throw new Error((data as any)?.erreur || 'Erreur lors de l’upload')
+          throw new Error((data as any)?.erreur || `Erreur sur le fichier ${fichier.name}`)
         }
+        if (estBulk) setProgressBulk({ done: idx + 1, total: fichiers.length })
       }
 
-      setMessageSucces('Document téléversé avec succès. Redirection…')
+      setProgressBulk(null)
+      setMessageSucces(estBulk
+        ? `${fichiers.length} documents téléversés avec succès. Redirection…`
+        : 'Document téléversé avec succès. Redirection…')
       setTimeout(() => {
         router.push('/documents')
       }, 1500)
     } catch (error) {
       console.error('Erreur upload:', error)
-      setErreur(error instanceof Error ? error.message : 'Erreur lors de l’upload')
+      setProgressBulk(null)
+      setErreur(error instanceof Error ? error.message : 'Erreur lors du téléversement')
       setChargement(false)
     }
   }
@@ -424,32 +465,48 @@ export default function PageNouveauDocument() {
               animate={{ opacity: 1, y: 0 }}
               className="bg-theme-card border border-theme rounded-xl p-6"
             >
-              <h2 className="text-sm font-semibold text-theme-primary mb-4">Informations du document</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-theme-primary">
+                  {fichiers.length > 1 ? `Upload en lot — ${fichiers.length} fichiers` : 'Informations du document'}
+                </h2>
+                {fichiers.length > 1 && (
+                  <span className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-full font-medium">
+                    Mode lot
+                  </span>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Titre *</label>
-                  <input
-                    type="text"
-                    value={titre}
-                    onChange={(e) => setTitre(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
-                    placeholder="Ex: Police Automobile 2025"
-                    required
-                  />
-                </div>
+                {/* Titre — solo uniquement */}
+                {fichiers.length === 1 && (
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-theme-secondary mb-1.5">Titre *</label>
+                    <input
+                      type="text"
+                      value={titre}
+                      onChange={(e) => setTitre(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
+                      placeholder="Ex: Police Automobile 2025"
+                      required
+                    />
+                  </div>
+                )}
 
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Description</label>
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none resize-none"
-                    placeholder="Description optionnelle"
-                  />
-                </div>
+                {/* Description — solo uniquement */}
+                {fichiers.length === 1 && (
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-theme-secondary mb-1.5">Description</label>
+                    <textarea
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      rows={3}
+                      className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none resize-none"
+                      placeholder="Description optionnelle"
+                    />
+                  </div>
+                )}
 
+                {/* Client — commun */}
                 <div>
                   <label className="block text-xs font-medium text-theme-secondary mb-1.5">Client *</label>
                   <div className="relative" ref={clientDropdownRef}>
@@ -497,6 +554,7 @@ export default function PageNouveauDocument() {
                   )}
                 </div>
 
+                {/* Exercice — commun */}
                 <div>
                   <label className="block text-xs font-medium text-theme-secondary mb-1.5">Exercice *</label>
                   <select
@@ -516,6 +574,7 @@ export default function PageNouveauDocument() {
                   )}
                 </div>
 
+                {/* Type de courrier — commun */}
                 <div className="md:col-span-2">
                   <label className="block text-xs font-medium text-theme-secondary mb-1.5">Type de courrier *</label>
                   <div className="flex flex-wrap gap-2">
@@ -539,6 +598,7 @@ export default function PageNouveauDocument() {
                   </div>
                 </div>
 
+                {/* Risque — commun */}
                 <div>
                   <label className="block text-xs font-medium text-theme-secondary mb-1.5">Risque *</label>
                   <select
@@ -560,17 +620,61 @@ export default function PageNouveauDocument() {
                   )}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-theme-secondary mb-1.5">Référence</label>
-                  <input
-                    type="text"
-                    value={reference}
-                    onChange={(e) => setReference(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
-                    placeholder="Ex: DOC-2025-001"
-                  />
-                </div>
+                {/* Référence — solo uniquement */}
+                {fichiers.length === 1 && (
+                  <div>
+                    <label className="block text-xs font-medium text-theme-secondary mb-1.5">Référence</label>
+                    <input
+                      type="text"
+                      value={reference}
+                      onChange={(e) => setReference(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
+                      placeholder="Ex: DOC-2025-001"
+                    />
+                  </div>
+                )}
               </div>
+
+              {/* Mode bulk : tableau titre/référence par fichier */}
+              {fichiers.length > 1 && (
+                <div className="mt-6">
+                  <p className="text-xs font-medium text-theme-secondary uppercase tracking-wider mb-3">
+                    Titre et référence par fichier
+                  </p>
+                  <div className="space-y-2">
+                    {fichiers.map((fichier, index) => (
+                      <div key={index} className="p-3 bg-theme-muted/50 rounded-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Icon name="document" size="sm" className="text-theme-secondary flex-shrink-0" />
+                          <p className="text-xs text-theme-secondary truncate">{fichier.name}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-theme-secondary mb-1">Titre</label>
+                            <input
+                              type="text"
+                              value={titresParFichier[index] ?? ''}
+                              onChange={(e) => mettreAJourTitre(index, e.target.value)}
+                              className="w-full px-2 py-1.5 text-xs bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
+                              placeholder="Titre du document"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-theme-secondary mb-1">Référence</label>
+                            <input
+                              type="text"
+                              value={referencesParFichier[index] ?? ''}
+                              onChange={(e) => mettreAJourReference(index, e.target.value)}
+                              className="w-full px-2 py-1.5 text-xs bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
+                              placeholder="Ex: DOC-2025-001"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-between mt-6 pt-4 border-t border-theme">
                 <button
@@ -584,7 +688,7 @@ export default function PageNouveauDocument() {
                 <button
                   type="button"
                   onClick={() => setEtape(3)}
-                  disabled={!titre.trim() || !clientId || !exerciceId || !risqueId || !typeCourrier || chargementClients}
+                  disabled={(fichiers.length === 1 && !titre.trim()) || !clientId || !exerciceId || !risqueId || !typeCourrier || chargementClients}
                   className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
                 >
                   Continuer
@@ -602,11 +706,14 @@ export default function PageNouveauDocument() {
             >
               <h2 className="text-sm font-semibold text-theme-primary mb-4">Validation finale</h2>
 
+              {/* Métadonnées communes */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 bg-theme-muted/50 rounded-lg mb-4">
-                <div>
-                  <p className="text-xs text-theme-secondary">Titre</p>
-                  <p className="text-sm font-medium text-theme-primary">{titre || '-'}</p>
-                </div>
+                {fichiers.length === 1 && (
+                  <div>
+                    <p className="text-xs text-theme-secondary">Titre</p>
+                    <p className="text-sm font-medium text-theme-primary">{titre || '-'}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs text-theme-secondary">Client</p>
                   <p className="text-sm font-medium text-theme-primary">{clientSelectionne?.nom ?? '-'}</p>
@@ -623,35 +730,68 @@ export default function PageNouveauDocument() {
                   <p className="text-xs text-theme-secondary">Type</p>
                   <p className="text-sm font-medium text-theme-primary">{typeCourrierSelectionne?.label ?? '-'}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-theme-secondary">Référence</p>
-                  <p className="text-sm font-medium text-theme-primary">{reference || '-'}</p>
-                </div>
+                {fichiers.length === 1 && (
+                  <div>
+                    <p className="text-xs text-theme-secondary">Référence</p>
+                    <p className="text-sm font-medium text-theme-primary">{reference || '-'}</p>
+                  </div>
+                )}
               </div>
 
-              {description && (
+              {description && fichiers.length === 1 && (
                 <div className="mb-4 p-3 bg-theme-muted/50 rounded-lg">
                   <p className="text-xs text-theme-secondary mb-1">Description</p>
                   <p className="text-sm text-theme-primary">{description}</p>
                 </div>
               )}
 
+              {/* Liste fichiers */}
               <div className="mb-6">
                 <p className="text-xs font-medium text-theme-secondary uppercase tracking-wider mb-2">
                   {fichiers.length} fichier{fichiers.length > 1 ? 's' : ''}
                 </p>
                 <div className="space-y-2">
                   {fichiers.map((fichier, index) => (
-                    <div key={index} className="flex items-center gap-3 p-3 bg-theme-muted/50 rounded-lg">
-                      <Icon name="document" size="sm" className="text-theme-secondary" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-theme-primary truncate">{fichier.name}</p>
-                        <p className="text-xs text-theme-secondary">{formatTaille(fichier.size)}</p>
+                    <div key={index} className="p-3 bg-theme-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <Icon name="document" size="sm" className="text-theme-secondary flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-theme-primary truncate">{fichier.name}</p>
+                          <p className="text-xs text-theme-secondary">{formatTaille(fichier.size)}</p>
+                        </div>
                       </div>
+                      {fichiers.length > 1 && (
+                        <div className="mt-2 ml-7 flex gap-4">
+                          <p className="text-xs text-theme-secondary">
+                            Titre : <span className="text-theme-primary font-medium">{titresParFichier[index] || extraireNomSansExtension(fichier.name)}</span>
+                          </p>
+                          {referencesParFichier[index] && (
+                            <p className="text-xs text-theme-secondary">
+                              Réf : <span className="text-theme-primary font-medium">{referencesParFichier[index]}</span>
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
+
+              {/* Barre de progression bulk */}
+              {progressBulk && (
+                <div className="mb-4">
+                  <div className="flex justify-between text-xs text-theme-secondary mb-1">
+                    <span>Téléversement en cours…</span>
+                    <span>{progressBulk.done}/{progressBulk.total}</span>
+                  </div>
+                  <div className="w-full bg-theme-muted rounded-full h-2">
+                    <div
+                      className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${(progressBulk.done / progressBulk.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-between pt-4 border-t border-theme">
                 <button
@@ -671,12 +811,12 @@ export default function PageNouveauDocument() {
                   {chargement ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Envoi...
+                      {progressBulk ? `${progressBulk.done}/${progressBulk.total} envoyés…` : 'Envoi…'}
                     </>
                   ) : (
                     <>
                       <Icon name="check" size="sm" />
-                      Enregistrer
+                      {fichiers.length > 1 ? `Enregistrer ${fichiers.length} documents` : 'Enregistrer'}
                     </>
                   )}
                 </button>
