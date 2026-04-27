@@ -277,15 +277,15 @@ export default function PageConnexion() {
               >
                 <div className="pointer-events-none absolute -inset-10 rounded-[999px] bg-[radial-gradient(ellipse_at_center,rgba(15,23,42,0.78),transparent_78%)] opacity-85" />
                 <div className="relative">
-                  <img src="/acs-logo.svg" alt="ACS Logo" width={200} height={80} className="mb-8" />
+                  <img src="/acs-logo.svg" alt="ACS Logo" width={220} height={190} className="mb-6" />
                   <h2 className="text-5xl font-bold text-white mb-6 leading-tight tracking-tight">
-                    Future of <br />
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-400">
-                      Archiving
+                    L’avenir de <br />
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
+                      l’archivage
                     </span>
                   </h2>
                   <p className="text-blue-100/80 text-lg leading-relaxed font-light">
-                    Expérimentez la puissance d'une gestion documentaire sécurisée, rapide et intuitive.
+                    Expérimentez la puissance d’une gestion documentaire sécurisée, rapide et intuitive.
                   </p>
                 </div>
               </motion.div>
