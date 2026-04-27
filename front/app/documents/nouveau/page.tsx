@@ -72,16 +72,15 @@ export default function PageNouveauDocument() {
 
   const extraireReference = (nom: string) => {
     const nomSansExt = nom.replace(/\.[^/.]+$/, '')
+    const match = nomSansExt.match(/N[°º]?\s*\d+/i)
+    if (match) return match[0].replace(/\s+/, '')
     return nomSansExt.split(' ')[0]
   }
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFichiers(prev => [...prev, ...acceptedFiles])
     setTitresParFichier(prev => [...prev, ...acceptedFiles.map(f => f.name.replace(/\.[^/.]+$/, ''))])
-    setReferencesParFichier(prev => [...prev, ...acceptedFiles.map(f => {
-      const nomSansExt = f.name.replace(/\.[^/.]+$/, '')
-      return nomSansExt.split(' ')[0]
-    })])
+    setReferencesParFichier(prev => [...prev, ...acceptedFiles.map(f => extraireReference(f.name))])
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

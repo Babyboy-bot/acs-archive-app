@@ -39,28 +39,33 @@ const ANNEE_MIN_EXERCICE = 1900
 const SUGGESTIONS_RISQUES = [
   'Automobile',
   'Santé',
-  'MRP facultés',
-  'Prévoyance décès',
-  'Bris de machine',
-  'Divers',
-  'Evacuation sanitaire',
-  'Globale dommages',
-  'Individuelle accidents',
-  'Multirisque habitation',
-  'Multirisque immeuble',
-  'Multirisque professionnelle',
-  'Règlements',
-  'Sinistre',
-  'Responsabilité civile',
-  'Indemnité de fin de carrière',
-  'Retraite',
-  'Retraite complémentaire',
-  'Temporaire décès',
-  'Transport',
-  'Transport facultés',
-  'Voyage',
   'Caution',
-  'Tous risques chantier'
+  'Divers',
+  'Sinistre',
+  'Voyage',
+  'Retraite',
+  'Retraite Complémentaire',
+  'Règlements',
+  'Responsabilité Civile',
+  'Prévoyance Décès',
+  'Prévoyance Collective',
+  'Individuelle Accidents',
+  'Indemnité de Fin de Carrière',
+  'Temporaire Décès',
+  'Décès Emprunteur',
+  'Multirisque Professionnelle',
+  'Multirisque Habitation',
+  'Multirisque Immeuble',
+  'Multirisque Commerçant',
+  'Multirisque Bureau',
+  'Globale Dommages',
+  'Globale Banque',
+  'Transport Facultés',
+  'Tous Risques Chantier',
+  'Bris de Machine',
+  'Vol et Détournements',
+  'Assistance Frais Funéraires',
+  'Autre'
 ]
 
 const CLIENTS_PAR_PAGE = 50
@@ -1472,11 +1477,15 @@ export default function PageClients() {
                     <label className="block text-xs font-medium text-theme-secondary mb-1">Type de risque *</label>
                     <input
                       type="text"
+                      list="risque-types-list"
                       value={risqueType}
                       onChange={(e) => setRisqueType(e.target.value)}
                       className="w-full px-3 py-2 text-sm border rounded-lg bg-theme-card border-theme text-theme-primary"
                       placeholder="Ex: Automobile"
                     />
+                    <datalist id="risque-types-list">
+                      {suggestionsRisques.map((s) => <option key={s} value={s} />)}
+                    </datalist>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-theme-secondary mb-1">N° Police</label>

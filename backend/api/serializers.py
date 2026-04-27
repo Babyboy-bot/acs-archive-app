@@ -215,6 +215,10 @@ class RisqueSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
     
+    def validate_type(self, value):
+        """Normalise le type de risque : strip + title case pour éviter les doublons."""
+        return ' '.join(value.strip().split()).title()
+
     def get_exercice_info(self, obj):
         return {
             'annee': obj.exercice.annee,

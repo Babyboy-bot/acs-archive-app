@@ -1213,10 +1213,10 @@ export default function ConsultantChatPage() {
                               }`}
                           >
                             {message.isStreaming && !message.content ? (
-                              <span className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-4 bg-cyan-500 rounded-sm animate-pulse" />
-                                <span className="w-1.5 h-4 bg-purple-500 rounded-sm animate-pulse delay-75" />
-                                <span className="w-1.5 h-4 bg-cyan-500 rounded-sm animate-pulse delay-150" />
+                              <span className="flex items-center gap-1">
+                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-cyan-400" : "bg-cyan-500"}`} style={{ animationDelay: "0ms" }} />
+                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-purple-400" : "bg-purple-500"}`} style={{ animationDelay: "150ms" }} />
+                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-fuchsia-400" : "bg-fuchsia-500"}`} style={{ animationDelay: "300ms" }} />
                               </span>
                             ) : (
                               <>
