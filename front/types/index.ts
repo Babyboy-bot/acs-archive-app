@@ -180,6 +180,7 @@ export interface ClientDRF {
   entreprise: string | null
   entreprise_nom: string | null
   nombre_personnes_rattachees: number
+  exercices_count?: number
   exercices?: ExerciceResumeAPI[]
 }
 
@@ -196,6 +197,7 @@ export interface ClientAPI {
   entrepriseId: string | null
   entrepriseNom: string | null
   nombrePersonnesRattachees: number
+  exercicesCount: number
   exercices: ExerciceResumeAPI[]
 }
 

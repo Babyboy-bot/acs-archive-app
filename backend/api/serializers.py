@@ -111,11 +111,15 @@ class ClientBaseSerializer(serializers.ModelSerializer):
     )
     entreprise_nom = serializers.CharField(source='entreprise_parente.nom', read_only=True)
     nombre_personnes_rattachees = serializers.SerializerMethodField()
+    exercices_count = serializers.SerializerMethodField()
 
     def get_nombre_personnes_rattachees(self, obj):
         if obj.type != 'ENTREPRISE':
             return 0
         return obj.membres.count()
+
+    def get_exercices_count(self, obj):
+        return obj.exercices.count()
 
 
 class ClientSimpleSerializer(ClientBaseSerializer):
@@ -126,7 +130,7 @@ class ClientSimpleSerializer(ClientBaseSerializer):
         fields = [
             'id', 'nom', 'numero_client', 'type', 'email', 'telephone',
             'adresse', 'entreprise', 'entreprise_nom', 'entreprise_parente',
-            'nombre_personnes_rattachees', 'cree_le', 'modifie_le'
+            'nombre_personnes_rattachees', 'exercices_count', 'cree_le', 'modifie_le'
         ]
         read_only_fields = ['id', 'cree_le', 'modifie_le']
 

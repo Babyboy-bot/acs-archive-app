@@ -94,6 +94,7 @@ function mapClient(client: ClientDRF): ClientAPI {
     entrepriseId: client.entreprise ?? null,
     entrepriseNom: client.entreprise_nom ?? null,
     nombrePersonnesRattachees: client.nombre_personnes_rattachees ?? 0,
+    exercicesCount: client.exercices_count ?? client.exercices?.length ?? 0,
     exercices: client.exercices ?? []
   }
 }
@@ -1163,7 +1164,7 @@ export default function PageClients() {
                       <div className="border-t border-gray-100 pt-4 mt-4">
                         <h4 className="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-2">
                           <Icon name="calendar" size="xs" />
-                          Exercices ({client.exercices.length})
+                          Exercices ({clientsExercicesCharges[client.id] ? client.exercices.length : client.exercicesCount})
                         </h4>
                         <button
                           type="button"
