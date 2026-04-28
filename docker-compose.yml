@@ -1,12 +1,6 @@
 # ============================================================================
 # Docker Compose - ACS Archive Application
 # ============================================================================
-# Usage:
-#   Development: docker compose up -d
-#   Production:  docker compose --profile production up -d
-#   Logs:        docker compose logs -f
-#   Stop:        docker compose down
-# ============================================================================
 
 services:
   # ==========================================================================
@@ -37,7 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: acs-backend
     restart: unless-stopped
-    # Utilise l'utilisateur non-root défini dans le Dockerfile (appuser)
+    # Utilise l'utilisateur non-root défini dans le Dockerfile 
     depends_on:
       db:
         condition: service_healthy
@@ -93,9 +87,9 @@ services:
     expose:
       - "5000"
 
-  
+  # ==========================================================================
   # Nginx Reverse Proxy - Point d'entrée unique
-  
+  # ==========================================================================
   nginx:
     build:
       context: ./nginx
@@ -116,8 +110,6 @@ services:
 
   # ==========================================================================
   # Certbot - Obtention et renouvellement des certificats Let's Encrypt
-  # Usage initial : docker compose run --rm certbot
-  # Renouvellement : docker compose run --rm certbot renew
   # ==========================================================================
   certbot:
     image: certbot/certbot:latest

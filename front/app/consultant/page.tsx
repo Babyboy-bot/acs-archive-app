@@ -15,7 +15,6 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import dynamic from "next/dynamic";
 const Blob3D = dynamic(() => import("@/components/ui/Blob3D"), { ssr: false });
 import ReactMarkdown from "react-markdown";
-import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
 // PdfThumbnail retiré - on utilise iframe directement avec l'URL media
 
@@ -63,14 +62,6 @@ interface Message {
   isStreaming?: boolean;
 }
 
-interface AssistantConversationSummary {
-  id: string;
-  titre: string;
-  cree_le: string;
-  modifie_le: string;
-  dernier_message_le?: string | null;
-  nombre_messages?: number;
-}
 
 // Générer des suggestions intelligentes basées sur le contexte
 function genererSuggestionsIntelligentes(messages: Message[]): string[] {
@@ -115,12 +106,6 @@ const SUGGESTIONS_DEFAUT = [
 ];
 
 
-const LOCAL_STORAGE_KEY = "acs-assistant-conversation-v1";
-const ACTIVE_CONVERSATION_KEY = "acs-assistant-active-conversation-id";
-
-function getConversationStorageKey(conversationId: string) {
-  return `${LOCAL_STORAGE_KEY}:${conversationId}`;
-}
 
 export default function ConsultantChatPage() {
   // Tous les hooks doivent être appelés AVANT tout return conditionnel
@@ -128,9 +113,6 @@ export default function ConsultantChatPage() {
 
   const [mounted, setMounted] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [conversations, setConversations] = useState<
-    AssistantConversationSummary[]
-  >([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -143,20 +125,13 @@ export default function ConsultantChatPage() {
   const [utilisateur, setUtilisateur] = useState<SessionUtilisateur | null>(
     null
   );
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-
   // États pour les modales
-  const [modaleSuppressionConversation, setModaleSuppressionConversation] = useState<{
-    open: boolean;
-    conversation: AssistantConversationSummary | null;
-  }>({ open: false, conversation: null });
   const [alerteModal, setAlerteModal] = useState<{
     open: boolean;
     title: string;
     message: string;
     variant: "error" | "warning" | "success" | "info";
   }>({ open: false, title: "", message: "", variant: "error" });
-  const [suppressionEnCours, setSuppressionEnCours] = useState(false);
   const [modaleTutoriel, setModaleTutoriel] = useState(false);
 
   // État pour la modale de prévisualisation document
@@ -202,100 +177,11 @@ export default function ConsultantChatPage() {
   useEffect(() => {
     const user = getUtilisateurActif();
     setUtilisateur(user);
-
-    if (!user) return;
-
-    const chargerConversations = async () => {
-      try {
-        const { data } = await apiFetchJson<any>("assistant/conversations/");
-        const items = Array.isArray(data) ? data : data?.results ?? [];
-        setConversations(items);
-
-        // Tenter de restaurer la conversation active depuis le localStorage
-        if (typeof window !== "undefined") {
-          try {
-            const savedId = window.localStorage.getItem(
-              ACTIVE_CONVERSATION_KEY
-            );
-            if (
-              savedId &&
-              items.some((c: AssistantConversationSummary) => c.id === savedId)
-            ) {
-              setConversationId(savedId);
-            }
-          } catch (error) {
-            console.error(
-              "Erreur lors du chargement de la conversation active de l'assistant:",
-              error
-            );
-          }
-        }
-      } catch (error) {
-        console.error(
-          "Erreur lors du chargement des conversations de l'assistant:",
-          error
-        );
-      }
-    };
-
-    void chargerConversations();
   }, []);
-
-  // Charger l'historique de conversation depuis localStorage (par conversationId)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!conversationId) return;
-
-    try {
-      const raw = window.localStorage.getItem(
-        getConversationStorageKey(conversationId)
-      );
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw) as Array<
-        Omit<Message, "timestamp"> & { timestamp: string }
-      >;
-
-      const restored: Message[] = parsed.map((m) => ({
-        ...m,
-        timestamp: new Date(m.timestamp),
-      }));
-
-      if (restored.length > 0) {
-        setMessages(restored);
-      }
-    } catch (error) {
-      console.error(
-        "Erreur lors du chargement de l'historique de conversation:",
-        error
-      );
-    }
-  }, [conversationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  // Sauvegarder l'historique à chaque mise à jour des messages
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!conversationId) return;
-    try {
-      const serialisable = messages.map((m) => ({
-        ...m,
-        timestamp: m.timestamp.toISOString(),
-      }));
-      window.localStorage.setItem(
-        getConversationStorageKey(conversationId),
-        JSON.stringify(serialisable)
-      );
-    } catch (error) {
-      console.error(
-        "Erreur lors de la sauvegarde de l'historique de conversation:",
-        error
-      );
-    }
-  }, [messages, conversationId]);
 
   const handleLogout = async () => {
     await seDeconnecter();
@@ -428,22 +314,6 @@ export default function ConsultantChatPage() {
 
       let currentConversationId = conversationId;
 
-      // Si l'ID de conversation n'est pas en mémoire (ex : rechargement / hot reload),
-      // essayer de le récupérer depuis le localStorage.
-      if (!currentConversationId && typeof window !== "undefined") {
-        try {
-          const savedId = window.localStorage.getItem(ACTIVE_CONVERSATION_KEY);
-          if (savedId) {
-            currentConversationId = savedId;
-            setConversationId(savedId);
-          }
-        } catch (error) {
-          console.error(
-            "Erreur lors de la restauration de la conversation active de l'assistant:",
-            error
-          );
-        }
-      }
       try {
         const titrePropose =
           userMessage.content.length > 100
@@ -456,47 +326,13 @@ export default function ConsultantChatPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ titre: titrePropose }),
           });
-
           if (data && data.id) {
             currentConversationId = data.id as string;
             setConversationId(currentConversationId);
-            if (typeof window !== "undefined") {
-              try {
-                window.localStorage.setItem(
-                  ACTIVE_CONVERSATION_KEY,
-                  currentConversationId
-                );
-              } catch (error) {
-                console.error(
-                  "Erreur lors de la sauvegarde de la conversation active de l'assistant:",
-                  error
-                );
-              }
-            }
-            setConversations((prev) => {
-              const existe = prev.find((c) => c.id === currentConversationId);
-              if (existe) return prev;
-              return [data as AssistantConversationSummary, ...prev];
-            });
           }
-        } else if (
-          titrePropose &&
-          !conversations.find((c) => c.id === currentConversationId && c.titre)
-        ) {
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === currentConversationId
-                ? { ...c, titre: c.titre || titrePropose }
-                : c
-            )
-          );
         }
-
       } catch (error) {
-        console.error(
-          "Erreur lors de la sauvegarde de la conversation de l'assistant (message utilisateur):",
-          error
-        );
+        console.error("Erreur création conversation:", error);
       }
 
       if (!currentConversationId) {
@@ -589,69 +425,6 @@ export default function ConsultantChatPage() {
     }
   };
 
-  const ouvrirModaleSuppressionConversation = (conv: AssistantConversationSummary) => {
-    setModaleSuppressionConversation({ open: true, conversation: conv });
-  };
-
-  const fermerModaleSuppressionConversation = () => {
-    setModaleSuppressionConversation({ open: false, conversation: null });
-  };
-
-  const confirmerSuppressionConversation = async () => {
-    const { conversation } = modaleSuppressionConversation;
-    if (!conversation) return;
-
-    setSuppressionEnCours(true);
-    try {
-      await apiFetchJson<any>(`assistant/conversations/${conversation.id}/`, {
-        method: "DELETE",
-      });
-
-      setConversations((prev) => prev.filter((c) => c.id !== conversation.id));
-
-      if (conversationId === conversation.id) {
-        setConversationId(null);
-        setMessages([]);
-        if (typeof window !== "undefined") {
-          try {
-            window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
-            window.localStorage.removeItem(
-              getConversationStorageKey(conversation.id)
-            );
-          } catch (error) {
-            console.error(
-              "Erreur lors du nettoyage de la conversation active de l'assistant:",
-              error
-            );
-          }
-        }
-      } else if (typeof window !== "undefined") {
-        // Conversation supprimée non-active: nettoyer son historique local si présent
-        try {
-          window.localStorage.removeItem(getConversationStorageKey(conversation.id));
-        } catch (error) {
-          console.error(
-            "Erreur lors du nettoyage de l'historique local de la conversation supprimée:",
-            error
-          );
-        }
-      }
-    } catch (error) {
-      console.error(
-        "Erreur lors de la suppression de la conversation de l'assistant:",
-        error
-      );
-      setAlerteModal({
-        open: true,
-        title: "Erreur",
-        message: "Impossible de supprimer cette conversation pour le moment.",
-        variant: "error",
-      });
-    } finally {
-      setSuppressionEnCours(false);
-      fermerModaleSuppressionConversation();
-    }
-  };
 
   const afficherAlerte = (title: string, message: string, variant: "error" | "warning" | "success" | "info" = "error") => {
     setAlerteModal({ open: true, title, message, variant });
@@ -753,82 +526,9 @@ export default function ConsultantChatPage() {
     }
   };
 
-  const chargerConversation = async (id: string) => {
-    if (!id || id === conversationId) return;
-
-    setIsLoading(true);
-    try {
-      const { data } = await apiFetchJson<any>(
-        `assistant/messages/?conversation=${id}`
-      );
-      const items = Array.isArray(data) ? data : data?.results ?? [];
-
-      const nouveauxMessages: Message[] = items.map((m: any) => {
-        const apiRole = (m.role as string) || "ASSISTANT";
-        const role: "user" | "assistant" =
-          apiRole === "USER" ? "user" : "assistant";
-        const timestamp = m.cree_le
-          ? new Date(m.cree_le as string)
-          : new Date();
-        const metadata = (m.metadata as Record<string, unknown> | null) ?? {};
-
-        let pieces: PieceJustificative[] | undefined;
-        const rawPieces = (metadata as any).pieces as any[] | undefined;
-        if (Array.isArray(rawPieces) && rawPieces.length > 0) {
-          pieces = rawPieces.map((p: any, index: number) => ({
-            id: p.id || `piece-${index}`,
-            source: p.source || "",
-            content: p.content || "",
-            metadata: p.metadata || {},
-            score: p.score || 0,
-            isFallback: p.isFallback || false,
-          }));
-        }
-
-        return {
-          id: (m.id as string) || `${role}-${timestamp.getTime()}`,
-          role,
-          content: (m.contenu as string) || "",
-          timestamp,
-          ...(pieces ? { pieces } : {}),
-        };
-      });
-
-      setConversationId(id);
-      if (typeof window !== "undefined") {
-        try {
-          window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, id);
-        } catch (error) {
-          console.error(
-            "Erreur lors de la sauvegarde de la conversation active de l'assistant:",
-            error
-          );
-        }
-      }
-      setMessages(nouveauxMessages);
-    } catch (error) {
-      console.error(
-        "Erreur lors du chargement de la conversation de l'assistant:",
-        error
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const nouvelleConversation = () => {
     setMessages([]);
     setConversationId(null);
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
-      } catch (error) {
-        console.error(
-          "Erreur lors du nettoyage de l'historique de conversation:",
-          error
-        );
-      }
-    }
   };
 
   // Attendre la vérification d'authentification (après tous les hooks)
@@ -850,196 +550,9 @@ export default function ConsultantChatPage() {
     <div
       className={"flex h-screen w-full overflow-x-hidden bg-theme-base text-theme-primary"}
     >
-      {/* Sidebar moderne */}
-      <aside
-        className={`${sidebarOpen ? "w-72" : "w-0"
-          } flex-shrink-0 overflow-hidden transition-all duration-500 ease-out bg-theme-card border-r border-theme`}
-      >
-        <div className="flex flex-col h-full p-4">
-          {/* Header sidebar */}
-          <div className="flex items-center gap-3 mb-16 px-2">
-            <div className="">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
-                <Icon name="sparkles" size="sm" className="text-white" />
-              </div>
-            </div>
-            <div>
-              <h2
-                className={"font-semibold text-sm text-theme-primary"}
-              >
-                ACS Assistant
-              </h2>
-              <p
-                className={"text-xs text-theme-secondary"}
-              >
-                Intelligence documentaire
-              </p>
-            </div>
-          </div>
-
-          {/* Nouveau chat */}
-          <button
-            onClick={nouvelleConversation}
-            className={"group flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium mb-4 transition-all duration-300 bg-theme-card border border-theme text-theme-primary hover:bg-theme-muted"}
-          >
-            <div
-              className={`w-6 h-6 rounded-lg flex items-center justify-center transition-transform group-hover:scale-110 ${isDark ? "bg-cyan-500/30" : "bg-cyan-500/20"
-                }`}
-            >
-              <Icon
-                name="plus"
-                size="xs"
-                className={isDark ? "text-cyan-300" : "text-cyan-600"}
-              />
-            </div>
-            Nouvelle conversation
-          </button>
-
-          {/* Historique */}
-          <div className="flex-1 overflow-y-auto space-y-1">
-            <p
-              className={"text-[10px] font-semibold uppercase tracking-wider px-3 py-2 text-theme-secondary"}
-            >
-              Historique
-            </p>
-            {conversations.map((conv) => (
-              <div key={conv.id}>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => chargerConversation(conv.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      chargerConversation(conv.id);
-                    }
-                  }}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl transition-all duration-200 cursor-pointer ${
-                    conv.id === conversationId
-                      ? isDark
-                        ? "bg-white/10 text-white"
-                        : "bg-cyan-50 text-cyan-700"
-                      : isDark
-                      ? "text-slate-400 hover:bg-white/5 hover:text-white"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  }`}
-                >
-                  <Icon
-                    name="document"
-                    size="xs"
-                    className={
-                      conv.id === conversationId
-                        ? isDark
-                          ? "text-cyan-400"
-                          : "text-cyan-500"
-                        : ""
-                    }
-                  />
-                  <span className="flex-1 truncate text-left text-[13px]">
-                    {conv.titre || "Nouvelle conversation"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      ouvrirModaleSuppressionConversation(conv);
-                    }}
-                    className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${
-                      isDark
-                        ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
-                        : "text-slate-400 hover:text-red-500 hover:bg-red-50"
-                    }`}
-                    aria-label="Supprimer"
-                  >
-                    <Icon name="trash" size="xs" />
-                  </button>
-                </div>
-              </div>
-            ))}
-            {conversations.length === 0 && (
-              <div
-                className={`px-3 py-8 text-center ${isDark ? "text-slate-600" : "text-slate-400"
-                  }`}
-              >
-                <Icon
-                  name="document"
-                  size="lg"
-                  className="mx-auto mb-2 opacity-30"
-                />
-                <p className="text-xs">Aucune conversation</p>
-              </div>
-            )}
-          </div>
-
-          {/* Utilisateur */}
-          <div
-            className={`mt-4 pt-4 ${isDark ? "border-t border-white/5" : "border-t border-slate-100"
-              }`}
-          >
-            <div
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg ${isDark ? "bg-white/5" : "bg-slate-50"
-                }`}
-            >
-              <div className="relative">
-                <div className="w-9 h-9 rounded-lg bg-zinc-700 flex items-center justify-center text-white text-sm font-semibold">
-                  {(
-                    utilisateur?.prenom?.[0] ||
-                    utilisateur?.nom?.[0] ||
-                    "?"
-                  ).toUpperCase()}
-                </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p
-                  className={`text-sm font-medium truncate ${isDark ? "text-white" : "text-slate-900"
-                    }`}
-                >
-                  {utilisateur?.prenom} {utilisateur?.nom}
-                </p>
-                <p
-                  className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"
-                    }`}
-                >
-                  {utilisateur?.role === "ADMIN"
-                    ? "Administrateur"
-                    : "Consultant"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-2 mt-10 mb-4">
-              {utilisateur?.role === "ADMIN" && (
-                <button
-                  onClick={() => router.push("/tableau-de-bord")}
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
-                    isDark
-                      ? "text-slate-400 hover:text-white hover:bg-white/5"
-                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <Icon name="home" size="xs" />
-                  Dashboard
-                </button>
-              )}
-              <button
-                onClick={handleLogout}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
-                  isDark
-                    ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
-                    : "text-slate-400 hover:text-red-500 hover:bg-red-50"
-                }`}
-              >
-                <Icon name="logout" size="xs" />
-                Déconnexion
-              </button>
-            </div>
-          </div>
-        </div>
-      </aside>
-
       {/* Zone principale */}
       <div className="flex-1 min-w-0 flex flex-col relative overflow-x-hidden">
-        {/* Header flottant */}
+        {/* Header */}
         <div
           className={`absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 ${
             isDark
@@ -1047,46 +560,80 @@ export default function ConsultantChatPage() {
               : "bg-gradient-to-b from-white via-white/80 to-transparent"
           }`}
         >
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className={`p-2.5 rounded-xl transition-all duration-300 ${
-              isDark
-                ? "text-slate-500 hover:text-white hover:bg-white/10"
-                : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-            }`}
-          >
-            <Icon name={sidebarOpen ? "chevron-left" : "menu"} size="sm" />
-          </button>
+          {/* Logo + titre */}
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
+              <Icon name="sparkles" size="xs" className="text-white" />
+            </div>
+            <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-800"}`}>ACS Assistant</span>
+          </div>
 
-          <div className="flex items-center gap-4">
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            {/* Nouvelle conversation */}
+            <button
+              onClick={nouvelleConversation}
+              title="Nouvelle conversation"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                isDark ? "border-white/10 text-slate-400 hover:text-white hover:bg-white/10" : "border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+              }`}
+            >
+              <Icon name="plus" size="xs" />
+              Nouveau
+            </button>
+
+            {/* Dashboard (admin) */}
+            {utilisateur?.role === "ADMIN" && (
+              <button
+                onClick={() => router.push("/tableau-de-bord")}
+                title="Dashboard"
+                className={`p-2 rounded-lg transition-colors ${
+                  isDark ? "text-slate-400 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                }`}
+              >
+                <Icon name="home" size="xs" />
+              </button>
+            )}
+
+            {/* Toggle thème */}
             <button
               onClick={() => setTheme(isDark ? "light" : "dark")}
               aria-label={isDark ? "Mode clair" : "Mode sombre"}
-              className={`relative w-14 h-8 flex items-center rounded-full transition-all duration-300 focus:outline-none shadow-inner
-                ${isDark ? "bg-slate-800" : "bg-gradient-to-r from-amber-100 to-cyan-100"}
-              `}
+              className={`relative w-14 h-8 flex items-center rounded-full transition-all duration-300 focus:outline-none shadow-inner ${
+                isDark ? "bg-slate-800" : "bg-gradient-to-r from-amber-100 to-cyan-100"
+              }`}
             >
-              {/* Thumb */}
-              <span
-                className={`absolute top-1 w-6 h-6 z-5 rounded-full shadow-md transition-all duration-300 flex items-center justify-center
-                  ${isDark
-                    ? "left-7 bg-slate-600 text-cyan-400"
-                    : "left-1 bg-amber-400 text-white"
-                  }
-                `}
-              >
+              <span className={`absolute top-1 w-6 h-6 rounded-full shadow-md transition-all duration-300 flex items-center justify-center ${
+                isDark ? "left-7 bg-slate-600 text-cyan-400" : "left-1 bg-amber-400 text-white"
+              }`}>
                 <Icon name={isDark ? "moon" : "sun"} size="xs" />
               </span>
-              <span className="sr-only">
-                {isDark ? "Mode clair" : "Mode sombre"}
+              <span className="sr-only">{isDark ? "Mode clair" : "Mode sombre"}</span>
+              <span className="absolute right-2 top-2 text-blue-600 text-xs"><Icon name="moon" size="xs" /></span>
+              <span className="absolute left-2 top-2 text-white text-xs"><Icon name="sun" size="xs" /></span>
+            </button>
+
+            {/* Avatar utilisateur */}
+            <div className={`flex items-center gap-2 px-2 py-1 rounded-lg ${
+              isDark ? "bg-white/5" : "bg-slate-100"
+            }`}>
+              <div className="w-6 h-6 rounded-md bg-zinc-700 flex items-center justify-center text-white text-xs font-semibold">
+                {(utilisateur?.prenom?.[0] || utilisateur?.nom?.[0] || "?").toUpperCase()}
+              </div>
+              <span className={`text-xs hidden sm:block ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                {utilisateur?.prenom}
               </span>
-              {/* Track icons */}
-              <span className="absolute right-2 top-2 text-blue-600 text-xs">
-                <Icon name="moon" size="xs" />
-              </span>
-              <span className="absolute left-2 top-2 text-white text-xs">
-                <Icon name="sun" size="xs" />
-              </span>
+            </div>
+
+            {/* Déconnexion */}
+            <button
+              onClick={handleLogout}
+              title="Déconnexion"
+              className={`p-2 rounded-lg transition-colors ${
+                isDark ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10" : "text-slate-400 hover:text-red-500 hover:bg-red-50"
+              }`}
+            >
+              <Icon name="logout" size="xs" />
             </button>
           </div>
         </div>
@@ -1620,19 +1167,6 @@ export default function ConsultantChatPage() {
         </div>
       </div>
 
-      {/* Modale de confirmation suppression conversation */}
-      <ConfirmModal
-        isOpen={modaleSuppressionConversation.open}
-        onClose={fermerModaleSuppressionConversation}
-        onConfirm={confirmerSuppressionConversation}
-        title="Supprimer la conversation"
-        message={`Êtes-vous sûr de vouloir supprimer la conversation "${modaleSuppressionConversation.conversation?.titre || "Nouvelle conversation"}" ? Cette action est irréversible.`}
-        confirmText="Supprimer"
-        cancelText="Annuler"
-        variant="danger"
-        isLoading={suppressionEnCours}
-        isDark={isDark}
-      />
 
       {/* Modale d'alerte */}
       <AlertModal
