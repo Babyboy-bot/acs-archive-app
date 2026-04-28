@@ -257,6 +257,8 @@ class Document(models.Model):
             models.Index(fields=['type_courrier']),
             models.Index(fields=['est_archive']),
             models.Index(fields=['date_document']),
+            models.Index(fields=['est_archive', 'cree_le']),
+            models.Index(fields=['risque', 'type_courrier']),
         ]
     
     def __str__(self):
@@ -285,6 +287,8 @@ class DocumentChunk(models.Model):
             models.Index(fields=['document', 'ordre']),
             models.Index(fields=['exercice_annee']),
             models.Index(fields=['risque_type']),
+            models.Index(fields=['client_nom']),
+            models.Index(fields=['type_courrier']),
         ]
 
     def __str__(self):
@@ -309,6 +313,9 @@ class AssistantConversation(models.Model):
         verbose_name = 'Conversation assistant'
         verbose_name_plural = 'Conversations assistant'
         ordering = ['-dernier_message_le', '-cree_le']
+        indexes = [
+            models.Index(fields=['utilisateur', 'cree_le']),
+        ]
 
     def __str__(self):
         return self.titre or f'Conversation {self.id}'
@@ -399,6 +406,9 @@ class LlmUsage(models.Model):
         verbose_name = "Usage LLM"
         verbose_name_plural = "Usages LLM"
         ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['utilisateur', 'timestamp']),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover - représentation simple
         return f"{self.utilisateur_id} {self.purpose} {self.tokens_total} @ {self.timestamp}"
