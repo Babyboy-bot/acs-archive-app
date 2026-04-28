@@ -1317,14 +1317,23 @@ class DocumentUploadView(APIView):
             default_storage.delete(chemin)
             raise
 
-        try:
-            chunker_document(document)
-        except Exception:
-            logging.exception("Erreur lors de la génération des chunks de document (upload)")
-        
-        # Invalider l'index de recherche
-        from .search_index import invalidate_document_index
-        invalidate_document_index()
+        def _post_upload(doc_id):
+            import django
+            django.db.close_old_connections()
+            try:
+                from .models import Document as Doc
+                doc = Doc.objects.get(id=doc_id)
+                chunker_document(doc)
+            except Exception:
+                logging.exception("Erreur lors de la génération des chunks de document (upload)")
+            try:
+                from .search_index import invalidate_document_index
+                invalidate_document_index()
+            except Exception:
+                logging.exception("Erreur lors de l'invalidation de l'index (upload)")
+
+        import threading
+        threading.Thread(target=_post_upload, args=(document.id,), daemon=True).start()
 
         serializer = DocumentSerializer(document, context={'request': request})
         return Response({

@@ -12,6 +12,7 @@ import {
   PlusIcon,
   XMarkIcon,
   EyeIcon,
+  EyeSlashIcon,
   ArrowDownTrayIcon,
   TrashIcon,
   PencilIcon,
@@ -66,6 +67,7 @@ export type IconName =
   | 'phone' | 'at' | 'sun' | 'moon' | 'language' | 'arrow-right' | 'arrow-left'
   | 'chevron-right' | 'chevron-left' | 'menu' | 'check-circle' | 'warning' | 'info' | 'sparkles'
   | 'fire' | 'bolt' | 'star' | 'card' | 'print' | 'logout'
+  | 'eye-slash'
   | 'mail-open'
   | 'document-solid' | 'folder-solid' | 'user-solid' | 'check-circle-solid'
 
@@ -98,6 +100,7 @@ const icons = {
   plus: PlusIcon,
   close: XMarkIcon,
   eye: EyeIcon,
+  'eye-slash': EyeSlashIcon,
   download: ArrowDownTrayIcon,
   trash: TrashIcon,
   edit: PencilIcon,

@@ -23,6 +23,9 @@ export default function PageParametres() {
   const [ancienMdp, setAncienMdp] = useState('')
   const [nouveauMdp, setNouveauMdp] = useState('')
   const [confirmMdp, setConfirmMdp] = useState('')
+  const [voirAncienMdp, setVoirAncienMdp] = useState(false)
+  const [voirNouveauMdp, setVoirNouveauMdp] = useState(false)
+  const [voirConfirmMdp, setVoirConfirmMdp] = useState(false)
   const [chargement, setChargement] = useState(false)
   const [messageProfil, setMessageProfil] = useState('')
   const [erreurProfil, setErreurProfil] = useState('')
@@ -377,40 +380,55 @@ export default function PageParametres() {
                     <form onSubmit={changerMotDePasse} className="space-y-5">
                       <div>
                         <label className="block text-xs font-medium text-theme-secondary mb-1.5">Mot de passe actuel</label>
-                        <input 
-                          type="password" 
-                          value={ancienMdp} 
-                          onChange={(e) => setAncienMdp(e.target.value)} 
-                          required 
-                          className="w-full px-3 py-2.5 text-sm border border-theme bg-theme-card text-theme-primary rounded-lg focus:border-red-400 focus:ring-1 focus:ring-red-200 transition-all outline-none" 
-                          placeholder="••••••••" 
-                        />
+                        <div className="relative">
+                          <input 
+                            type={voirAncienMdp ? 'text' : 'password'} 
+                            value={ancienMdp} 
+                            onChange={(e) => setAncienMdp(e.target.value)} 
+                            required 
+                            className="w-full px-3 py-2.5 pr-10 text-sm border border-theme bg-theme-card text-theme-primary rounded-lg focus:border-red-400 focus:ring-1 focus:ring-red-200 transition-all outline-none" 
+                            placeholder="••••••••" 
+                          />
+                          <button type="button" onClick={() => setVoirAncienMdp((v) => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-theme-primary transition-colors" tabIndex={-1}>
+                            <Icon name={voirAncienMdp ? 'eye-slash' : 'eye'} size="xs" />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs font-medium text-theme-secondary mb-1.5">Nouveau mot de passe</label>
-                          <input 
-                            type="password" 
-                            value={nouveauMdp} 
-                            onChange={(e) => setNouveauMdp(e.target.value)} 
-                            required 
-                            minLength={8} 
-                            className="w-full px-3 py-2.5 text-sm border border-theme bg-theme-card text-theme-primary rounded-lg focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-all outline-none" 
-                            placeholder="••••••••" 
-                          />
+                          <div className="relative">
+                            <input 
+                              type={voirNouveauMdp ? 'text' : 'password'} 
+                              value={nouveauMdp} 
+                              onChange={(e) => setNouveauMdp(e.target.value)} 
+                              required 
+                              minLength={8} 
+                              className="w-full px-3 py-2.5 pr-10 text-sm border border-theme bg-theme-card text-theme-primary rounded-lg focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-all outline-none" 
+                              placeholder="••••••••" 
+                            />
+                            <button type="button" onClick={() => setVoirNouveauMdp((v) => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-theme-primary transition-colors" tabIndex={-1}>
+                              <Icon name={voirNouveauMdp ? 'eye-slash' : 'eye'} size="xs" />
+                            </button>
+                          </div>
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-theme-secondary mb-1.5">Confirmer</label>
-                          <input 
-                            type="password" 
-                            value={confirmMdp} 
-                            onChange={(e) => setConfirmMdp(e.target.value)} 
-                            required 
-                            minLength={8} 
-                            className="w-full px-3 py-2.5 text-sm border border-theme bg-theme-card text-theme-primary rounded-lg focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-all outline-none" 
-                            placeholder="••••••••" 
-                          />
+                          <div className="relative">
+                            <input 
+                              type={voirConfirmMdp ? 'text' : 'password'} 
+                              value={confirmMdp} 
+                              onChange={(e) => setConfirmMdp(e.target.value)} 
+                              required 
+                              minLength={8} 
+                              className="w-full px-3 py-2.5 pr-10 text-sm border border-theme bg-theme-card text-theme-primary rounded-lg focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-all outline-none" 
+                              placeholder="••••••••" 
+                            />
+                            <button type="button" onClick={() => setVoirConfirmMdp((v) => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-theme-primary transition-colors" tabIndex={-1}>
+                              <Icon name={voirConfirmMdp ? 'eye-slash' : 'eye'} size="xs" />
+                            </button>
+                          </div>
                         </div>
                       </div>
 

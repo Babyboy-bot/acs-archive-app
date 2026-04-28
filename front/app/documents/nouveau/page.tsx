@@ -77,6 +77,13 @@ export default function PageNouveauDocument() {
     return nomSansExt.split(' ')[0]
   }
 
+  useEffect(() => {
+    if (fichiers.length === 1) {
+      setTitre(t => t || extraireNomSansExtension(fichiers[0].name))
+      setReference(r => r || extraireReference(fichiers[0].name))
+    }
+  }, [fichiers])
+
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFichiers(prev => [...prev, ...acceptedFiles])
     setTitresParFichier(prev => [...prev, ...acceptedFiles.map(f => f.name.replace(/\.[^/.]+$/, ''))])
@@ -251,32 +258,40 @@ export default function PageNouveauDocument() {
     const estBulk = fichiers.length > 1
     if (estBulk) setProgressBulk({ done: 0, total: fichiers.length })
 
+    const uploaderFichier = async (idx: number) => {
+      const fichier = fichiers[idx]
+      const titreFichier = estBulk
+        ? (titresParFichier[idx] || extraireNomSansExtension(fichier.name))
+        : titre
+      const referenceFichier = estBulk ? (referencesParFichier[idx] || '') : reference
+
+      const formData = new FormData()
+      formData.append('file', fichier)
+      formData.append('titre', titreFichier.trim())
+      formData.append('description', description.trim())
+      formData.append('risque_id', risqueId)
+      formData.append('type_courrier', typeCourrier)
+      formData.append('reference', referenceFichier.trim())
+      formData.append('auteur_id', auteurId)
+
+      const { response, data } = await apiFetchJson('/documents/upload/', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!response.ok) {
+        throw new Error((data as any)?.erreur || `Erreur sur le fichier ${fichier.name}`)
+      }
+    }
+
     try {
-      for (let idx = 0; idx < fichiers.length; idx++) {
-        const fichier = fichiers[idx]
-        const titreFichier = estBulk
-          ? (titresParFichier[idx] || extraireNomSansExtension(fichier.name))
-          : titre
-        const referenceFichier = estBulk ? (referencesParFichier[idx] || '') : reference
-
-        const formData = new FormData()
-        formData.append('file', fichier)
-        formData.append('titre', titreFichier.trim())
-        formData.append('description', description.trim())
-        formData.append('risque_id', risqueId)
-        formData.append('type_courrier', typeCourrier)
-        formData.append('reference', referenceFichier.trim())
-        formData.append('auteur_id', auteurId)
-
-        const { response, data } = await apiFetchJson('/documents/upload/', {
-          method: 'POST',
-          body: formData
-        })
-
-        if (!response.ok) {
-          throw new Error((data as any)?.erreur || `Erreur sur le fichier ${fichier.name}`)
-        }
-        if (estBulk) setProgressBulk({ done: idx + 1, total: fichiers.length })
+      const BATCH = 5
+      let done = 0
+      for (let i = 0; i < fichiers.length; i += BATCH) {
+        const indices = Array.from({ length: Math.min(BATCH, fichiers.length - i) }, (_, k) => i + k)
+        await Promise.all(indices.map((idx) => uploaderFichier(idx)))
+        done += indices.length
+        if (estBulk) setProgressBulk({ done, total: fichiers.length })
       }
 
       setProgressBulk(null)

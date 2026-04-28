@@ -115,6 +115,7 @@ export default function PageUtilisateurs() {
   const [formulaireUtilisateur, setFormulaireUtilisateur] = useState<FormulaireUtilisateur | null>(null)
   const [soumissionEnCours, setSoumissionEnCours] = useState(false)
   const [actionEnCours, setActionEnCours] = useState<string | null>(null)
+  const [voirMotDePasse, setVoirMotDePasse] = useState(false)
 
   useEffect(() => {
     if (!messageSucces && !erreur) {
@@ -330,13 +331,21 @@ export default function PageUtilisateurs() {
     }
 
     const estEdition = Boolean(formulaireUtilisateur.id)
+    const mdpSaisi = formulaireUtilisateur.motDePasse.trim()
     if (!estEdition) {
-      if (!formulaireUtilisateur.motDePasse || formulaireUtilisateur.motDePasse.trim().length < 8) {
+      if (!mdpSaisi || mdpSaisi.length < 8) {
         setSoumissionEnCours(false)
         setErreur('Le mot de passe doit contenir au moins 8 caractères.')
         return
       }
-      payload.mot_de_passe = formulaireUtilisateur.motDePasse.trim()
+      payload.mot_de_passe = mdpSaisi
+    } else if (mdpSaisi) {
+      if (mdpSaisi.length < 8) {
+        setSoumissionEnCours(false)
+        setErreur('Le nouveau mot de passe doit contenir au moins 8 caractères.')
+        return
+      }
+      payload.mot_de_passe = mdpSaisi
     }
     const url = estEdition ? `/utilisateurs/${formulaireUtilisateur.id}/` : '/utilisateurs/'
     const method = estEdition ? 'PUT' : 'POST'
@@ -821,16 +830,21 @@ export default function PageUtilisateurs() {
               <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
                 {formulaireUtilisateur.id ? 'Nouveau mot de passe (optionnel)' : 'Mot de passe'}
               </label>
-              <input
-                type="password"
-                value={formulaireUtilisateur.motDePasse}
-                onChange={(event) => mettreAJourFormulaire('motDePasse', event.target.value)}
-                className={`w-full px-3 py-2 text-sm border rounded-lg focus:border-purple-400 outline-none ${
-                  isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
-                }`}
-                placeholder={formulaireUtilisateur.id ? 'Laisser vide pour conserver l\'actuel' : 'Minimum 8 caractères'}
-                autoComplete="new-password"
-              />
+              <div className="relative">
+                <input
+                  type={voirMotDePasse ? 'text' : 'password'}
+                  value={formulaireUtilisateur.motDePasse}
+                  onChange={(event) => mettreAJourFormulaire('motDePasse', event.target.value)}
+                  className={`w-full px-3 py-2 pr-10 text-sm border rounded-lg focus:border-purple-400 outline-none ${
+                    isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-200 text-gray-900'
+                  }`}
+                  placeholder={formulaireUtilisateur.id ? "Laisser vide pour conserver l'actuel" : 'Minimum 8 caractères'}
+                  autoComplete="new-password"
+                />
+                <button type="button" onClick={() => setVoirMotDePasse((v) => !v)} className={`absolute right-2.5 top-1/2 -translate-y-1/2 transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-gray-400 hover:text-gray-600'}`} tabIndex={-1}>
+                  <Icon name={voirMotDePasse ? 'eye-slash' : 'eye'} size="xs" />
+                </button>
+              </div>
             </div>
 
             <div className="flex gap-2 pt-2">

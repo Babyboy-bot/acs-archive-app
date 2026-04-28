@@ -42,6 +42,7 @@ COPY . .
 
 # Créer un utilisateur non-root pour la sécurité
 RUN adduser --disabled-password --gecos '' appuser \
+    && mkdir -p /app/media/documents \
     && chown -R appuser:appuser /app
 USER appuser
 

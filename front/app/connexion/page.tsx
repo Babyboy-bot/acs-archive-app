@@ -15,6 +15,7 @@ export default function PageConnexion() {
   const router = useRouter()
   const [nomUtilisateur, setNomUtilisateur] = useState('')
   const [motDePasse, setMotDePasse] = useState('')
+  const [afficherMotDePasse, setAfficherMotDePasse] = useState(false)
   const [chargement, setChargement] = useState(false)
   const [erreur, setErreur] = useState('')
 
@@ -338,13 +339,21 @@ export default function PageConnexion() {
                   <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2 ml-1">Mot de passe</label>
                   <div className="relative">
                     <input
-                      type="password"
+                      type={afficherMotDePasse ? 'text' : 'password'}
                       required
                       value={motDePasse}
                       onChange={(e) => setMotDePasse(e.target.value)}
-                      className="block w-full bg-gray-50 border border-gray-400 focus:ring-0 focus:outline-none rounded-md py-4 px-4 text-gray-900 transition-all duration-300 ease-in-out placeholder-gray-500"
+                      className="block w-full bg-gray-50 border border-gray-400 focus:ring-0 focus:outline-none rounded-md py-4 px-4 pr-12 text-gray-900 transition-all duration-300 ease-in-out placeholder-gray-500"
                       placeholder="••••••••"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setAfficherMotDePasse((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      tabIndex={-1}
+                    >
+                      <Icon name={afficherMotDePasse ? 'eye-slash' : 'eye'} size="sm" />
+                    </button>
                     <div className="absolute inset-0 rounded-xl border border-gray-100 pointer-events-none transition-all duration-300" />
                   </div>
                 </div>
