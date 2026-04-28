@@ -530,6 +530,11 @@ export default function PageNouveauDocument() {
                       onChange={(e) => {
                         setRechercheClient(e.target.value)
                         setClientDropdownOpen(true)
+                        if (!e.target.value) {
+                          setClientId('')
+                          setExerciceId('')
+                          setRisqueId('')
+                        }
                       }}
                       onFocus={() => setClientDropdownOpen(true)}
                       className="w-full px-3 py-2 text-sm bg-theme-base border border-theme rounded-lg focus:border-red-400 outline-none"
@@ -583,6 +588,9 @@ export default function PageNouveauDocument() {
                       <option key={exercice.id} value={exercice.id}>{exercice.annee}</option>
                     ))}
                   </select>
+                  {!clientId && (
+                    <p className="text-xs text-theme-secondary/60 mt-1">Sélectionnez d'abord un client</p>
+                  )}
                   {clientId && exercicesDisponibles.length === 0 && (
                     <p className="text-xs text-amber-600 mt-1">Aucun exercice disponible</p>
                   )}
@@ -629,6 +637,12 @@ export default function PageNouveauDocument() {
                       </option>
                     ))}
                   </select>
+                  {!exerciceId && !clientId && (
+                    <p className="text-xs text-theme-secondary/60 mt-1">Sélectionnez d'abord un client</p>
+                  )}
+                  {!exerciceId && clientId && (
+                    <p className="text-xs text-theme-secondary/60 mt-1">Sélectionnez d'abord un exercice</p>
+                  )}
                   {exerciceId && risquesDisponibles.length === 0 && (
                     <p className="text-xs text-amber-600 mt-1">Aucun risque disponible</p>
                   )}

@@ -14,6 +14,7 @@ import { RoleUtilisateur } from "@/types";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import dynamic from "next/dynamic";
 const Blob3D = dynamic(() => import("@/components/ui/Blob3D"), { ssr: false });
+import ReactMarkdown from "react-markdown";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AlertModal } from "@/components/ui/AlertModal";
 // PdfThumbnail retiré - on utilise iframe directement avec l'URL media
@@ -1208,10 +1209,7 @@ export default function ConsultantChatPage() {
                         <div
                           className={`rounded-tl-md px-5 py-4`}
                         >
-                          <p
-                            className={`text-[15px] leading-relaxed whitespace-pre-wrap ${isDark ? "text-slate-200" : "text-slate-700"
-                              }`}
-                          >
+                          <div className={`text-[15px] leading-relaxed ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                             {message.isStreaming && !message.content ? (
                               <span className="flex items-center gap-1">
                                 <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-cyan-400" : "bg-cyan-500"}`} style={{ animationDelay: "0ms" }} />
@@ -1220,13 +1218,25 @@ export default function ConsultantChatPage() {
                               </span>
                             ) : (
                               <>
-                                {message.content}
+                                <ReactMarkdown
+                                  components={{
+                                    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                                    em: ({ children }) => <em className="italic">{children}</em>,
+                                    ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
+                                    ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+                                    li: ({ children }) => <li>{children}</li>,
+                                    code: ({ children }) => <code className={`px-1 py-0.5 rounded text-sm font-mono ${isDark ? "bg-slate-700" : "bg-slate-100"}`}>{children}</code>,
+                                  }}
+                                >
+                                  {message.content}
+                                </ReactMarkdown>
                                 {message.isStreaming && (
                                   <span className="inline-block w-0.5 h-4 bg-cyan-400 ml-0.5 animate-pulse align-middle" />
                                 )}
                               </>
                             )}
-                          </p>
+                          </div>
 
                           {/* Pièces justificatives modernisées */}
                           {message.pieces && message.pieces.length > 0 && (

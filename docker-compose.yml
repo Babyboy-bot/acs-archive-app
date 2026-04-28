@@ -93,10 +93,9 @@ services:
     expose:
       - "5000"
 
-  # ==========================================================================
+  
   # Nginx Reverse Proxy - Point d'entrée unique
-  # Résout les problèmes de cookies cross-origin en servant tout sur le même port
-  # ==========================================================================
+  
   nginx:
     build:
       context: ./nginx
