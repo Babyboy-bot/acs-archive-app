@@ -1,151 +1,404 @@
 # ============================================================================
+
 # Docker Compose - ACS Archive Application
+
 # ============================================================================
 
+
+
 services:
+
   # ==========================================================================
+
   # Base de données PostgreSQL
+
   # ==========================================================================
+
   db:
+
     image: postgres:16-alpine
+
     container_name: acs-db
+
     restart: unless-stopped
+
     environment:
+
       POSTGRES_DB: ${POSTGRES_DB:-acs_archive}
+
       POSTGRES_USER: ${POSTGRES_USER:-acs_user}
+
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-acs_password}
+
     volumes:
+
       - postgres_data:/var/lib/postgresql/data
+
     healthcheck:
+
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-acs_user} -d ${POSTGRES_DB:-acs_archive}"]
+
       interval: 10s
+
       timeout: 5s
+
       retries: 5
 
+
+
   # ==========================================================================
-  # Backend Django API
+
+  # Redis - Broker pour Celery
+
   # ==========================================================================
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: acs-backend
+
+  redis:
+
+    image: redis:7-alpine
+
+    container_name: acs-redis
+
     restart: unless-stopped
-    # Utilise l'utilisateur non-root défini dans le Dockerfile 
-    depends_on:
-      db:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - DEBUG=${DEBUG:-False}
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set in .env}
-      # Variables de base de données (utilisées par settings.py)
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=${POSTGRES_DB:-acs_archive}
-      - DB_USER=${POSTGRES_USER:-acs_user}
-      - DB_PASSWORD=${POSTGRES_PASSWORD:-acs_password}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend},localhost,127.0.0.1
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5000,http://frontend:5000}
-      - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
-      - ASSISTANT_LLM_PROVIDER=${ASSISTANT_LLM_PROVIDER:-}
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
-    volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/media
-    expose:
-      - "8000"
+
     healthcheck:
+
+      test: ["CMD", "redis-cli", "ping"]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 5
+
+    expose:
+
+      - "6379"
+
+
+
+  # ==========================================================================
+
+  # Backend Django API
+
+  # ==========================================================================
+
+  backend:
+
+    build:
+
+      context: ./backend
+
+      dockerfile: Dockerfile
+
+    container_name: acs-backend
+
+    restart: unless-stopped
+
+    # Utilise l'utilisateur non-root défini dans le Dockerfile (appuser)
+
+    depends_on:
+
+      db:
+
+        condition: service_healthy
+
+      redis:
+
+        condition: service_healthy
+
+    env_file:
+
+      - .env
+
+    environment:
+
+      - DEBUG=${DEBUG:-False}
+
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set in .env}
+
+      # Variables de base de données (utilisées par settings.py)
+
+      - DB_HOST=db
+
+      - DB_PORT=5432
+
+      - DB_NAME=${POSTGRES_DB:-acs_archive}
+
+      - DB_USER=${POSTGRES_USER:-acs_user}
+
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-acs_password}
+
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend},localhost,127.0.0.1
+
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5000,http://frontend:5000}
+
+      - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
+
+      - ASSISTANT_LLM_PROVIDER=${ASSISTANT_LLM_PROVIDER:-}
+
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+
+    volumes:
+
+      - static_volume:/app/staticfiles
+
+      - media_volume:/app/media
+
+    expose:
+
+      - "8000"
+
+    healthcheck:
+
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health/ || exit 1"]
+
       interval: 20s
+
       timeout: 30s
+
       retries: 6
+
       start_period: 120s
+
     command: >
+
       sh -c "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 180 --max-requests 1000 --max-requests-jitter 100 acs_backend.wsgi:application"
 
+
+
   # ==========================================================================
-  # Frontend Next.js
+
+  # Worker Celery - Tâches asynchrones (chunking, OCR)
+
   # ==========================================================================
-  frontend:
+
+  celery:
+
     build:
-      context: ./front
+
+      context: ./backend
+
       dockerfile: Dockerfile
-    container_name: acs-frontend
+
+    container_name: acs-celery
+
     restart: unless-stopped
+
     depends_on:
-      - backend
+
+      db:
+
+        condition: service_healthy
+
+      redis:
+
+        condition: service_healthy
+
     env_file:
+
       - .env
+
     environment:
+
+      - DEBUG=${DEBUG:-False}
+
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set in .env}
+
+      - DB_HOST=db
+
+      - DB_PORT=5432
+
+      - DB_NAME=${POSTGRES_DB:-acs_archive}
+
+      - DB_USER=${POSTGRES_USER:-acs_user}
+
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-acs_password}
+
+      - CELERY_BROKER_URL=redis://redis:6379/0
+
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+      - OCR_ENABLED=${OCR_ENABLED:-true}
+
+      - TESSERACT_LANG=${TESSERACT_LANG:-fra}
+
+      - OCR_DPI=${OCR_DPI:-300}
+
+    volumes:
+
+      - media_volume:/app/media
+
+    command: celery -A acs_backend worker --loglevel=info --concurrency=2
+
+
+
+  # ==========================================================================
+
+  # Frontend Next.js
+
+  # ==========================================================================
+
+  frontend:
+
+    build:
+
+      context: ./front
+
+      dockerfile: Dockerfile
+
+    container_name: acs-frontend
+
+    restart: unless-stopped
+
+    depends_on:
+
+      - backend
+
+    env_file:
+
+      - .env
+
+    environment:
+
       - NODE_ENV=production
+
       - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-/api}
+
       - INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://backend:8000/api}
+
       - ASSISTANT_LLM_ENABLED=${ASSISTANT_LLM_ENABLED:-false}
+
       - MISTRAL_ENABLED=${MISTRAL_ENABLED:-false}
+
     expose:
+
       - "5000"
 
-  # ==========================================================================
-  # Nginx Reverse Proxy - Point d'entrée unique
-  # ==========================================================================
-  nginx:
-    build:
-      context: ./nginx
-      dockerfile: Dockerfile
-    container_name: acs-nginx
-    restart: unless-stopped
-    depends_on:
-      - backend
-      - frontend
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - static_volume:/var/www/static:ro
-      - media_volume:/var/www/media:ro
-      - certbot_www:/var/www/certbot:ro
-      - certbot_conf:/etc/letsencrypt
+
 
   # ==========================================================================
-  # Certbot - Obtention et renouvellement des certificats Let's Encrypt
+
+  # Nginx Reverse Proxy - Point d'entrée unique
+
+  # Résout les problèmes de cookies cross-origin en servant tout sur le même port
+
   # ==========================================================================
-  certbot:
-    image: certbot/certbot:latest
-    container_name: acs-certbot
+
+  nginx:
+
+    build:
+
+      context: ./nginx
+
+      dockerfile: Dockerfile
+
+    container_name: acs-nginx
+
+    restart: unless-stopped
+
+    depends_on:
+
+      - backend
+
+      - frontend
+
+    ports:
+
+      - "80:80"
+
+      - "443:443"
+
     volumes:
+
+      - static_volume:/var/www/static:ro
+
+      - media_volume:/var/www/media:ro
+
+      - certbot_www:/var/www/certbot:ro
+
       - certbot_conf:/etc/letsencrypt
+
+
+
+  # ==========================================================================
+
+  # Certbot - Obtention et renouvellement des certificats Let's Encrypt
+
+  # ==========================================================================
+
+  certbot:
+
+    image: certbot/certbot:latest
+
+    container_name: acs-certbot
+
+    volumes:
+
+      - certbot_conf:/etc/letsencrypt
+
       - certbot_www:/var/www/certbot
+
     command: >
+
       certonly --webroot
+
       --webroot-path=/var/www/certbot
+
       --email contact@assureursconseilservice.com
+
       --agree-tos
+
       --no-eff-email
+
       --keep-until-expiring
+
       -d assureursconseilservice.com
+
       -d www.assureursconseilservice.com
 
-# ==========================================================================
-# Volumes persistants
-# ==========================================================================
-volumes:
-  postgres_data:
-    driver: local
-  static_volume:
-    driver: local
-  media_volume:
-    driver: local
-  certbot_www:
-    driver: local
-  certbot_conf:
-    driver: local
+
 
 # ==========================================================================
-# Réseaux
+
+# Volumes persistants
+
 # ==========================================================================
+
+volumes:
+
+  postgres_data:
+
+    driver: local
+
+  static_volume:
+
+    driver: local
+
+  media_volume:
+
+    driver: local
+
+  certbot_www:
+
+    driver: local
+
+  certbot_conf:
+
+    driver: local
+
+
+
+# ==========================================================================
+
+# Réseaux
+
+# ==========================================================================
+
 networks:
+
   default:
+
     name: acs-network
+
     driver: bridge
+

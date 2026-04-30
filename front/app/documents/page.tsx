@@ -32,6 +32,8 @@ type DocumentUI = {
   color: string
   urlFichier: string | null
   source: any
+  chunking_status?: 'pending' | 'completed' | 'failed'
+  chunking_error?: string | null
 }
 
 type PreviewState = {
@@ -246,6 +248,7 @@ export default function PageDocuments() {
   const [previewOuvert, setPreviewOuvert] = useState(false)
   const [documentPreview, setDocumentPreview] = useState<PreviewState>(null)
   const [suppressionEnCours, setSuppressionEnCours] = useState<string | null>(null)
+  const [relanceChunkingEnCours, setRelanceChunkingEnCours] = useState<string | null>(null)
   const [chargement, setChargement] = useState(true)
   const [erreur, setErreur] = useState('')
   const [documentEdite, setDocumentEdite] = useState<DocumentUI | null>(null)
@@ -335,6 +338,8 @@ export default function PageDocuments() {
             color: determinerCouleurRisque(risqueKey),
             urlFichier: fichierUrl,
             source: doc,
+            chunking_status: doc.chunking_status ?? 'completed',
+            chunking_error: doc.chunking_error ?? null,
           } as DocumentUI
         })
 
@@ -694,6 +699,67 @@ export default function PageDocuments() {
     setTypeCourrierEdition('')
   }
 
+  const relancerChunking = async (doc: DocumentUI) => {
+    setRelanceChunkingEnCours(doc.id)
+    setErreur('')
+
+    try {
+      const { response, data } = await apiFetchJson(`/documents/${doc.id}/retry-chunking/`, {
+        method: 'POST',
+      })
+
+      if (!response.ok) {
+        throw new Error((data as any)?.erreur ?? 'Impossible de relancer le chunking')
+      }
+
+      // Mettre à jour le statut du document en local
+      setDocuments((precedent) =>
+        precedent.map((item) =>
+          item.id === doc.id
+            ? { ...item, chunking_status: 'pending', chunking_error: null }
+            : item,
+        ),
+      )
+
+      setErreur('')
+    } catch (error: any) {
+      console.error('Erreur relance chunking', error)
+      setErreur(error?.message ?? 'Erreur lors de la relance du chunking')
+    } finally {
+      setRelanceChunkingEnCours(null)
+    }
+  }
+
+  const ChunkingBadge = ({ doc }: { doc: DocumentUI }) => {
+    if (doc.chunking_status === 'pending') {
+      return (
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 text-xs font-medium">
+          <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse" />
+          Indexation en cours
+        </div>
+      )
+    }
+
+    if (doc.chunking_status === 'failed') {
+      return (
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-xs font-medium">
+            Non indexé
+          </div>
+          <button
+            onClick={() => relancerChunking(doc)}
+            disabled={relanceChunkingEnCours === doc.id}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {relanceChunkingEnCours === doc.id ? '...' : 'Relancer'}
+          </button>
+        </div>
+      )
+    }
+
+    return null
+  }
+
   const soumettreEditionDocument = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!documentEdite) return
@@ -942,6 +1008,10 @@ export default function PageDocuments() {
                   <h3 className="font-medium text-theme-primary text-sm mb-1 line-clamp-2">{doc.titre}</h3>
                   <p className="text-xs text-theme-secondary font-mono mb-3">{doc.reference || '—'}</p>
 
+                  <div className="mb-3">
+                    <ChunkingBadge doc={doc} />
+                  </div>
+
                   <div className="space-y-1.5 text-xs text-theme-secondary mb-4">
                     <div className="flex items-center gap-2">
                       <Icon name="building" size="xs" />
@@ -1041,6 +1111,9 @@ export default function PageDocuments() {
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-theme-primary truncate">{doc.titre}</p>
                               <p className="text-xs text-theme-secondary font-mono">{doc.reference || '—'}</p>
+                              <div className="mt-1">
+                                <ChunkingBadge doc={doc} />
+                              </div>
                             </div>
                           </div>
                         </td>

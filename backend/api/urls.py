@@ -6,6 +6,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views_main import (
+    DocumentRetryChunkingView,
     login_view,
     logout_view,
     refresh_token_view,
@@ -64,6 +65,7 @@ urlpatterns = [
     path('auth/logout/', logout_view, name='logout'),
     path('auth/refresh/', refresh_token_view, name='token_refresh'),
     path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
+    path('documents/<str:document_id>/retry-chunking/', DocumentRetryChunkingView.as_view(), name='document-retry-chunking'),
     path('documents/search/', documents_search_view, name='documents-search'),
     path('stats/', stats_view, name='stats'),
     path('assistant/stats/', assistant_stats_view, name='assistant-stats'),

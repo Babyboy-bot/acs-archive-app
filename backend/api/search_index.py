@@ -252,11 +252,14 @@ def rebuild_document_index(force: bool = False) -> Dict[str, Any]:
     """
     Reconstruit l'index des documents.
     Appelé automatiquement lors des recherches ou manuellement via une commande.
+    Exclut les documents avec chunking_status != completed.
     """
     from .views import _build_document_payload, _build_document_text
     
     documents = list(
-        Document.objects.select_related('categorie', 'risque__exercice__client').all()
+        Document.objects.select_related('categorie', 'risque__exercice__client')
+        .filter(chunking_status='completed')
+        .all()
     )
     
     index = get_document_index()
@@ -270,7 +273,10 @@ def rebuild_document_index(force: bool = False) -> Dict[str, Any]:
     return index.get_stats()
 
 
-def invalidate_document_index() -> None:
+from acs_backend.celery import app as celery_app
+
+@celery_app.task(bind=True, name='api.invalidate_document_index')
+def invalidate_document_index(self) -> None:
     """Invalide l'index des documents (à appeler après modification de documents)."""
     index = get_document_index()
     index.invalidate()
