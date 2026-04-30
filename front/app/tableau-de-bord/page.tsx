@@ -13,7 +13,7 @@ import { AuthLoadingScreen, AccessDenied, PageHeader } from '@/components/common
 import { useUtilisateurCourant, useEnforceNonConsultant, useRequireAuth } from '@/hooks'
 
 // Lib
-import { apiFetchJson, canAccessSection, hasPermission, formatDateRelative } from '@/lib'
+import { apiFetchJson, hasPermission, formatDateRelative } from '@/lib'
 
 type DocumentApi = {
   id: string
@@ -44,7 +44,6 @@ export default function DashboardUltraModerne() {
   const peutVoirStats = hasPermission(role, 'stats', 'voir')
   const peutVoirDocuments = hasPermission(role, 'documents', 'voir')
   const peutCreerDocuments = hasPermission(role, 'documents', 'creer')
-  const peutAccederRecherche = canAccessSection(role, 'documents')
   const peutAccederParametres = hasPermission(role, 'utilisateurs', 'voir')
 
   const [mounted, setMounted] = useState(false)
@@ -252,18 +251,6 @@ export default function DashboardUltraModerne() {
               </Link>
             )}
 
-            {peutAccederRecherche && (
-              <Link href="/recherche">
-                <motion.button 
-                  whileHover={{ scale: 1.02 }} 
-                  whileTap={{ scale: 0.98 }} 
-                  className="inline-flex items-center gap-2 px-8 py-4 bg-theme-card border border-theme rounded-lg text-sm font-medium text-theme-primary hover:border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all"
-                >
-                  <Icon name="search" size="sm" className="text-blue-500" />
-                  Rechercher
-                </motion.button>
-              </Link>
-            )}
 
             {peutAccederParametres && (
               <Link href="/parametres">

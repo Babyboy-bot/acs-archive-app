@@ -23,7 +23,6 @@ type MenuItem = {
 const MENU_ITEMS: MenuItem[] = [
   { href: '/tableau-de-bord', label: 'Tableau de bord', icone: 'chart', ressource: 'stats', action: 'voir' },
   { href: '/documents', label: 'Documents', icone: 'folder', ressource: 'documents', action: 'voir' },
-  { href: '/recherche', label: 'Recherche avancée', icone: 'search', ressource: 'documents', action: 'voir' },
   { href: '/clients', label: 'Clients', icone: 'building', ressource: 'documents', action: 'voir' },
   {
     href: '/utilisateurs',
