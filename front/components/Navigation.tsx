@@ -38,6 +38,12 @@ const MENU_ITEMS: MenuItem[] = [
     icone: 'bolt',
     roles: [RoleUtilisateur.ADMIN],
   },
+  {
+    href: '/journal',
+    label: 'Journal',
+    icone: 'clock',
+    roles: [RoleUtilisateur.ADMIN],
+  },
 ]
 
 export function Navigation() {

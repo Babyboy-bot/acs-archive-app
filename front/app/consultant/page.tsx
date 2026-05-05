@@ -205,6 +205,7 @@ export default function ConsultantChatPage() {
         afficherAlerte("Document non disponible", "Ce document n'a pas de fichier téléchargeable", "warning");
         return;
       }
+      logActionDoc(piece, 'DOWNLOAD')
 
       const finalUrl = buildFileUrl(fichierUrl);
 
@@ -234,6 +235,14 @@ export default function ConsultantChatPage() {
     }
   };
 
+  const logActionDoc = (piece: PieceJustificative, action: string) => {
+    apiFetchJson(`/documents/${piece.id}/log-view/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    }).catch(() => {})
+  }
+
   const ouvrirPiece = async (piece: PieceJustificative) => {
     try {
       let fichierUrl = piece.metadata?.fichier_url as string | undefined | null;
@@ -260,6 +269,7 @@ export default function ConsultantChatPage() {
       const finalUrl = buildFileUrl(fichierUrl);
 
       // Ouvrir dans la modale au lieu d'un nouvel onglet
+      logActionDoc(piece, 'READ')
       setModaleDocument({ open: true, piece, url: finalUrl });
     } catch (error) {
       console.error("Erreur lors de l'ouverture du document:", error);
@@ -273,6 +283,7 @@ export default function ConsultantChatPage() {
       afficherAlerte("Document non disponible", "Ce document n'a pas de fichier imprimable", "warning");
       return;
     }
+    logActionDoc(piece, 'PRINT')
 
     const finalUrl = buildFileUrl(fichierUrl);
 

@@ -449,6 +449,14 @@ export default function PageDocuments() {
     return resolved
   }
 
+  const logConsultation = (doc: DocumentUI) => {
+    apiFetchJson(`/documents/${doc.id}/log-view/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'READ' }),
+    }).catch(() => {})
+  }
+
   const ouvrirPreview = (doc: DocumentUI) => {
     const url = extraireUrlDocument(doc)
     if (!url) {
@@ -456,6 +464,7 @@ export default function PageDocuments() {
       return
     }
     setErreur('')
+    logConsultation(doc)
     setDocumentPreview({ titre: doc.titre, url })
     setPreviewOuvert(true)
   }
@@ -468,6 +477,7 @@ export default function PageDocuments() {
     }
 
     setErreur('')
+    logConsultation(doc)
     if (typeof window !== 'undefined') {
       window.open(url, '_blank', 'noopener,noreferrer')
     }
@@ -481,6 +491,7 @@ export default function PageDocuments() {
     }
 
     setErreur('')
+    apiFetchJson(`/documents/${doc.id}/log-view/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'PRINT' }) }).catch(() => {})
     if (typeof window === 'undefined') {
       return
     }
@@ -572,6 +583,7 @@ export default function PageDocuments() {
     }
 
     setErreur('')
+    apiFetchJson(`/documents/${doc.id}/log-view/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'DOWNLOAD' }) }).catch(() => {})
     if (typeof window !== 'undefined') {
       const fetchUrl = construireUrlTelechargement(url)
 
@@ -839,6 +851,7 @@ export default function PageDocuments() {
       setErreur('Aucun document à exporter avec les filtres actuels')
       return
     }
+    apiFetchJson('/audit/log-export/', { method: 'POST', body: JSON.stringify({ format: type, nb_documents: documentsFiltres.length }) }).catch(() => {})
     switch (type) {
       case 'pdf':
         exporterPDF(documentsFiltres, 'Liste des documents')

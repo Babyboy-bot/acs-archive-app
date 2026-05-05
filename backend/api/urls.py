@@ -7,6 +7,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views_main import (
     DocumentRetryChunkingView,
+    DocumentLogViewView,
     login_view,
     logout_view,
     refresh_token_view,
@@ -28,6 +29,7 @@ from .views_main import (
     audit_log_list,
     audit_log_detail,
     audit_log_stats,
+    audit_log_export,
     auth_verify_view,
     health_check,
     ready_check,
@@ -66,6 +68,7 @@ urlpatterns = [
     path('auth/refresh/', refresh_token_view, name='token_refresh'),
     path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
     path('documents/<str:document_id>/retry-chunking/', DocumentRetryChunkingView.as_view(), name='document-retry-chunking'),
+    path('documents/<str:document_id>/log-view/', DocumentLogViewView.as_view(), name='document-log-view'),
     path('documents/search/', documents_search_view, name='documents-search'),
     path('stats/', stats_view, name='stats'),
     path('assistant/stats/', assistant_stats_view, name='assistant-stats'),
@@ -92,6 +95,7 @@ urlpatterns = [
     path('audit/logs/', audit_log_list, name='audit-log-list'),
     path('audit/logs/<int:log_id>/', audit_log_detail, name='audit-log-detail'),
     path('audit/stats/', audit_log_stats, name='audit-log-stats'),
+    path('audit/log-export/', audit_log_export, name='audit-log-export'),
     
     # Healthcheck (monitoring/Kubernetes)
     path('auth/verify/', auth_verify_view, name='auth-verify'),

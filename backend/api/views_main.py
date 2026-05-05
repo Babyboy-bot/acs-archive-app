@@ -97,6 +97,32 @@ def should_use_secure_cookie(request):
     return request.is_secure()
 
 
+def log_action(request, action, resource_type, resource_id, resource_name, details=None, success=True, error_message='', utilisateur_override=None):
+    """Helper pour enregistrer une action dans le journal d'audit."""
+    from .models import AuditLog
+    try:
+        utilisateur = utilisateur_override or (request.user if request.user.is_authenticated else None)
+        utilisateur_nom = ''
+        if utilisateur:
+            utilisateur_nom = f"{utilisateur.prenom} {utilisateur.nom}".strip() or utilisateur.nom_utilisateur
+        ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() or request.META.get('REMOTE_ADDR', '')
+        AuditLog.objects.create(
+            utilisateur=utilisateur,
+            utilisateur_nom=utilisateur_nom,
+            action=action,
+            resource_type=resource_type,
+            resource_id=str(resource_id),
+            resource_name=resource_name,
+            details=details or {},
+            ip_address=ip_address or None,
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            success=success,
+            error_message=error_message,
+        )
+    except Exception:
+        logging.exception("Erreur lors de l'enregistrement du log d'audit")
+
+
 
 
 
@@ -686,6 +712,8 @@ def login_view(request):
 
         utilisateur.save(update_fields=['derniere_connexion'])
 
+        log_action(request, 'LOGIN', 'session', utilisateur.id, utilisateur.nom_utilisateur, details={'role': utilisateur.role}, utilisateur_override=utilisateur)
+
         
 
         # Générer les tokens JWT
@@ -1029,6 +1057,8 @@ def logout_view(request):
             pass  # Déjà expiré ou invalide
 
 
+
+    log_action(request, 'LOGOUT', 'session', getattr(request.user, 'id', ''), getattr(request.user, 'nom_utilisateur', ''), details={})
 
     response = Response(
 
@@ -2456,6 +2486,20 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     
 
+    def retrieve(self, request, *args, **kwargs):
+
+        """Consulter un document et logger l'activité"""
+
+        instance = self.get_object()
+
+        log_action(request, 'READ', 'document', instance.id, instance.titre, details={'reference': instance.reference, 'type_courrier': instance.type_courrier})
+
+        serializer = self.get_serializer(instance)
+
+        return Response(serializer.data)
+
+    
+
     def create(self, request, *args, **kwargs):
 
         """Créer un document et logger l'activité"""
@@ -2469,6 +2513,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         document = serializer.save()
+
+        log_action(request, 'CREATE', 'document', document.id, document.titre, details={'reference': document.reference, 'type_courrier': document.type_courrier})
 
         try:
 
@@ -2496,9 +2542,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
         from .search_index import invalidate_document_index
 
-        
+        instance = self.get_object()
 
         response = super().update(request, *args, **kwargs)
+
+        log_action(request, 'UPDATE', 'document', instance.id, instance.titre, details={'reference': instance.reference})
 
         invalidate_document_index.delay()
 
@@ -2512,7 +2560,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
         from .search_index import invalidate_document_index
 
-        
+        instance = self.get_object()
+
+        log_action(request, 'DELETE', 'document', instance.id, instance.titre, details={'reference': instance.reference, 'taille': instance.taille_fichier})
 
         response = super().destroy(request, *args, **kwargs)
 
@@ -2522,6 +2572,26 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
 
 
+
+
+class DocumentLogViewView(APIView):
+    """Enregistrer une action sur un document dans le journal d'audit."""
+
+    permission_classes = [IsAuthenticated]
+
+    ALLOWED_ACTIONS = {'READ', 'DOWNLOAD', 'PRINT'}
+
+    def post(self, request, document_id: str):
+        from .models import Document
+        try:
+            document = Document.objects.only('id', 'titre', 'reference', 'type_courrier').get(id=document_id)
+        except Document.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        action = request.data.get('action', 'READ')
+        if action not in self.ALLOWED_ACTIONS:
+            action = 'READ'
+        log_action(request, action, 'document', document.id, document.titre, details={'reference': document.reference, 'type_courrier': document.type_courrier})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class DocumentRetryChunkingView(APIView):
@@ -2681,6 +2751,8 @@ class DocumentUploadView(APIView):
         # Invalider l'index de recherche (géré par chunker_document)
 
         # Pas besoin d'appeler ici car chunker_document le fait avec countdown=2
+
+        log_action(request, 'CREATE', 'document', document.id, document.titre, details={'reference': document.reference, 'type_courrier': document.type_courrier, 'taille': document.taille_fichier, 'type_fichier': document.type_fichier})
 
         serializer = DocumentSerializer(document, context={'request': request})
 
@@ -7103,122 +7175,133 @@ def version_info(request):
 # ============================================================================
 
 
-
 @api_view(['GET'])
-
 @permission_classes([IsAuthenticated, RoleBasedPermission])
-
 def audit_log_list(request):
-
-    """Liste des logs d'audit."""
-
+    """Liste des logs d'audit avec filtres et pagination."""
     from .models import AuditLog
 
-    
+    qs = AuditLog.objects.select_related('utilisateur').order_by('-timestamp')
 
-    logs = AuditLog.objects.all().order_by('-timestamp')[:100]
+    # Filtres
+    action_filter = request.query_params.get('action')
+    if action_filter:
+        qs = qs.filter(action=action_filter)
+
+    resource_type_filter = request.query_params.get('resource_type')
+    if resource_type_filter:
+        qs = qs.filter(resource_type=resource_type_filter)
+
+    utilisateur_id = request.query_params.get('utilisateur_id')
+    if utilisateur_id:
+        qs = qs.filter(utilisateur_id=utilisateur_id)
+
+    date_debut = request.query_params.get('date_debut')
+    if date_debut:
+        qs = qs.filter(timestamp__gte=date_debut)
+
+    date_fin = request.query_params.get('date_fin')
+    if date_fin:
+        qs = qs.filter(timestamp__lte=date_fin)
+
+    search = request.query_params.get('search')
+    if search:
+        qs = qs.filter(Q(resource_name__icontains=search) | Q(utilisateur_nom__icontains=search))
+
+    total = qs.count()
+
+    # Pagination
+    page = max(1, int(request.query_params.get('page', 1)))
+    page_size = min(100, int(request.query_params.get('page_size', 50)))
+    offset = (page - 1) * page_size
+    logs = qs[offset:offset + page_size]
 
     data = [
-
         {
-
             'id': log.id,
-
             'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else log.utilisateur_nom,
-
+            'utilisateur_nom_complet': log.utilisateur_nom,
             'action': log.action,
-
+            'resource_type': log.resource_type,
+            'resource_id': log.resource_id,
+            'resource_name': log.resource_name,
             'details': log.details,
-
+            'ip_address': str(log.ip_address) if log.ip_address else None,
+            'success': log.success,
             'date': log.timestamp.isoformat(),
-
         }
-
         for log in logs
-
     ]
 
-    return Response({'logs': data, 'total': AuditLog.objects.count()})
-
-
-
+    return Response({
+        'logs': data,
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': max(1, (total + page_size - 1) // page_size),
+    })
 
 
 setattr(audit_log_list, 'ressource', 'audit')
 
 
-
-
-
 @api_view(['GET'])
-
 @permission_classes([IsAuthenticated, RoleBasedPermission])
-
 def audit_log_detail(request, log_id):
-
     """Détail d'un log d'audit."""
-
     from .models import AuditLog
-
-    
-
     try:
-
-        log = AuditLog.objects.get(id=log_id)
-
+        log = AuditLog.objects.select_related('utilisateur').get(id=log_id)
         return Response({
-
             'id': log.id,
-
             'utilisateur': log.utilisateur.nom_utilisateur if log.utilisateur else log.utilisateur_nom,
-
+            'utilisateur_nom_complet': log.utilisateur_nom,
             'action': log.action,
-
+            'resource_type': log.resource_type,
+            'resource_id': log.resource_id,
+            'resource_name': log.resource_name,
             'details': log.details,
-
+            'ip_address': str(log.ip_address) if log.ip_address else None,
+            'success': log.success,
+            'error_message': log.error_message,
             'date': log.timestamp.isoformat(),
-
         })
-
     except AuditLog.DoesNotExist:
-
         return Response({'error': 'Log non trouvé'}, status=status.HTTP_404_NOT_FOUND)
-
-
-
 
 
 setattr(audit_log_detail, 'ressource', 'audit')
 
 
-
-
-
 @api_view(['GET'])
-
 @permission_classes([IsAuthenticated, RoleBasedPermission])
-
 def audit_log_stats(request):
-
     """Statistiques des logs d'audit."""
-
     from .models import AuditLog
-
-    
+    from django.db.models import Count
 
     total = AuditLog.objects.count()
+    par_action = dict(AuditLog.objects.values_list('action').annotate(n=Count('id')).order_by())
+    par_resource = dict(AuditLog.objects.values_list('resource_type').annotate(n=Count('id')).order_by())
 
     return Response({
-
         'total_logs': total,
-
+        'par_action': par_action,
+        'par_resource': par_resource,
     })
 
 
-
-
-
 setattr(audit_log_stats, 'ressource', 'audit')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def audit_log_export(request):
+    """Logger un export de liste de documents."""
+    fmt = request.data.get('format', 'csv')
+    nb = request.data.get('nb_documents', 0)
+    log_action(request, 'EXPORT', 'document', '', f'Export {fmt.upper()}', details={'format': fmt, 'nb_documents': nb})
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 
