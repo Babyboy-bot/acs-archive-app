@@ -50,6 +50,16 @@ export function AppLayout({ children }: AppLayoutProps) {
         className={`fixed left-0 top-0 h-screen z-40 transition-transform duration-300 ease-in-out
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
+        {/* Bouton fermeture mobile (X) en haut à droite de la sidebar */}
+        {mobileOpen && (
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="md:hidden absolute top-3 right-3 z-50 p-1.5 rounded-lg bg-theme-muted text-theme-secondary hover:text-theme-primary transition-colors"
+            aria-label="Fermer le menu"
+          >
+            <Icon name="close" size="sm" />
+          </button>
+        )}
         <Sidebar />
       </div>
 

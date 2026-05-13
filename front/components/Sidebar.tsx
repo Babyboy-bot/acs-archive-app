@@ -114,7 +114,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const sidebarWidth = collapsed ? 'w-20' : 'w-64'
 
   return (
-    <aside className={`${sidebarWidth} h-screen bg-theme-card border-r border-theme shadow-lg flex flex-col transition-all duration-300 fixed left-0 top-0 z-40`}>
+    <aside className={`${sidebarWidth} h-screen bg-theme-card border-r border-theme shadow-lg flex flex-col transition-all duration-300`}>
       {/* Logo et titre */}
       <div className="p-4 border-b border-theme">
         <Link href="/tableau-de-bord" className="flex items-center gap-3">

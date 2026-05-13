@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Icon } from '@/components/Icon'
+import { AppLayout } from '@/components/AppLayout'
 import { apiFetchJson } from '@/lib/api'
 import { getUtilisateurActif } from '@/lib/session'
 
@@ -144,7 +145,8 @@ export default function AdminLlmPage() {
   const safeTopUtilisateurs = Array.isArray(stats.top_utilisateurs) ? stats.top_utilisateurs : []
 
   return (
-    <div className="min-h-screen bg-theme-base">
+    <AppLayout>
+    <div className="flex-1 overflow-auto">
       {/* Header */}
       <header className="bg-theme-card border-b border-theme shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -609,5 +611,6 @@ export default function AdminLlmPage() {
         )}
       </div>
     </div>
+    </AppLayout>
   )
 }

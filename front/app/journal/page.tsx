@@ -5,6 +5,7 @@ import { apiFetchJson } from '@/lib/api'
 import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
 import { useRouter } from 'next/navigation'
 import { Icon } from '@/components/Icon'
+import { AppLayout } from '@/components/AppLayout'
 
 type AuditLog = {
   id: number
@@ -124,7 +125,8 @@ export default function JournalPage() {
   if (utilisateur?.role !== 'ADMIN') return null
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <AppLayout>
+    <div className="p-4 md:p-6 max-w-7xl mx-auto">
       <div className="mb-6">
         <button
           onClick={() => router.back()}
@@ -280,5 +282,6 @@ export default function JournalPage() {
         )}
       </div>
     </div>
+    </AppLayout>
   )
 }
