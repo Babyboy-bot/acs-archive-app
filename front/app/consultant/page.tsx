@@ -572,11 +572,13 @@ export default function ConsultantChatPage() {
           }`}
         >
           {/* Logo + titre */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
               <Icon name="sparkles" size="xs" className="text-white" />
             </div>
-            <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-800"}`}>ACS Assistant</span>
+            <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-800"}`}>ACS
+              <span className="hidden sm:inline"> Assistant</span>
+            </span>
           </div>
 
           {/* Actions */}
@@ -585,12 +587,12 @@ export default function ConsultantChatPage() {
             <button
               onClick={nouvelleConversation}
               title="Nouvelle conversation"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs rounded-lg border transition-colors ${
                 isDark ? "border-white/10 text-slate-400 hover:text-white hover:bg-white/10" : "border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-100"
               }`}
             >
               <Icon name="plus" size="xs" />
-              Nouveau
+              <span className="hidden sm:inline">Nouveau</span>
             </button>
 
             {/* Dashboard (admin) */}
@@ -606,11 +608,18 @@ export default function ConsultantChatPage() {
               </button>
             )}
 
-            {/* Toggle thème */}
+            {/* Toggle thème — pill sur desktop, icône sur mobile */}
             <button
               onClick={() => setTheme(isDark ? "light" : "dark")}
               aria-label={isDark ? "Mode clair" : "Mode sombre"}
-              className={`relative w-14 h-8 flex items-center rounded-full transition-all duration-300 focus:outline-none shadow-inner ${
+              className={`sm:hidden p-2 rounded-lg transition-colors ${isDark ? "text-slate-400 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"}`}
+            >
+              <Icon name={isDark ? "moon" : "sun"} size="xs" />
+            </button>
+            <button
+              onClick={() => setTheme(isDark ? "light" : "dark")}
+              aria-label={isDark ? "Mode clair" : "Mode sombre"}
+              className={`hidden sm:relative sm:flex w-14 h-8 items-center rounded-full transition-all duration-300 focus:outline-none shadow-inner ${
                 isDark ? "bg-slate-800" : "bg-gradient-to-r from-amber-100 to-cyan-100"
               }`}
             >
@@ -653,17 +662,17 @@ export default function ConsultantChatPage() {
         <div className="flex-1 overflow-y-auto pt-16">
           {messages.length === 0 ? (
             // Écran de bienvenue moderne
-            <div className="h-full flex flex-col items-center justify-center px-4 pb-12">
-              {/* Logo animé */}
-              <Blob3D />
+            <div className="h-full flex flex-col items-center justify-center px-4 pb-4 sm:pb-12">
+              {/* Logo animé — masqué sur mobile pour gagner de l'espace */}
+              <div className="hidden sm:block"><Blob3D /></div>
 
               <h1
-                className={`text-4xl font-bold mb-3 bg-gradient-to-r from-cyan-600 via-purple-600 to-fuchsia-600 bg-clip-text text-transparent`}
+                className={`text-2xl sm:text-4xl font-bold mb-2 sm:mb-3 mt-4 sm:mt-0 bg-gradient-to-r from-cyan-600 via-purple-600 to-fuchsia-600 bg-clip-text text-transparent`}
               >
                 ACS Assistant
               </h1>
               <p
-                className={`text-center max-w-lg mb-10 text-base ${isDark ? "text-slate-400" : "text-slate-500"
+                className={`text-center max-w-lg mb-5 sm:mb-10 text-sm sm:text-base ${isDark ? "text-slate-400" : "text-slate-500"
                   }`}
               >
                 Explorez vos archives intelligemment. Posez une question sur vos
@@ -671,7 +680,7 @@ export default function ConsultantChatPage() {
               </p>
 
               {/* Suggestions intelligentes */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl w-full px-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 max-w-4xl w-full px-2 sm:px-4">
                 {(messages.length > 0
                   ? genererSuggestionsIntelligentes(messages)
                   : SUGGESTIONS_DEFAUT
@@ -679,7 +688,7 @@ export default function ConsultantChatPage() {
                   <button
                     key={i}
                     onClick={() => handleSuggestionClick(suggestion)}
-                    className={`group relative p-5 rounded-lg text-left text-sm transition-all duration-300 overflow-hidden ${
+                    className={`group relative flex sm:block items-center gap-3 p-3 sm:p-5 rounded-lg text-left text-sm transition-all duration-300 overflow-hidden ${
                       isDark
                         ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/30"
                         : "bg-white hover:bg-cyan-50/50 border border-slate-200 hover:border-cyan-300 shadow-sm hover:shadow-lg hover:shadow-cyan-500/10"
@@ -689,7 +698,7 @@ export default function ConsultantChatPage() {
                       className={`absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-cyan-500 to-fuchsia-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300`}
                     />
                     <div
-                      className={`w-8 h-8 rounded-xl mb-3 flex items-center justify-center ${isDark ? "bg-cyan-500/20" : "bg-cyan-100"
+                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl sm:mb-3 flex-shrink-0 flex items-center justify-center ${isDark ? "bg-cyan-500/20" : "bg-cyan-100"
                         }`}
                     >
                       <Icon
@@ -699,7 +708,7 @@ export default function ConsultantChatPage() {
                       />
                     </div>
                     <p
-                      className={`font-medium ${isDark ? "text-white" : "text-slate-700"
+                      className={`font-medium text-xs sm:text-sm ${isDark ? "text-white" : "text-slate-700"
                         }`}
                     >
                       {suggestion}
@@ -710,7 +719,7 @@ export default function ConsultantChatPage() {
 
               {/* Indicateur de capacités */}
               <div
-                className={`mt-12 flex items-center gap-6 text-xs ${isDark ? "text-slate-600" : "text-slate-400"
+                className={`mt-6 sm:mt-12 flex flex-wrap items-center justify-center gap-3 sm:gap-6 text-xs ${isDark ? "text-slate-600" : "text-slate-400"
                   }`}
               >
                 <span className="flex items-center gap-2">
@@ -729,7 +738,7 @@ export default function ConsultantChatPage() {
             </div>
           ) : (
             // Conversation moderne
-            <div className="max-w-4xl mx-auto w-full py-8 px-6">
+            <div className="max-w-4xl mx-auto w-full py-4 sm:py-8 px-3 sm:px-6">
               {messages.map((message, idx) => (
                 <div
                   key={message.id}
@@ -738,7 +747,7 @@ export default function ConsultantChatPage() {
                 >
                   {message.role === "user" ? (
                     // Message utilisateur - bulle à droite
-                    <div className="max-w-[80%]">
+                    <div className="max-w-[90%] sm:max-w-[80%]">
                       <div
                         className={`px-5 py-3.5 rounded-3xl rounded-tr-md ${
                           isDark
