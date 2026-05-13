@@ -50,7 +50,7 @@ export default function CorbeillePage() {
     setChargement(true)
     setErreur(null)
     try {
-      const { data } = await apiFetchJson<{ documents: DocCorbeille[]; total: number }>('/api/corbeille/')
+      const { data } = await apiFetchJson<{ documents: DocCorbeille[]; total: number }>('/corbeille/')
       setDocuments(data?.documents ?? [])
     } catch {
       setErreur('Impossible de charger la corbeille.')
@@ -68,7 +68,7 @@ export default function CorbeillePage() {
   const restaurer = async (id: string) => {
     setEnCours(id)
     try {
-      await apiFetchJson<{ detail: string }>(`/api/corbeille/${id}/restaurer/`, { method: 'POST' })
+      await apiFetchJson<{ detail: string }>(`/corbeille/${id}/restaurer/`, { method: 'POST' })
       setMessage('Document restauré avec succès.')
       setDocuments(prev => prev.filter(d => d.id !== id))
     } catch {
@@ -82,7 +82,7 @@ export default function CorbeillePage() {
     setEnCours(id)
     setConfirmerPurgeId(null)
     try {
-      await apiFetchJson<void>(`/api/corbeille/${id}/purger/`, { method: 'DELETE' })
+      await apiFetchJson<void>(`/corbeille/${id}/purger/`, { method: 'DELETE' })
       setMessage('Document supprimé définitivement.')
       setDocuments(prev => prev.filter(d => d.id !== id))
     } catch {
@@ -96,7 +96,7 @@ export default function CorbeillePage() {
     setConfirmerPurgeAll(false)
     setEnCours('all')
     try {
-      const { data } = await apiFetchJson<{ detail: string }>('/api/corbeille/purger-tout/', { method: 'DELETE' })
+      const { data } = await apiFetchJson<{ detail: string }>('/corbeille/purger-tout/', { method: 'DELETE' })
       setMessage(data?.detail ?? 'Corbeille vidée.')
       setDocuments([])
     } catch {
