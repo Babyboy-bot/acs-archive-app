@@ -6768,11 +6768,13 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
                     w for w in q_norm.split()
                     if len(w) >= 4 and w not in _STOPWORDS and not w.isdigit()
                 ]
-                if title_words and qs.count() > 5:
+                if title_words:
                     tq = _Q()
                     for w in title_words[:3]:
                         tq |= _Q(titre__icontains=w)
-                    qs = qs.filter(tq)
+                    refined = qs.filter(tq)
+                    if refined.exists():  # N'appliquer que si ça donne des résultats
+                        qs = refined
 
                 logging.warning("[chat_context] nb docs trouves: %s", qs.count())
 
@@ -6898,11 +6900,25 @@ def _build_chat_prompt(question: str, context_docs: list) -> str:
 
         for i, doc in enumerate(context_docs, 1):
 
-            parts.append(f"{i}. {doc['titre']} (Client: {doc['client']}, Exercice: {doc['exercice']})")
+            meta = f"Client: {doc['client']}, Exercice: {doc['exercice']}"
 
-            if doc['description']:
+            if doc.get('risque'):
+
+                meta += f", Risque: {doc['risque']}"
+
+            if doc.get('reference'):
+
+                meta += f", Réf: {doc['reference']}"
+
+            parts.append(f"{i}. {doc['titre']} ({meta})")
+
+            if doc.get('description'):
 
                 parts.append(f"   Contenu : {doc['description']}")
+
+            else:
+
+                parts.append(f"   [Document archivé sans texte extractible — existence confirmée par les métadonnées]")
 
             parts.append("")
 
@@ -6918,7 +6934,9 @@ def _build_chat_prompt(question: str, context_docs: list) -> str:
 
         "- Base ta réponse UNIQUEMENT sur les documents fournis dans le contexte",
 
-        "- Si les informations sont insuffisantes, indique-le clairement",
+        "- IMPORTANT : si un document est listé ci-dessus, confirme TOUJOURS son existence même s'il n'a pas de contenu textuel",
+
+        "- Pour un document sans contenu, indique son titre, client, exercice et risque, et précise que le contenu n'est pas disponible en format texte",
 
         "- Ne jamais inventer d'informations",
 
