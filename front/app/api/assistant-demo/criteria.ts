@@ -90,16 +90,17 @@ export function extraireCriteresRecherche(question: string): CriteresRecherche {
     }
   }
 
-  // Extraire l'année (format 4 chiffres)
-  const anneeMatch = question.match(/\b(19\d{2}|20[0-2]\d)\b/)
+  // Extraire l'année (format 4 chiffres, jusqu'à 2039)
+  const anneeMatch = question.match(/\b(19\d{2}|20[0-3]\d)\b/)
   if (anneeMatch) {
     criteres.annee = anneeMatch[1]
   }
 
-  // Extraire le code client (format 3CB, SANLAM, etc.)
-  const clientPatterns = [
-    /(?:client|pour)\s+([A-Z0-9]{2,4})/i,
-    /(?:documents?|archives?|factures?|dossiers?)\s+(?:de|du|pour)\s+(?:le client\s+)?([A-Z0-9]{2,4})/i,
+  // Extraire le nom client complet (multi-mots, jusqu'au prochain mot-clé structurel)
+  const clientPatterns: RegExp[] = [
+    // Capture tout après "client" jusqu'à risque/exercice/annee/document
+    /(?:client|pour)\s+(.+?)(?=\s+(?:risque|exercice|ann[eé]e|document|type)\b|\s*$)/i,
+    /(?:documents?|archives?|factures?|dossiers?)\s+(?:de|du|pour)\s+(?:le client\s+)?(.+?)(?=\s+(?:risque|exercice|ann[eé]e|document|type)\b|\s*$)/i,
     /([A-Z]{3,4}\d{0,2})\s*[:\-]/, // Format "3CB:" ou "SANLAM-"
   ]
 

@@ -6523,7 +6523,7 @@ setattr(assistant_chat_view, 'ressource', 'documents')
 
 
 
-def _prepare_chat_context(question: str, conversation) -> tuple:
+def _prepare_chat_context(question: str, conversation, criteres_extraits: dict | None = None) -> tuple:
 
     """Recherche documentaire + préparation du contexte pour le chat."""
 
@@ -6679,6 +6679,20 @@ def _prepare_chat_context(question: str, conversation) -> tuple:
                 except ValueError:
 
                     pass
+
+            # Override avec critères structurés du frontend (plus précis que regex)
+            if criteres_extraits:
+                if criteres_extraits.get('annee'):
+                    try:
+                        year = int(criteres_extraits['annee'])
+                    except (ValueError, TypeError):
+                        pass
+                if criteres_extraits.get('client'):
+                    client_token = criteres_extraits['client']  # Nom complet préservé
+                if criteres_extraits.get('risque'):
+                    risque_token = criteres_extraits['risque'].lower()
+                if criteres_extraits.get('typeCourrier'):
+                    type_courrier = criteres_extraits['typeCourrier']
 
             logging.warning(
                 "[chat_context] year=%s risque=%s->%s client=%s montant=%s",
@@ -6968,9 +6982,12 @@ def assistant_chat_stream_view(request):
 
 
 
+    # Critères structurés envoyés par le frontend (extraction LLM/regex côté client)
+    criteres_extraits = request.data.get('criteres_extraits') or {}
+
     # Préparer contexte documentaire et prompt
 
-    _, context_docs, pieces = _prepare_chat_context(question, conversation)
+    _, context_docs, pieces = _prepare_chat_context(question, conversation, criteres_extraits)
 
     prompt = _build_chat_prompt(question, context_docs)
 
