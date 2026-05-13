@@ -622,7 +622,7 @@ export default function PageNouveauDocument() {
 
     try {
 
-      const uploaderFichier = async (idx: number, force = false): Promise<'ok' | 'doublon'> => {
+      const uploaderFichier = async (idx: number, force = false): Promise<'ok' | { type: 'doublon'; info: DoublonInfo }> => {
         const fichier = fichiers[idx]
 
         const titreFichier = estBulk
@@ -665,12 +665,11 @@ export default function PageNouveauDocument() {
 
         if (response.status === 409) {
           const d = data as any
-          setDoublonsDetectes(prev => [...prev, {
+          return { type: 'doublon' as const, info: {
             idx,
             nom: fichier.name,
             docExistant: d?.document_existant ?? { id: '', titre: '?', reference: null, client: null, cree_le: '' }
-          }])
-          return 'doublon'
+          }}
         }
 
         if (!response.ok) {
@@ -682,12 +681,13 @@ export default function PageNouveauDocument() {
         if (estBulk) {
           setProgressBulk(prev => ({ done: (prev?.done || 0) + 1, total: fichiers.length }))
         }
-        return 'ok'
+        return 'ok' as const
       }
 
       const BATCH = 10
       let done = 0
       const nouveauxEchoues: Array<{ idx: number; erreur: string; nom: string }> = []
+      const nouveauxDoublons: DoublonInfo[] = []
 
       for (let i = 0; i < fichiers.length; i += BATCH) {
         const indices = Array.from({ length: Math.min(BATCH, fichiers.length - i) }, (_, k) => i + k)
@@ -703,8 +703,9 @@ export default function PageNouveauDocument() {
             })
           } else if (result.value === 'ok') {
             done++
+          } else if (typeof result.value === 'object' && result.value.type === 'doublon') {
+            nouveauxDoublons.push(result.value.info)
           }
-          // 'doublon' : déjà ajouté à doublonsDetectes via setDoublonsDetectes
         })
       }
 
@@ -712,15 +713,13 @@ export default function PageNouveauDocument() {
       setUploadReussis(done)
       setProgressBulk(null)
 
-      // S'il y a des doublons, ouvrir la modale avant de continuer
-      setDoublonsDetectes(prev => {
-        if (prev.length > 0) {
-          setModaleDoublons(true)
-          setChargement(false)
-          return prev
-        }
-        return prev
-      })
+      // Si des doublons détectés : afficher la modale et STOPPER (pas de redirection)
+      if (nouveauxDoublons.length > 0) {
+        setDoublonsDetectes(nouveauxDoublons)
+        setModaleDoublons(true)
+        setChargement(false)
+        return
+      }
 
       if (nouveauxEchoues.length === 0) {
         setMessageSucces(estBulk
