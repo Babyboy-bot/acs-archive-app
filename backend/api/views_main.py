@@ -6653,12 +6653,29 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
 
             # Map token -> valeur icontains accent-safe (é != e en PostgreSQL ILIKE)
             RISQUE_DB_FILTER = {
-                'sante': 'sant',        # 'sant' est dans 'Santé', 'sante', 'SANTE'
+                'sante': 'sant',
+                'automobile': 'auto',
                 'auto': 'auto',
                 'mrp': 'mrp',
-                'mri': 'immeuble',      # 'mri' absent de 'Multirisque Immeuble'
-                'rc': 'responsabilit',  # préfixe commun sans accent
+                'multirisque professionnel': 'multirisque',
+                'mri': 'immeuble',
+                'multirisque habitation': 'habitation',
+                'responsabilite civile': 'responsabilit',
+                'rc': 'responsabilit',
                 'transport': 'transport',
+                'tous risques chantier': 'chantier',
+                'trc': 'chantier',
+                'caution': 'caution',
+                'individuel accident': 'individuel',
+                'ia': 'individuel',
+                'incendie': 'incendie',
+                'vol': 'vol',
+                'divers': 'divers',
+                'reglements': 'r\u00e8glement',
+                'deces': 'dec',
+                'prevoyance': 'pr\u00e9voyance',
+                'global dommage': 'global',
+                'tous risques informatiques': 'informatique',
             }
 
             # Premier mot significatif après "client" (icontains suffit pour matcher le nom complet)
@@ -6737,6 +6754,25 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
                         mq |= _Q(titre__icontains=v) | _Q(description__icontains=v)
 
                     qs = qs.filter(mq)
+
+                # Filtre titre sur mots significatifs si trop de résultats
+                _STOPWORDS = {
+                    'le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 'et', 'ou',
+                    'pour', 'par', 'sur', 'en', 'avec', 'client', 'risque', 'exercice',
+                    'annee', 'document', 'type', 'divers', 'sante', 'auto', 'mrp', 'mri',
+                    'rc', 'transport', 'caution', 'vol', 'incendie', 'prevoyance', 'deces',
+                    'que', 'qui', 'quoi', 'quel', 'quelle', 'dans', 'me', 'je', 'il',
+                    'nous', 'vous', 'ils', 'cette', 'ce', 'cet',
+                }
+                title_words = [
+                    w for w in q_norm.split()
+                    if len(w) >= 4 and w not in _STOPWORDS and not w.isdigit()
+                ]
+                if title_words and qs.count() > 5:
+                    tq = _Q()
+                    for w in title_words[:3]:
+                        tq |= _Q(titre__icontains=w)
+                    qs = qs.filter(tq)
 
                 logging.warning("[chat_context] nb docs trouves: %s", qs.count())
 

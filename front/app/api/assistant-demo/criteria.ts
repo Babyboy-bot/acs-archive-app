@@ -53,6 +53,8 @@ export const TYPES_RISQUES: Record<string, string[]> = {
   'global dommage': ['gd', 'global dommage', 'global dommages', 'globale dommage', 'globale dommages'],
   'vol': ['vol', 'vols', 'vol et detournement', 'vol et detournements', 'vols et detournements'],
   'tous risques informatiques': ['tri', 'tous risques informatiques', 'informatique', 'info'],
+  'divers': ['divers', 'div'],
+  'reglements': ['reglement', 'reglements', 'paiement', 'versement'],
 }
 
 // ============================================================================
@@ -82,9 +84,9 @@ export function extraireCriteresRecherche(question: string): CriteresRecherche {
     }
   }
 
-  // Extraire le risque
+  // Extraire le risque (word boundary pour éviter faux positifs ex: "rc" dans "exercice")
   for (const [risque, keywords] of Object.entries(TYPES_RISQUES)) {
-    if (keywords.some(keyword => normalized.includes(keyword))) {
+    if (keywords.some(keyword => new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(normalized))) {
       criteres.risque = risque
       break
     }
