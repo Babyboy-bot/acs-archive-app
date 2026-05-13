@@ -2753,6 +2753,8 @@ class DocumentUploadView(APIView):
 
     def post(self, request, *args, **kwargs):
 
+        import hashlib
+
         fichier = request.FILES.get('file')
 
         titre = (request.data.get('titre') or '').strip()
@@ -2768,6 +2770,8 @@ class DocumentUploadView(APIView):
         categorie_id = request.data.get('categorie_id') or request.data.get('categorieId') or None
 
         date_document = request.data.get('date_document') or request.data.get('dateDocument') or None
+
+        force = request.data.get('force', 'false').lower() == 'true'
 
 
 
@@ -2805,6 +2809,28 @@ class DocumentUploadView(APIView):
 
 
 
+        # Calculer le hash SHA256 du fichier
+        sha256 = hashlib.sha256()
+        for chunk in fichier.chunks():
+            sha256.update(chunk)
+        file_hash = sha256.hexdigest()
+        fichier.seek(0)
+
+        # Vérifier les doublons (sauf si force=true)
+        if not force:
+            doublon = Document.objects.filter(file_hash=file_hash, is_deleted=False).select_related('risque__exercice__client').first()
+            if doublon:
+                return Response({
+                    'doublon': True,
+                    'document_existant': {
+                        'id': doublon.id,
+                        'titre': doublon.titre,
+                        'reference': doublon.reference,
+                        'client': doublon.risque.exercice.client.nom if doublon.risque and doublon.risque.exercice and doublon.risque.exercice.client else None,
+                        'cree_le': doublon.cree_le,
+                    }
+                }, status=status.HTTP_409_CONFLICT)
+
         extension = mimetypes.guess_extension(fichier.content_type or '') or ''
 
         nom_fichier = f"documents/{uuid.uuid4()}{extension}"
@@ -2837,7 +2863,9 @@ class DocumentUploadView(APIView):
 
                 reference=reference,
 
-                date_document=date_document
+                date_document=date_document,
+
+                file_hash=file_hash,
 
             )
 

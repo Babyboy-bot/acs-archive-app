@@ -72,6 +72,14 @@ export default function PageNouveauDocument() {
 
   const [uploadReussis, setUploadReussis] = useState(0)
 
+  type DoublonInfo = {
+    idx: number
+    nom: string
+    docExistant: { id: string; titre: string; reference: string | null; client: string | null; cree_le: string }
+  }
+  const [doublonsDetectes, setDoublonsDetectes] = useState<DoublonInfo[]>([])
+  const [modaleDoublons, setModaleDoublons] = useState(false)
+
 
 
   const [clients, setClients] = useState<{
@@ -614,7 +622,7 @@ export default function PageNouveauDocument() {
 
     try {
 
-      const uploaderFichier = async (idx: number) => {
+      const uploaderFichier = async (idx: number, force = false): Promise<'ok' | 'doublon'> => {
         const fichier = fichiers[idx]
 
         const titreFichier = estBulk
@@ -643,6 +651,8 @@ export default function PageNouveauDocument() {
 
         formData.append('auteur_id', auteurId)
 
+        if (force) formData.append('force', 'true')
+
 
 
         const { response, data } = await apiFetchJson('/documents/upload/', {
@@ -653,7 +663,15 @@ export default function PageNouveauDocument() {
 
         })
 
-
+        if (response.status === 409) {
+          const d = data as any
+          setDoublonsDetectes(prev => [...prev, {
+            idx,
+            nom: fichier.name,
+            docExistant: d?.document_existant ?? { id: '', titre: '?', reference: null, client: null, cree_le: '' }
+          }])
+          return 'doublon'
+        }
 
         if (!response.ok) {
 
@@ -664,6 +682,7 @@ export default function PageNouveauDocument() {
         if (estBulk) {
           setProgressBulk(prev => ({ done: (prev?.done || 0) + 1, total: fichiers.length }))
         }
+        return 'ok'
       }
 
       const BATCH = 10
@@ -682,18 +701,26 @@ export default function PageNouveauDocument() {
               erreur: result.reason instanceof Error ? result.reason.message : String(result.reason),
               nom: fichiers[fichierIdx].name
             })
-          } else {
+          } else if (result.value === 'ok') {
             done++
           }
+          // 'doublon' : déjà ajouté à doublonsDetectes via setDoublonsDetectes
         })
       }
 
       setFichiersEchoues(nouveauxEchoues)
       setUploadReussis(done)
-
-
-
       setProgressBulk(null)
+
+      // S'il y a des doublons, ouvrir la modale avant de continuer
+      setDoublonsDetectes(prev => {
+        if (prev.length > 0) {
+          setModaleDoublons(true)
+          setChargement(false)
+          return prev
+        }
+        return prev
+      })
 
       if (nouveauxEchoues.length === 0) {
         setMessageSucces(estBulk
@@ -1862,6 +1889,81 @@ export default function PageNouveauDocument() {
         </form>
 
       </main>
+
+      {/* Modale détection de doublon */}
+      {modaleDoublons && doublonsDetectes.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-theme-card rounded-xl p-6 max-w-lg w-full shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center flex-shrink-0">
+                <Icon name="warning" size="sm" className="text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-theme-primary">
+                  {doublonsDetectes.length > 1 ? `${doublonsDetectes.length} doublons détectés` : 'Doublon détecté'}
+                </h3>
+                <p className="text-sm text-theme-secondary">Ce fichier est déjà archivé</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 mb-5 max-h-48 overflow-y-auto">
+              {doublonsDetectes.map((d, i) => (
+                <div key={i} className="p-3 bg-amber-50 dark:bg-amber-900/10 rounded-lg border border-amber-200 dark:border-amber-800">
+                  <p className="text-sm font-medium text-theme-primary truncate">{d.nom}</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                    Déjà archivé sous : <span className="font-medium">{d.docExistant.titre}</span>
+                    {d.docExistant.reference && ` (${d.docExistant.reference})`}
+                    {d.docExistant.client && ` — ${d.docExistant.client}`}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-sm text-theme-secondary mb-5">
+              Voulez-vous quand même archiver {doublonsDetectes.length > 1 ? 'ces fichiers' : 'ce fichier'} en double ?
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setModaleDoublons(false); setDoublonsDetectes([]) }}
+                className="flex-1 py-2 text-sm border border-theme rounded-lg hover:bg-theme-muted transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={async () => {
+                  setModaleDoublons(false)
+                  setChargement(true)
+                  const indices = doublonsDetectes.map(d => d.idx)
+                  for (const idx of indices) {
+                    const fichier = fichiers[idx]
+                    const titreFichier = fichiers.length > 1 ? (titresParFichier[idx] || extraireNomSansExtension(fichier.name)) : titre
+                    const referenceFichier = fichiers.length > 1 ? (referencesParFichier[idx] || '') : reference
+                    const formData = new FormData()
+                    formData.append('file', fichier)
+                    formData.append('titre', titreFichier.trim())
+                    formData.append('description', description.trim())
+                    formData.append('risque_id', risqueId)
+                    formData.append('type_courrier', typeCourrier)
+                    formData.append('reference', referenceFichier.trim())
+                    formData.append('auteur_id', auteurId)
+                    formData.append('force', 'true')
+                    await apiFetchJson('/documents/upload/', { method: 'POST', body: formData })
+                  }
+                  setDoublonsDetectes([])
+                  setChargement(false)
+                  setMessageSucces('Documents archivés avec succès. Redirection…')
+                  setTimeout(() => router.push('/documents'), 1500)
+                }}
+                className="flex-1 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors"
+              >
+                Archiver quand même
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </AppLayout>
   )
 }

@@ -501,6 +501,8 @@ class Document(models.Model):
 
     chunking_error = models.TextField(null=True, blank=True, db_column='chunkingError')
 
+    file_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+
     is_deleted = models.BooleanField(default=False, db_index=True)
 
     deleted_at = models.DateTimeField(null=True, blank=True)
