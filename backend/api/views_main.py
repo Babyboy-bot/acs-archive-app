@@ -6645,15 +6645,32 @@ def _prepare_chat_context(question: str, conversation) -> tuple:
 
                 type_courrier = 'ACS_VERS_CLIENT'
 
-            risque_token = next((r for r in ['sante', 'auto', 'mrp', 'mri'] if r in q_norm), None)
+            risque_token = next((r for r in ['sante', 'auto', 'mrp', 'mri', 'rc', 'transport'] if r in q_norm), None)
 
             if risque_token == 'auto' and 'automobile' not in q_norm and 'auto' not in q_norm:
 
                 risque_token = None
 
-            cm = _re.search(r"\bclient\s+([a-z0-9]{2,})\b", q_norm)
+            # Map token -> valeur icontains accent-safe (é != e en PostgreSQL ILIKE)
+            RISQUE_DB_FILTER = {
+                'sante': 'sant',        # 'sant' est dans 'Santé', 'sante', 'SANTE'
+                'auto': 'auto',
+                'mrp': 'mrp',
+                'mri': 'immeuble',      # 'mri' absent de 'Multirisque Immeuble'
+                'rc': 'responsabilit',  # préfixe commun sans accent
+                'transport': 'transport',
+            }
 
-            client_token = cm.group(1) if cm else None
+            # Capturer le nom client complet (multi-mots) jusqu'au prochain mot-clé
+            cm = _re.search(
+                r"\bclient\s+(.+?)\s*(?=\b(?:risque|exercice|ann[eé]e|document|$))",
+                q_norm, _re.IGNORECASE
+            )
+            # Fallback : premier mot alphanum après "client"
+            if not cm:
+                cm = _re.search(r"\bclient\s+([a-z0-9]{2,})", q_norm)
+
+            client_token = cm.group(1).strip() if cm else None
 
             mm = _re.search(r"(\d{1,3}(?:[ .]\d{3})*(?:,\d{2})?)", question)
 
@@ -6683,7 +6700,9 @@ def _prepare_chat_context(question: str, conversation) -> tuple:
 
                 if risque_token:
 
-                    qs = qs.filter(risque__type__icontains=risque_token)
+                    risque_db_val = RISQUE_DB_FILTER.get(risque_token, risque_token)
+
+                    qs = qs.filter(risque__type__icontains=risque_db_val)
 
                 if client_token:
 
