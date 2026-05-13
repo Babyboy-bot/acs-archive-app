@@ -95,11 +95,11 @@ urlpatterns = [
     # Rapport qualité OCR (priorisation re-scan)
     path('ocr/quality-report/', ocr_quality_report_view, name='ocr-quality-report'),
     
-    # Corbeille (soft delete)
+    # Corbeille (soft delete) — purger-tout AVANT les routes dynamiques
     path('corbeille/', CorbeilleListView.as_view(), name='corbeille-list'),
+    path('corbeille/purger-tout/', CorbeillePurgeAllView.as_view(), name='corbeille-purge-all'),
     path('corbeille/<str:document_id>/restaurer/', CorbeilleRestoreView.as_view(), name='corbeille-restore'),
     path('corbeille/<str:document_id>/purger/', CorbeillePurgeOneView.as_view(), name='corbeille-purge-one'),
-    path('corbeille/purger-tout/', CorbeillePurgeAllView.as_view(), name='corbeille-purge-all'),
 
     # Journal d'audit
     path('audit/logs/', audit_log_list, name='audit-log-list'),
