@@ -1,6 +1,6 @@
 'use client'
 
-import { Sidebar } from '@/components/Sidebar'
+import { Sidebar, AppLayout } from '@/components'
 import { Icon, IconName } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
@@ -203,10 +203,8 @@ export default function PageParametres() {
   }
 
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary flex">
-      <Sidebar />
-      
-      <main className="flex-1 ml-64 p-10 overflow-auto">
+    <AppLayout>
+      <main className="flex-1 p-4 md:p-10 overflow-auto">
         {/* En-tête minimaliste */}
         <motion.header 
           initial={{ opacity: 0 }}
@@ -465,6 +463,6 @@ export default function PageParametres() {
           </div>
         </div>
       </main>
-    </div>
+    </AppLayout>
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { Sidebar } from '@/components/Sidebar'
+import { Sidebar, AppLayout } from '@/components'
 import { Icon } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
@@ -392,9 +392,8 @@ export default function PageUtilisateurs() {
 
   if (!peutVoirUtilisateurs) {
     return (
-      <div className="min-h-screen bg-theme-base text-theme-primary flex">
-        <Sidebar />
-        <main className="flex-1 ml-64 p-8 overflow-auto flex flex-col items-center text-center gap-6">
+      <AppLayout>
+        <main className="flex-1 p-4 md:p-8 overflow-auto flex flex-col items-center text-center gap-6">
           <div className="flex items-center gap-3 text-red-600">
             <Icon name="shield" size="lg" />
             <h1 className="text-3xl font-bold text-gray-900">Accès restreint</h1>
@@ -403,15 +402,13 @@ export default function PageUtilisateurs() {
             Vous n'avez pas la permission de consulter la gestion des utilisateurs. Veuillez contacter un administrateur si vous pensez qu'il s'agit d'une erreur.
           </p>
         </main>
-      </div>
+      </AppLayout>
     )
   }
 
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary flex">
-      <Sidebar />
-      
-      <main className="flex-1 ml-64 p-10 overflow-auto">
+    <AppLayout>
+      <main className="flex-1 p-4 md:p-10 overflow-auto">
         {/* En-tête minimaliste */}
         <motion.header 
           initial={{ opacity: 0 }}
@@ -873,6 +870,6 @@ export default function PageUtilisateurs() {
           </form>
         </FormModal>
       )}
-    </div>
+    </AppLayout>
   )
 }

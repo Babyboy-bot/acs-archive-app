@@ -8,6 +8,10 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views_main import (
     DocumentRetryChunkingView,
     DocumentLogViewView,
+    CorbeilleListView,
+    CorbeilleRestoreView,
+    CorbeillePurgeOneView,
+    CorbeillePurgeAllView,
     login_view,
     logout_view,
     refresh_token_view,
@@ -91,6 +95,12 @@ urlpatterns = [
     # Rapport qualité OCR (priorisation re-scan)
     path('ocr/quality-report/', ocr_quality_report_view, name='ocr-quality-report'),
     
+    # Corbeille (soft delete)
+    path('corbeille/', CorbeilleListView.as_view(), name='corbeille-list'),
+    path('corbeille/<str:document_id>/restaurer/', CorbeilleRestoreView.as_view(), name='corbeille-restore'),
+    path('corbeille/<str:document_id>/purger/', CorbeillePurgeOneView.as_view(), name='corbeille-purge-one'),
+    path('corbeille/purger-tout/', CorbeillePurgeAllView.as_view(), name='corbeille-purge-all'),
+
     # Journal d'audit
     path('audit/logs/', audit_log_list, name='audit-log-list'),
     path('audit/logs/<int:log_id>/', audit_log_detail, name='audit-log-detail'),

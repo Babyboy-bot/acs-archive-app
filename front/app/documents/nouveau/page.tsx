@@ -2,7 +2,7 @@
 
 
 
-import { Sidebar } from '@/components/Sidebar'
+import { Sidebar, AppLayout } from '@/components'
 
 import { Icon } from '@/components/Icon'
 
@@ -164,7 +164,15 @@ export default function PageNouveauDocument() {
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
 
-    setFichiers(prev => [...prev, ...acceptedFiles])
+    setFichiers(prev => {
+      const newFiles = [...prev, ...acceptedFiles]
+      // Mode solo : pré-remplir titre et référence depuis le nom du fichier
+      if (newFiles.length === 1) {
+        setTitre(newFiles[0].name.replace(/\.[^/.]+$/, ''))
+        setReference(extraireReference(newFiles[0].name))
+      }
+      return newFiles
+    })
 
     setTitresParFichier(prev => [...prev, ...acceptedFiles.map(f => f.name.replace(/\.[^/.]+$/, ''))])
 
@@ -759,13 +767,8 @@ export default function PageNouveauDocument() {
 
   return (
 
-    <div className="min-h-screen bg-theme-base text-theme-primary flex">
-
-      <Sidebar />
-
-      
-
-      <main className="flex-1 ml-64 p-10 overflow-auto">
+    <AppLayout>
+      <main className="flex-1 p-4 md:p-10 overflow-auto">
 
         {/* En-tête minimaliste */}
 
@@ -1859,10 +1862,7 @@ export default function PageNouveauDocument() {
         </form>
 
       </main>
-
-    </div>
-
+    </AppLayout>
   )
-
 }
 

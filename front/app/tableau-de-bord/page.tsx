@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
 
 // Composants
-import { Sidebar, Icon, StatsTempsReel } from '@/components'
+import { Sidebar, Icon, StatsTempsReel, AppLayout } from '@/components'
 import { AuthLoadingScreen, AccessDenied, PageHeader } from '@/components/common'
 
 // Hooks
@@ -167,23 +167,20 @@ export default function DashboardUltraModerne() {
 
   if (!peutVoirStats) {
     return (
-      <div className="min-h-screen bg-theme-base text-theme-primary flex">
-        <Sidebar />
-        <main className="flex-1 ml-64 p-8">
+      <AppLayout>
+        <main className="flex-1 p-4 md:p-8">
           <AccessDenied 
             title="Accès restreint"
             description="Ce tableau de bord est réservé aux administrateurs et archivistes. Veuillez contacter un administrateur si vous avez besoin d'un accès élargi."
           />
         </main>
-      </div>
+      </AppLayout>
     )
   }
 
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary flex">
-      <Sidebar />
-      
-      <main className="flex-1 ml-64 p-10 overflow-auto">
+    <AppLayout>
+      <main className="flex-1 p-4 md:p-10 overflow-auto">
         {/* En-tête minimaliste */}
         <motion.header 
           initial={{ opacity: 0 }}
@@ -414,6 +411,6 @@ export default function DashboardUltraModerne() {
           )}
         </motion.section>
       </main>
-    </div>
+    </AppLayout>
   )
 }

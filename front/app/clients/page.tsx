@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { motion } from 'framer-motion'
 
-import { Sidebar } from '@/components/Sidebar'
+import { Sidebar, AppLayout } from '@/components'
 
 import { Icon } from '@/components/Icon'
 
@@ -1760,13 +1760,8 @@ export default function PageClients() {
 
   return (
 
-    <div className="min-h-screen bg-theme-base text-theme-primary flex">
-
-      <Sidebar />
-
-
-
-      <main className="flex-1 ml-64 p-10 overflow-auto">
+    <AppLayout>
+      <main className="flex-1 p-4 md:p-10 overflow-auto">
 
         {/* En-tête minimaliste */}
 
@@ -3073,10 +3068,7 @@ export default function PageClients() {
         )}
 
       </FormModal>
-
-    </div>
-
+    </AppLayout>
   )
-
 }
 

@@ -7,7 +7,7 @@ import { useRequireAuth } from '@/hooks/useRequireAuth'
 import { hasPermission } from '@/lib/permissions'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
-import { Sidebar } from '@/components/Sidebar'
+import { Sidebar, AppLayout } from '@/components'
 import { Icon } from '@/components/Icon'
 import { PreviewPDF } from '@/components/PreviewPDF'
 import { apiFetchJson, buildApiUrl } from '@/lib/api'
@@ -883,10 +883,8 @@ export default function PageDocuments() {
   }
 
   return (
-    <div className="min-h-screen bg-theme-base text-theme-primary flex">
-      <Sidebar />
-
-      <main className="flex-1 ml-64 p-10 overflow-auto">
+    <AppLayout>
+      <main className="flex-1 p-4 md:p-10 overflow-auto">
         {/* En-tête minimaliste */}
         <motion.header
           initial={{ opacity: 0 }}
@@ -1339,6 +1337,6 @@ export default function PageDocuments() {
         isLoading={suppressionEnCours === modaleSuppressionDocument.document?.id}
         isDark={isDark}
       />
-    </div>
+    </AppLayout>
   )
 }

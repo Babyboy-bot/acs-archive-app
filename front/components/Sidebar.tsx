@@ -45,6 +45,12 @@ const MENU_ITEMS: MenuItem[] = [
     icone: 'clock',
     roles: [RoleUtilisateur.ADMIN],
   },
+  {
+    href: '/corbeille',
+    label: 'Corbeille',
+    icone: 'trash',
+    roles: [RoleUtilisateur.ADMIN],
+  },
 ]
 
 type SidebarProps = {

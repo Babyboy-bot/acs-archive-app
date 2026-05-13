@@ -1144,6 +1144,8 @@ def documents_search_view(request):
 
         Document.objects.select_related('categorie', 'risque__exercice__client')
 
+        .filter(is_deleted=False)
+
         .order_by('-cree_le')[:MAX_DOCUMENTS_TO_SCAN]
 
     )
@@ -2406,7 +2408,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     """ViewSet pour gérer les documents"""
 
-    queryset = Document.objects.all()
+    queryset = Document.objects.filter(is_deleted=False)
 
     serializer_class = DocumentSerializer
 
@@ -2418,7 +2420,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
 
-        """Filtrer les documents selon les paramètres"""
+        """Filtrer les documents selon les paramètres (exclut les supprimés)"""
 
         queryset = Document.objects.select_related(
 
@@ -2428,7 +2430,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
             'risque__exercice__client',
 
-        ).all()
+        ).filter(is_deleted=False)
 
 
 
@@ -2556,19 +2558,23 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
 
-        """Supprimer un document"""
+        """Soft delete : marquer le document comme supprimé sans l'effacer physiquement"""
 
         from .search_index import invalidate_document_index
+        from django.utils import timezone
 
         instance = self.get_object()
 
-        log_action(request, 'DELETE', 'document', instance.id, instance.titre, details={'reference': instance.reference, 'taille': instance.taille_fichier})
+        instance.is_deleted = True
+        instance.deleted_at = timezone.now()
+        instance.deleted_by = request.user if request.user.is_authenticated else None
+        instance.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by'])
 
-        response = super().destroy(request, *args, **kwargs)
+        log_action(request, 'DELETE', 'document', instance.id, instance.titre, details={'reference': instance.reference, 'taille': instance.taille_fichier})
 
         invalidate_document_index.delay()
 
-        return response
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 
@@ -2592,6 +2598,113 @@ class DocumentLogViewView(APIView):
             action = 'READ'
         log_action(request, action, 'document', document.id, document.titre, details={'reference': document.reference, 'type_courrier': document.type_courrier})
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CorbeilleListView(APIView):
+    """Liste des documents supprimés (ADMIN uniquement)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not hasattr(request.user, 'role') or request.user.role != 'ADMIN':
+            return Response({'detail': 'Accès réservé aux administrateurs.'}, status=status.HTTP_403_FORBIDDEN)
+
+        docs = Document.objects.filter(is_deleted=True).select_related(
+            'risque__exercice__client', 'auteur', 'deleted_by'
+        ).order_by('-deleted_at')
+
+        data = []
+        for doc in docs:
+            data.append({
+                'id': doc.id,
+                'titre': doc.titre,
+                'reference': doc.reference,
+                'type_courrier': doc.type_courrier,
+                'taille_fichier': doc.taille_fichier,
+                'cree_le': doc.cree_le,
+                'deleted_at': doc.deleted_at,
+                'deleted_by': f"{doc.deleted_by.prenom} {doc.deleted_by.nom}".strip() if doc.deleted_by else None,
+                'client': doc.risque.exercice.client.nom if doc.risque and doc.risque.exercice and doc.risque.exercice.client else None,
+            })
+        return Response({'documents': data, 'total': len(data)})
+
+
+class CorbeilleRestoreView(APIView):
+    """Restaurer un document supprimé (ADMIN uniquement)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, document_id: str):
+        if not hasattr(request.user, 'role') or request.user.role != 'ADMIN':
+            return Response({'detail': 'Accès réservé aux administrateurs.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            doc = Document.objects.get(id=document_id, is_deleted=True)
+        except Document.DoesNotExist:
+            return Response({'detail': 'Document introuvable dans la corbeille.'}, status=status.HTTP_404_NOT_FOUND)
+
+        doc.is_deleted = False
+        doc.deleted_at = None
+        doc.deleted_by = None
+        doc.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by'])
+
+        log_action(request, 'UPDATE', 'document', doc.id, doc.titre, details={'action': 'restauration depuis corbeille'})
+        return Response({'detail': 'Document restauré avec succès.'})
+
+
+class CorbeillePurgeOneView(APIView):
+    """Suppression définitive d'un document (ADMIN uniquement)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, document_id: str):
+        if not hasattr(request.user, 'role') or request.user.role != 'ADMIN':
+            return Response({'detail': 'Accès réservé aux administrateurs.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            doc = Document.objects.get(id=document_id, is_deleted=True)
+        except Document.DoesNotExist:
+            return Response({'detail': 'Document introuvable dans la corbeille.'}, status=status.HTTP_404_NOT_FOUND)
+
+        titre = doc.titre
+        doc_id = doc.id
+        # Supprimer le fichier physique si possible
+        import os
+        try:
+            if doc.chemin_fichier and os.path.exists(doc.chemin_fichier):
+                os.remove(doc.chemin_fichier)
+        except Exception:
+            pass
+        doc.delete()
+
+        log_action(request, 'DELETE', 'document', doc_id, titre, details={'action': 'purge définitive'})
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CorbeillePurgeAllView(APIView):
+    """Vider toute la corbeille (ADMIN uniquement)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        if not hasattr(request.user, 'role') or request.user.role != 'ADMIN':
+            return Response({'detail': 'Accès réservé aux administrateurs.'}, status=status.HTTP_403_FORBIDDEN)
+
+        import os
+        docs = Document.objects.filter(is_deleted=True)
+        total = docs.count()
+
+        for doc in docs:
+            try:
+                if doc.chemin_fichier and os.path.exists(doc.chemin_fichier):
+                    os.remove(doc.chemin_fichier)
+            except Exception:
+                pass
+
+        docs.delete()
+
+        log_action(request, 'DELETE', 'document', 'all', f'{total} documents', details={'action': f'purge totale corbeille ({total} documents)'})
+        return Response({'detail': f'{total} document(s) purgé(s) définitivement.'})
 
 
 class DocumentRetryChunkingView(APIView):

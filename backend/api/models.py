@@ -501,7 +501,14 @@ class Document(models.Model):
 
     chunking_error = models.TextField(null=True, blank=True, db_column='chunkingError')
 
-    
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    deleted_by = models.ForeignKey(
+        'Utilisateur', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='documents_supprimes'
+    )
 
     class Meta:
 
