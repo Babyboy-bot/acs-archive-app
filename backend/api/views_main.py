@@ -6599,7 +6599,7 @@ def _prepare_chat_context(question: str, conversation) -> tuple:
 
     # 2) Fallback critères (année / type / risque / client / montant)
 
-    if not search_results and not current_doc:
+    if not search_results:
 
         try:
 
@@ -6661,18 +6661,12 @@ def _prepare_chat_context(question: str, conversation) -> tuple:
                 'transport': 'transport',
             }
 
-            # Capturer le nom client complet (multi-mots) jusqu'au prochain mot-clé
-            cm = _re.search(
-                r"\bclient\s+(.+?)\s*(?=\b(?:risque|exercice|ann[eé]e|document|$))",
-                q_norm, _re.IGNORECASE
-            )
-            # Fallback : premier mot alphanum après "client"
-            if not cm:
-                cm = _re.search(r"\bclient\s+([a-z0-9]{2,})", q_norm)
+            # Premier mot significatif après "client" (icontains suffit pour matcher le nom complet)
+            cm = _re.search(r"\bclient\s+([a-z0-9]{2,})", q_norm)
 
             client_token = cm.group(1).strip() if cm else None
 
-            mm = _re.search(r"(\d{1,3}(?:[ .]\d{3})*(?:,\d{2})?)", question)
+            mm = _re.search(r"(\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?)", question)
 
             montant_token = None
 
@@ -6686,9 +6680,15 @@ def _prepare_chat_context(question: str, conversation) -> tuple:
 
                     pass
 
+            logging.warning(
+                "[chat_context] year=%s risque=%s->%s client=%s montant=%s",
+                year, risque_token, RISQUE_DB_FILTER.get(risque_token, risque_token) if risque_token else None,
+                client_token, montant_token
+            )
+
             if any([year is not None, type_courrier, risque_token, client_token, montant_token is not None]):
 
-                qs = Document.objects.select_related('risque__exercice__client')
+                qs = Document.objects.select_related('risque__exercice__client').filter(is_deleted=False)
 
                 if year is not None:
 
@@ -6723,6 +6723,8 @@ def _prepare_chat_context(question: str, conversation) -> tuple:
                         mq |= _Q(titre__icontains=v) | _Q(description__icontains=v)
 
                     qs = qs.filter(mq)
+
+                logging.warning("[chat_context] nb docs trouves: %s", qs.count())
 
                 for doc in qs.order_by('-cree_le')[:5]:
 
