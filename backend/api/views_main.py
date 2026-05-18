@@ -6109,16 +6109,19 @@ def assistant_chat_view(request):
 
                     qs = qs.filter(montant_query)
 
-                # Raffiner par mots du titre (noms de personnes) si présents dans la requête
+                # Raffiner par mots du titre (noms de personnes, codes) si présents dans la requête
                 _STEP2_STOPWORDS = {
                     'ATTESTATION', 'ASSURANCE', 'MALADIE', 'SANTE', 'DOCUMENT', 'AVENANT',
                     'RENOUVELLEMENT', 'FACTURE', 'POLICE', 'CONTRAT', 'TRANSMISSION',
                     'RETOUR', 'SIGNE', 'DEMANDE', 'INCORPORATION', 'CHEQUE', 'COURRIER',
                     'AUTO', 'AUTOMOBILE', 'RISQUE', 'CLIENT',
+                    'CARTE', 'CARTES', 'SOINS', 'NOTE', 'NOTES', 'BON', 'BONS',
+                    'BORDEREAU', 'LISTE', 'NUMERO', 'LES', 'MRP', 'MRI',
                 }
                 step2_title_tokens = [
-                    t for t in re.split(r'[^a-zA-Z\u00C0-\u017E]+', question.upper())
-                    if len(t) >= 4 and t not in _STEP2_STOPWORDS
+                    t for t in re.split(r'[^a-zA-Z0-9\u00C0-\u017E]+', question.upper())
+                    if len(t) >= 3 and t not in _STEP2_STOPWORDS
+                    and not (t.isdigit() and len(t) == 4 and 1900 <= int(t) <= 2100)
                 ][:5]
                 for tok in step2_title_tokens:
                     qs = qs.filter(titre__icontains=tok)
@@ -6812,7 +6815,7 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
 
                     qs = qs.filter(mq)
 
-                # Filtre titre sur mots significatifs (noms de personnes) si trop de résultats
+                # Filtre titre sur mots significatifs (noms de personnes, codes) si trop de résultats
                 _STOPWORDS = {
                     'le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 'et', 'ou',
                     'pour', 'par', 'sur', 'en', 'avec', 'client', 'risque', 'exercice',
@@ -6824,10 +6827,15 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
                     'attestation', 'assurance', 'maladie', 'avenant', 'renouvellement',
                     'facture', 'police', 'contrat', 'transmission', 'retour', 'signe',
                     'demande', 'incorporation', 'cheque', 'courrier', 'sinistre',
+                    # Mots génériques liés aux cartes et soins
+                    'carte', 'cartes', 'soins', 'note', 'notes', 'bon', 'bons',
+                    'bordereau', 'liste', 'numero', 'les',
                 }
+                def _is_year(w):
+                    return w.isdigit() and len(w) == 4 and 1900 <= int(w) <= 2100
                 title_words = [
                     w for w in q_norm.split()
-                    if len(w) >= 4 and w not in _STOPWORDS and not w.isdigit()
+                    if len(w) >= 3 and w not in _STOPWORDS and (not w.isdigit() or (w.isdigit() and not _is_year(w)))
                 ]
                 if title_words:
                     tq = _Q()
