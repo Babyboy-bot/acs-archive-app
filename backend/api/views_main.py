@@ -6109,7 +6109,19 @@ def assistant_chat_view(request):
 
                     qs = qs.filter(montant_query)
 
-
+                # Raffiner par mots du titre (noms de personnes) si présents dans la requête
+                _STEP2_STOPWORDS = {
+                    'ATTESTATION', 'ASSURANCE', 'MALADIE', 'SANTE', 'DOCUMENT', 'AVENANT',
+                    'RENOUVELLEMENT', 'FACTURE', 'POLICE', 'CONTRAT', 'TRANSMISSION',
+                    'RETOUR', 'SIGNE', 'DEMANDE', 'INCORPORATION', 'CHEQUE', 'COURRIER',
+                    'AUTO', 'AUTOMOBILE', 'RISQUE', 'CLIENT',
+                }
+                step2_title_tokens = [
+                    t for t in re.split(r'[^a-zA-Z\u00C0-\u017E]+', question.upper())
+                    if len(t) >= 4 and t not in _STEP2_STOPWORDS
+                ][:5]
+                for tok in step2_title_tokens:
+                    qs = qs.filter(titre__icontains=tok)
 
                 # Si aucun filtre, ne pas lancer ce fallback (évite de ramener du bruit)
 
