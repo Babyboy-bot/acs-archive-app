@@ -6169,11 +6169,56 @@ def assistant_chat_view(request):
 
 
 
+        # 2.5) Recherche directe par mots du titre (noms de personnes, titres exacts)
+        if not search_results and not current_doc:
+            _TITLE_STOPWORDS = {
+                'ATTESTATION', 'ASSURANCE', 'MALADIE', 'DOCUMENT', 'AVENANT',
+                'RENOUVELLEMENT', 'FACTURE', 'POLICE', 'CONTRAT', 'TRANSMISSION',
+                'RETOUR', 'SIGNE', 'DEMANDE', 'INCORPORATION', 'CHEQUE', 'COURRIER',
+            }
+            title_tokens = [
+                t for t in re.split(r'[^a-zA-Z\u00C0-\u017E]+', question.upper())
+                if len(t) >= 4 and t not in _TITLE_STOPWORDS
+            ][:6]
+            if len(title_tokens) >= 2:
+                from django.db.models import Q as _Q
+                title_q = _Q()
+                for tok in title_tokens:
+                    title_q &= _Q(titre__icontains=tok)
+                title_docs = (
+                    Document.objects
+                    .select_related('risque__exercice__client')
+                    .filter(title_q)
+                    .order_by('-cree_le')[:5]
+                )
+                for doc in title_docs:
+                    try:
+                        client = doc.risque.exercice.client.code if doc.risque and doc.risque.exercice else None
+                        exercice = str(doc.risque.exercice.annee) if doc.risque and doc.risque.exercice else None
+                        risque_type = doc.risque.type if doc.risque else None
+                    except Exception:
+                        client = exercice = risque_type = None
+                    payload = {
+                        'id': str(doc.id),
+                        'titre': doc.titre,
+                        'description': (doc.description or ''),
+                        'client': client or '',
+                        'exercice': exercice or '',
+                        'type': getattr(doc, 'type_courrier', '') or '',
+                        'date_document': doc.date_document.isoformat() if doc.date_document else '',
+                        'fichier_url': f"/media/{doc.chemin_fichier}" if doc.chemin_fichier else '',
+                        'reference': doc.reference or '',
+                        'risque': risque_type or '',
+                    }
+                    search_results.append((payload, 0.98))
+
         # 3) Sinon, recherche TF-IDF (globale ou restreinte au document courant)
 
         if not search_results:
 
-            from .search_index import get_document_index
+            from .search_index import get_document_index, rebuild_document_index
+
+            rebuild_document_index()
 
             index = get_document_index()
 
@@ -6183,13 +6228,13 @@ def assistant_chat_view(request):
 
                 # Rechercher dans le document spécifique
 
-                search_results = index.search_tfidf(question, top_k=3, document_ids=[current_doc['document_id']])
+                search_results = index.search_tfidf(question, top_k=3)
 
             else:
 
                 # Recherche globale
 
-                search_results = index.search_tfidf(question, top_k=5)
+                search_results = index.search_tfidf(question, top_k=8)
 
         
 
