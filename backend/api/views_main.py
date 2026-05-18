@@ -6812,7 +6812,7 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
 
                     qs = qs.filter(mq)
 
-                # Filtre titre sur mots significatifs si trop de résultats
+                # Filtre titre sur mots significatifs (noms de personnes) si trop de résultats
                 _STOPWORDS = {
                     'le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 'et', 'ou',
                     'pour', 'par', 'sur', 'en', 'avec', 'client', 'risque', 'exercice',
@@ -6820,6 +6820,10 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
                     'rc', 'transport', 'caution', 'vol', 'incendie', 'prevoyance', 'deces',
                     'que', 'qui', 'quoi', 'quel', 'quelle', 'dans', 'me', 'je', 'il',
                     'nous', 'vous', 'ils', 'cette', 'ce', 'cet',
+                    # Mots génériques de titres de documents
+                    'attestation', 'assurance', 'maladie', 'avenant', 'renouvellement',
+                    'facture', 'police', 'contrat', 'transmission', 'retour', 'signe',
+                    'demande', 'incorporation', 'cheque', 'courrier', 'sinistre',
                 }
                 title_words = [
                     w for w in q_norm.split()
@@ -6827,8 +6831,8 @@ def _prepare_chat_context(question: str, conversation, criteres_extraits: dict |
                 ]
                 if title_words:
                     tq = _Q()
-                    for w in title_words[:3]:
-                        tq |= _Q(titre__icontains=w)
+                    for w in title_words[:5]:
+                        tq &= _Q(titre__icontains=w)  # AND : tous les mots doivent être présents
                     refined = qs.filter(tq)
                     if refined.exists():  # N'appliquer que si ça donne des résultats
                         qs = refined
