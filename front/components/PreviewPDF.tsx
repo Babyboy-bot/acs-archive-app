@@ -43,71 +43,24 @@ export function PreviewPDF({ ouvert, onFermer, titre, urlDocument }: PreviewPDFP
   }, [resolvedUrl])
 
   useEffect(() => {
-    let isMounted = true
-    let currentObjectUrl: string | null = null
-
-    const chargerPdf = async () => {
-      if (!resolvedUrl || !fetchUrl || !ouvert) {
-        setPreviewUrl(null)
-        setError(null)
-        return
-      }
-
-      try {
-        setLoading(true)
-        setError(null)
-        const headers = new Headers()
-        const token = getToken()
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`)
-        }
-        headers.set('Accept', 'application/pdf')
-
-        const response = await fetch(fetchUrl, {
-          headers,
-          credentials: 'include',
-        })
-
-        if (!response.ok) {
-          throw new Error(`Erreur ${response.status}`)
-        }
-
-        const contentType = response.headers.get('content-type') ?? ''
-
-        setResourceType(contentType.includes('pdf') ? 'pdf' : contentType.startsWith('image/') ? 'image' : 'unknown')
-
-        const blob = await response.blob()
-        if (!isMounted) return
-
-        currentObjectUrl = URL.createObjectURL(blob)
-        setPreviewUrl(currentObjectUrl)
-      } catch (err: any) {
-        console.warn('Prévisualisation PDF — utilisation d\'une URL alternative', err)
-        if (isMounted) {
-          const fallbackPreview = fetchUrl ?? resolvedUrl ?? null
-          setResourceType('unknown')
-          if (err instanceof TypeError) {
-            setError(null)
-            setPreviewUrl(fallbackPreview)
-          } else {
-            setError(err?.message ?? "Impossible de charger le PDF")
-            setPreviewUrl(fallbackPreview)
-          }
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false)
-        }
-      }
+    if (!resolvedUrl || !fetchUrl || !ouvert) {
+      setPreviewUrl(null)
+      setError(null)
+      return
     }
 
-    void chargerPdf()
+    // Affichage immédiat via URL directe (rendu progressif, pas d'attente blob complet)
+    setLoading(true)
+    setError(null)
+
+    const ext = (resolvedUrl.split('?')[0].split('.').pop() ?? '').toLowerCase()
+    const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)
+    setResourceType(isImage ? 'image' : 'pdf')
+    setPreviewUrl(fetchUrl)
+    setLoading(false)
 
     return () => {
-      isMounted = false
-      if (currentObjectUrl) {
-        URL.revokeObjectURL(currentObjectUrl)
-      }
+      // Rien à nettoyer (pas d'object URL)
     }
   }, [resolvedUrl, fetchUrl, ouvert])
 

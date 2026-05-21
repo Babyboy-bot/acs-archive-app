@@ -1292,14 +1292,24 @@ export default function ConsultantChatPage() {
                   </span>
                 )}
               </div>
-              <button
-                onClick={() => setModaleDocument({ open: false, piece: null, url: null })}
-                className={`p-2 rounded-lg transition-colors ${isDark ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-slate-200 text-slate-500 hover:text-slate-800"
-                  }`}
-                title="Fermer"
-              >
-                <Icon name="close" size="sm" />
-              </button>
+              <div className="flex items-center gap-2">
+                {modaleDocument.piece && (
+                  <button
+                    onClick={() => modaleDocument.piece && void telechargerPiece(modaleDocument.piece)}
+                    className={`p-2 rounded-lg transition-colors ${isDark ? "hover:bg-white/10 text-slate-400 hover:text-cyan-400" : "hover:bg-slate-200 text-slate-500 hover:text-blue-600"}`}
+                    title="Télécharger"
+                  >
+                    <Icon name="download" size="sm" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setModaleDocument({ open: false, piece: null, url: null })}
+                  className={`p-2 rounded-lg transition-colors ${isDark ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-slate-200 text-slate-500 hover:text-slate-800"}`}
+                  title="Fermer"
+                >
+                  <Icon name="close" size="sm" />
+                </button>
+              </div>
             </div>
 
             {/* Contenu du document */}
