@@ -19,11 +19,6 @@ export default {
             clair: '#E84855',
             fonce: '#A01820',
           },
-          magenta: {
-            DEFAULT: '#B52B8E',
-            clair: '#D63DAB',
-            fonce: '#8C1F6E',
-          },
           bleu: {
             DEFAULT: '#0066B3',
             clair: '#1E88E5',

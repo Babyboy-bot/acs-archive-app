@@ -579,7 +579,7 @@ export default function ConsultantChatPage() {
         >
           {/* Logo + titre */}
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-acs-rouge to-acs-bleu flex items-center justify-center shadow-lg shadow-acs-magenta/25">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
               <Icon name="sparkles" size="xs" className="text-white" />
             </div>
             <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-800"}`}>ACS
@@ -606,7 +606,7 @@ export default function ConsultantChatPage() {
               onClick={() => setEtapeOnboarding(0)}
               title="Guide d'utilisation"
               className={`w-7 h-7 rounded-full border text-xs font-bold transition-colors ${
-                isDark ? "border-white/20 text-slate-400 hover:text-acs-bleu-clair hover:border-acs-bleu/50" : "border-slate-300 text-slate-500 hover:text-acs-rouge hover:border-acs-rouge"
+                isDark ? "border-white/20 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/50" : "border-slate-300 text-slate-500 hover:text-cyan-600 hover:border-cyan-400"
               }`}
             >
               ?
@@ -684,7 +684,7 @@ export default function ConsultantChatPage() {
               <div className="hidden sm:block"><Blob3D /></div>
 
               <h1
-                className={`text-2xl sm:text-4xl font-bold mb-2 sm:mb-3 mt-4 sm:mt-0 bg-gradient-to-r from-acs-rouge via-acs-magenta to-acs-bleu bg-clip-text text-transparent`}
+                className={`text-2xl sm:text-4xl font-bold mb-2 sm:mb-3 mt-4 sm:mt-0 bg-gradient-to-r from-cyan-600 via-purple-600 to-fuchsia-600 bg-clip-text text-transparent`}
               >
                 ACS Assistant
               </h1>
@@ -707,21 +707,21 @@ export default function ConsultantChatPage() {
                     onClick={() => handleSuggestionClick(suggestion)}
                     className={`group relative flex sm:block items-center gap-3 p-3 sm:p-5 rounded-lg text-left text-sm transition-all duration-300 overflow-hidden ${
                       isDark
-                        ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-acs-bleu/30"
-                        : "bg-white hover:bg-red-50/30 border border-slate-200 hover:border-acs-rouge/40 shadow-sm hover:shadow-lg hover:shadow-acs-rouge/10"
+                        ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/30"
+                        : "bg-white hover:bg-cyan-50/50 border border-slate-200 hover:border-cyan-300 shadow-sm hover:shadow-lg hover:shadow-cyan-500/10"
                     }`}
                   >
                     <div
-                      className={`absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-acs-rouge to-acs-bleu transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300`}
+                      className={`absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-cyan-500 to-fuchsia-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300`}
                     />
                     <div
-                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl sm:mb-3 flex-shrink-0 flex items-center justify-center ${isDark ? "bg-acs-rouge/20" : "bg-red-50"
+                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl sm:mb-3 flex-shrink-0 flex items-center justify-center ${isDark ? "bg-cyan-500/20" : "bg-cyan-100"
                         }`}
                     >
                       <Icon
                         name="sparkles"
                         size="xs"
-                        className={isDark ? "text-acs-rouge-clair" : "text-acs-rouge"}
+                        className={isDark ? "text-cyan-400" : "text-cyan-500"}
                       />
                     </div>
                     <p
@@ -744,7 +744,7 @@ export default function ConsultantChatPage() {
                   Recherche par mots-clés
                 </span>
                 <span className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-acs-bleu" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
                   Analyse de documents
                 </span>
                 <span className="flex items-center gap-2">
@@ -768,8 +768,8 @@ export default function ConsultantChatPage() {
                       <div
                         className={`px-5 py-3.5 rounded-3xl rounded-tr-md ${
                           isDark
-                            ? "bg-gradient-to-r from-acs-rouge to-acs-bleu text-white"
-                            : "bg-gradient-to-r from-acs-rouge to-acs-bleu text-white shadow-sm shadow-acs-rouge/20"
+                            ? "bg-gradient-to-r from-cyan-600 to-purple-600 text-white"
+                            : "bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-sm shadow-cyan-500/20"
                         }`}
                       >
                         <p className="text-[15px] leading-relaxed">
@@ -796,9 +796,9 @@ export default function ConsultantChatPage() {
                           <div className={`text-[15px] leading-relaxed ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                             {message.isStreaming && !message.content ? (
                               <span className="flex items-center gap-1">
-                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-acs-rouge-clair" : "bg-acs-rouge"}`} style={{ animationDelay: "0ms" }} />
-                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-acs-magenta-clair" : "bg-acs-magenta"}`} style={{ animationDelay: "150ms" }} />
-                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-acs-bleu-clair" : "bg-acs-bleu"}`} style={{ animationDelay: "300ms" }} />
+                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-cyan-400" : "bg-cyan-500"}`} style={{ animationDelay: "0ms" }} />
+                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-purple-400" : "bg-purple-500"}`} style={{ animationDelay: "150ms" }} />
+                                <span className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-fuchsia-400" : "bg-fuchsia-500"}`} style={{ animationDelay: "300ms" }} />
                               </span>
                             ) : (
                               <>
@@ -816,7 +816,7 @@ export default function ConsultantChatPage() {
                                   {message.content}
                                 </ReactMarkdown>
                                 {message.isStreaming && (
-                                  <span className="inline-block w-0.5 h-4 bg-acs-rouge ml-0.5 animate-pulse align-middle" />
+                                  <span className="inline-block w-0.5 h-4 bg-cyan-400 ml-0.5 animate-pulse align-middle" />
                                 )}
                               </>
                             )}
@@ -883,8 +883,8 @@ export default function ConsultantChatPage() {
                                       onClick={() => void ouvrirPiece(piece)}
                                       className={`group rounded-xl overflow-hidden cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg ${
                                         isDark
-                                          ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-acs-bleu/40"
-                                          : "bg-slate-50 hover:bg-red-50/30 border border-slate-200 hover:border-acs-rouge/30"
+                                          ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50"
+                                          : "bg-slate-50 hover:bg-cyan-50 border border-slate-200 hover:border-cyan-300"
                                       }`}
                                     >
                                       {/* Miniature du document */}
@@ -951,7 +951,7 @@ export default function ConsultantChatPage() {
                                       {/* Infos du document */}
                                       <div className="p-2">
                                         <h4
-                                          className={`font-medium text-xs truncate group-hover:text-acs-rouge transition-colors ${isDark ? "text-white" : "text-slate-800"
+                                          className={`font-medium text-xs truncate group-hover:text-cyan-500 transition-colors ${isDark ? "text-white" : "text-slate-800"
                                             }`}
                                         >
                                           {piece.metadata?.titre || piece.source || "Document"}
@@ -980,8 +980,8 @@ export default function ConsultantChatPage() {
                                         onClick={() => void ouvrirPiece(piece)}
                                         className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 ${
                                           isDark
-                                            ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-acs-bleu/40"
-                                            : "bg-slate-50 hover:bg-red-50/30 border border-slate-200 hover:border-acs-rouge/30"
+                                            ? "bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50"
+                                            : "bg-slate-50 hover:bg-cyan-50 border border-slate-200 hover:border-cyan-300"
                                         }`}
                                       >
                                         {/* Icône type fichier */}
@@ -1006,7 +1006,7 @@ export default function ConsultantChatPage() {
                                         </div>
                                         {/* Infos */}
                                         <div className="flex-1 min-w-0">
-                                          <h4 className={`font-medium text-sm truncate group-hover:text-acs-rouge transition-colors ${isDark ? "text-white" : "text-slate-800"
+                                          <h4 className={`font-medium text-sm truncate group-hover:text-cyan-500 transition-colors ${isDark ? "text-white" : "text-slate-800"
                                             }`}>
                                             {piece.metadata?.titre || piece.source || "Document"}
                                           </h4>
@@ -1034,7 +1034,7 @@ export default function ConsultantChatPage() {
                                           </div>
                                         </div>
                                         {/* Action */}
-                                        <div className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDark ? "text-acs-bleu-clair" : "text-acs-bleu"
+                                        <div className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDark ? "text-cyan-400" : "text-cyan-600"
                                           }`}>
                                           <Icon name="eye" size="sm" />
                                         </div>
@@ -1065,7 +1065,7 @@ export default function ConsultantChatPage() {
               {isLoading && (
                 <div className="flex gap-4 mb-6">
                   <div className="flex-shrink-0">
-                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-acs-rouge to-acs-bleu flex items-center justify-center shadow-lg shadow-acs-magenta/20">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
                       <Icon
                         name="sparkles"
                         size="sm"
@@ -1083,116 +1083,106 @@ export default function ConsultantChatPage() {
                     <div className="flex items-center gap-2">
                       <div className="flex gap-1">
                         <div
-                          className={`w-2 h-2 rounded-full animate-bounce ${
-                            isDark
-                              ? "bg-acs-rouge-clair"
-                              : "bg-acs-rouge"
-                          }`}
+                          className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-cyan-400" : "bg-cyan-500"
+                            }`}
                           style={{ animationDelay: "0ms" }}
                         />
                         <div
-                          className={`w-2 h-2 rounded-full animate-bounce ${
-                            isDark
-                              ? "bg-acs-magenta-clair"
-                              : "bg-acs-magenta"
-                          }`}
+                          className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-purple-400" : "bg-purple-500"
+                            }`}
                           style={{ animationDelay: "150ms" }}
                         />
                         <div
-                          className={`w-2 h-2 rounded-full animate-bounce ${
-                            isDark
-                              ? "bg-acs-bleu-clair"
-                              : "bg-acs-bleu"
-                          }`}
+                          className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-fuchsia-400" : "bg-fuchsia-500"
+                            }`}
                           style={{ animationDelay: "300ms" }}
                         />
                       </div>
                       <span
-                        className={`text-sm ${
-                          isDark ? "text-slate-500" : "text-slate-400"
-                        }`}
+                        className={`text-sm ${isDark ? "text-slate-500" : "text-slate-400"
+                          }`}
                       >
                         Recherche en cours...
                       </span>
                     </div>
                   </div>
                 </div>
-            )}
+              )}
 
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-      </div>
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
 
-      {/* Zone de saisie moderne */}
-      <div
-        className={`p-2 mb-2`}
-      >
-        <form onSubmit={envoyerMessage} className="max-w-3xl mx-auto">
-          <div className="relative">
-            {/* Suggestions de clients */}
-            {showClientSuggestions && clientSuggestions.length > 0 && (
-              <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-xl overflow-hidden shadow-xl z-50 ${
-                isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"
-              }`}>
-                <div className={`px-3 py-2 text-xs font-medium ${isDark ? "text-slate-400 bg-slate-700/50" : "text-slate-500 bg-slate-50"}`}>
-                  Clients suggérés
-                </div>
-                {clientSuggestions.map((client, index) => (
-                  <button
-                    key={client.id}
-                    type="button"
-                    onClick={() => handleSelectClient(client)}
-                    className={`w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors ${
-                      index === selectedSuggestionIndex
-                        ? isDark ? "bg-acs-rouge/20" : "bg-red-50"
-                        : isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-acs-rouge to-acs-bleu flex items-center justify-center text-white text-sm font-medium">
-                      {client.nom.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className={`font-medium truncate ${isDark ? "text-white" : "text-slate-800"}`}>
-                        {client.nom}
+        {/* Zone de saisie moderne */}
+        <div
+          className={`p-2 mb-2`}
+        >
+          <form onSubmit={envoyerMessage} className="max-w-3xl mx-auto">
+            <div className="relative">
+              {/* Suggestions de clients */}
+              {showClientSuggestions && clientSuggestions.length > 0 && (
+                <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-xl overflow-hidden shadow-xl z-50 ${
+                  isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"
+                }`}>
+                  <div className={`px-3 py-2 text-xs font-medium ${isDark ? "text-slate-400 bg-slate-700/50" : "text-slate-500 bg-slate-50"}`}>
+                    Clients suggérés
+                  </div>
+                  {clientSuggestions.map((client, index) => (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => handleSelectClient(client)}
+                      className={`w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors ${
+                        index === selectedSuggestionIndex
+                          ? isDark ? "bg-cyan-500/20" : "bg-cyan-50"
+                          : isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
+                        {client.nom.charAt(0)}
                       </div>
-                      {client.numero_client && (
-                        <div className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          Code: {client.numero_client}
+                      <div className="flex-1 min-w-0">
+                        <div className={`font-medium truncate ${isDark ? "text-white" : "text-slate-800"}`}>
+                          {client.nom}
                         </div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div
-              className={`flex items-center rounded-xl transition-all duration-300 ${
-                isDark
-                  ? "bg-white/5 border border-white/10 focus-within:border-acs-bleu/50"
-                  : "bg-white border border-slate-200 shadow-lg shadow-slate-200/50 focus-within:border-acs-rouge/50 focus-within:shadow-acs-rouge/10"
-              }`}
-            >
-              <input
-                type="text"
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleInputKeyDown}
-                placeholder="Posez votre question..."
-                disabled={isLoading}
-                className={`flex-1 bg-transparent py-4 px-5 outline-none text-[15px] disabled:opacity-50 ${
+                        {client.numero_client && (
+                          <div className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            Code: {client.numero_client}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              <div
+                className={`flex items-center rounded-xl transition-all duration-300 ${
                   isDark
-                    ? "text-white placeholder-slate-500"
-                    : "text-slate-800 placeholder-slate-400"
+                    ? "bg-white/5 border border-white/10 focus-within:border-cyan-500/50 focus-within:bg-white/10"
+                    : "bg-white border border-slate-200 shadow-lg shadow-slate-200/50 focus-within:border-cyan-400 focus-within:shadow-cyan-500/10"
                 }`}
-              />
+              >
+                <input
+                  type="text"
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleInputKeyDown}
+                  placeholder="Posez votre question..."
+                  disabled={isLoading}
+                  className={`flex-1 bg-transparent py-4 px-5 outline-none text-[15px] disabled:opacity-50 ${
+                    isDark
+                      ? "text-white placeholder-slate-500"
+                      : "text-slate-800 placeholder-slate-400"
+                  }`}
+                />
               <button
                 type="submit"
                 disabled={!input.trim() || isLoading}
                 className={`mr-2 p-3 rounded-lg transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed ${
                   input.trim() && !isLoading
-                    ? "bg-gradient-to-r from-acs-rouge to-acs-bleu text-white shadow-lg shadow-acs-rouge/30 hover:shadow-acs-rouge/50"
+                    ? "bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50"
                     : isDark
                     ? "bg-white/5 text-slate-600"
                     : "bg-slate-100 text-slate-400"
@@ -1232,7 +1222,7 @@ export default function ConsultantChatPage() {
         };
         const etapes = [
           {
-            gradient: 'from-acs-rouge to-acs-bleu',
+            gradient: 'from-cyan-500 to-purple-500',
             icone: '✨',
             titre: 'Bienvenue sur ACS Assistant',
             corps: (
@@ -1243,7 +1233,7 @@ export default function ConsultantChatPage() {
             ),
           },
           {
-            gradient: 'from-acs-rouge to-acs-magenta',
+            gradient: 'from-blue-500 to-cyan-500',
             icone: '🔍',
             titre: 'Recherche par référence ou montant',
             corps: (
@@ -1263,11 +1253,11 @@ export default function ConsultantChatPage() {
                       type="button"
                       onClick={() => { setInput(ex); fermer(); }}
                       className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 transition-colors ${
-                        isDark ? 'bg-white/5 hover:bg-acs-rouge/10 text-slate-300 border border-white/10' : 'bg-slate-100 hover:bg-red-50 text-slate-700 border border-slate-200'
+                        isDark ? 'bg-white/5 hover:bg-cyan-500/20 text-slate-300 border border-white/10' : 'bg-slate-100 hover:bg-cyan-50 text-slate-700 border border-slate-200'
                       }`}
                     >
                       <span>{ex}</span>
-                      <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full ${isDark ? 'bg-acs-rouge/20 text-acs-rouge-clair' : 'bg-red-100 text-acs-rouge'}`}>Utiliser</span>
+                      <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full ${isDark ? 'bg-cyan-500/20 text-cyan-400' : 'bg-cyan-100 text-cyan-600'}`}>Utiliser</span>
                     </button>
                   ))}
                 </div>
@@ -1275,7 +1265,7 @@ export default function ConsultantChatPage() {
             ),
           },
           {
-            gradient: 'from-acs-magenta to-acs-bleu',
+            gradient: 'from-purple-500 to-fuchsia-500',
             icone: '📄',
             titre: 'Consulter et télécharger',
             corps: (
@@ -1299,7 +1289,7 @@ export default function ConsultantChatPage() {
             ),
           },
           {
-            gradient: 'from-acs-rouge to-acs-magenta',
+            gradient: 'from-fuchsia-500 to-rose-500',
             icone: '💡',
             titre: 'Astuces',
             corps: (
@@ -1312,7 +1302,7 @@ export default function ConsultantChatPage() {
                 ].map((tip) => (
                   <div key={tip} className={`flex items-start gap-2.5 p-2.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-slate-50'}`}>
                     <span className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${
-                      isDark ? 'bg-acs-rouge/20 text-acs-rouge-clair' : 'bg-red-100 text-acs-rouge'
+                      isDark ? 'bg-fuchsia-500/30 text-fuchsia-300' : 'bg-fuchsia-100 text-fuchsia-600'
                     }`}>✓</span>
                     <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{tip}</span>
                   </div>
