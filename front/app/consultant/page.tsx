@@ -1235,17 +1235,18 @@ export default function ConsultantChatPage() {
           {
             gradient: 'from-blue-500 to-cyan-500',
             icone: '🔍',
-            titre: 'Comment rechercher',
+            titre: 'Recherche par référence ou montant',
             corps: (
               <div className="space-y-3">
                 <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                  Précisez le <strong>client</strong>, <strong>l&apos;année</strong>, le <strong>type</strong> et le <strong>risque</strong> pour des résultats précis.
+                  Référence ou montant connu → résultat immédiat.<br />
+                  Sinon, cherchez par <strong>titre</strong> ou combinez <strong>client</strong>, <strong>exercice</strong>, <strong>type</strong> et <strong>risque</strong>.
                 </p>
                 <div className="space-y-2">
                   {[
-                    "Avenant N° 0529 2024 client 3CB risque MRP",
-                    "Factures de SANLAM 2024",
-                    "Dernier contrat automobile de AXA",
+                    "Document N° 2263",
+                    "Avenant avec le montant 29 185 francs",
+                    "Police multirisque professionnelle SANLAM",
                   ].map((ex) => (
                     <button
                       key={ex}
@@ -1294,10 +1295,10 @@ export default function ConsultantChatPage() {
             corps: (
               <div className="space-y-2">
                 {[
-                  'Utilisez le code client exact : 3CB, SANLAM, AXA, SONAR…',
-                  "Cherchez par numéro : « document N° 190 » ou « N° 2263 »",
-                  'Précisez le type : avenant, police, facture, sinistre, contrat…',
-                  "Filtrez par période : « 2023 », « entre 2019 et 2021 »",
+                  "Référence connue ? Tapez « N° 190 » ou « N° 2263 »",
+                  "Montant connu ? « avenant montant 29 185 francs »",
+                  "Titre connu ? Tapez directement le nom du document",
+                  "Sans rien de tout ça : client + exercice + type + risque",
                 ].map((tip) => (
                   <div key={tip} className={`flex items-start gap-2.5 p-2.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-slate-50'}`}>
                     <span className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${
