@@ -1223,26 +1223,29 @@ export default function ConsultantChatPage() {
         const etapes = [
           {
             gradient: 'from-cyan-500 to-purple-500',
-            icone: '\u2728',
+            icone: '✨',
             titre: 'Bienvenue sur ACS Assistant',
             corps: (
               <p className={`text-sm leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                Votre assistant intelligent pour explorer vos archives. Posez une question en <span className="font-semibold">langage naturel</span> et retrouvez vos documents en quelques secondes.
+                Posez une question en <span className="font-semibold">langage naturel</span> pour retrouver
+                n&apos;importe quel document dans les archives ACS — contrats, avenants, factures, sinistres et plus.
               </p>
             ),
           },
           {
             gradient: 'from-blue-500 to-cyan-500',
-            icone: '\ud83d\udd0d',
-            titre: 'Comment formuler une question',
+            icone: '🔍',
+            titre: 'Comment rechercher',
             corps: (
               <div className="space-y-3">
-                <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Soyez pr\u00e9cis \u2014 mentionnez le client, l&apos;ann\u00e9e, le type et le risque.</p>
+                <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  Précisez le <strong>client</strong>, <strong>l&apos;année</strong>, le <strong>type</strong> et le <strong>risque</strong> pour des résultats précis.
+                </p>
                 <div className="space-y-2">
                   {[
-                    "Avenant 2018 du client 3CB risque Automobile",
+                    "Avenant N° 0529 2024 client 3CB risque MRP",
                     "Factures de SANLAM 2024",
-                    "Documents du mois dernier",
+                    "Dernier contrat automobile de AXA",
                   ].map((ex) => (
                     <button
                       key={ex}
@@ -1262,19 +1265,21 @@ export default function ConsultantChatPage() {
           },
           {
             gradient: 'from-purple-500 to-fuchsia-500',
-            icone: '\ud83d\udcc4',
-            titre: 'Consulter et t\u00e9l\u00e9charger',
+            icone: '📄',
+            titre: 'Consulter et télécharger',
             corps: (
               <div className="space-y-3">
-                <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Apr\u00e8s une r\u00e9ponse, les documents trouv\u00e9s s&apos;affichent sous le message.</p>
+                <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  Les documents trouvés s&apos;affichent sous chaque réponse.
+                </p>
                 <div className="grid grid-cols-1 gap-2">
                   {[
-                    { icone: '\ud83d\udc41\ufe0f', label: 'Cliquez sur une carte pour voir le document en plein \u00e9cran' },
-                    { icone: '\u2b07\ufe0f', label: 'Bouton t\u00e9l\u00e9charger dans la barre du document' },
-                    { icone: '\u229e', label: 'Basculez entre vue grille et vue liste en haut \u00e0 droite' },
+                    { icone: '👁️', label: 'Cliquez sur une carte pour afficher le document en plein écran' },
+                    { icone: '⬇️', label: 'Bouton télécharger pour sauvegarder le fichier' },
+                    { icone: '⊞', label: 'Basculez entre vue grille et liste en haut à droite' },
                   ].map((f) => (
                     <div key={f.label} className={`flex items-start gap-3 p-2.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-slate-50'}`}>
-                      <span className="text-lg">{f.icone}</span>
+                      <span className="text-base">{f.icone}</span>
                       <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{f.label}</span>
                     </div>
                   ))}
@@ -1284,20 +1289,20 @@ export default function ConsultantChatPage() {
           },
           {
             gradient: 'from-fuchsia-500 to-rose-500',
-            icone: '\ud83d\udca1',
-            titre: 'Astuces pour de meilleurs r\u00e9sultats',
+            icone: '💡',
+            titre: 'Astuces',
             corps: (
               <div className="space-y-2">
                 {[
-                  'Utilisez le code client exact : 3CB, SANLAM, AXA\u2026',
-                  "Pr\u00e9cisez l'ann\u00e9e : \u00ab 2023 \u00bb ou \u00ab entre 2019 et 2021 \u00bb",
-                  'Mentionnez le type : avenant, police, facture, sinistre\u2026',
-                  'Le bouton ? en haut rouvre ce guide \u00e0 tout moment',
+                  'Utilisez le code client exact : 3CB, SANLAM, AXA, SONAR…',
+                  "Cherchez par numéro : « document N° 190 » ou « N° 2263 »",
+                  'Précisez le type : avenant, police, facture, sinistre, contrat…',
+                  "Filtrez par période : « 2023 », « entre 2019 et 2021 »",
                 ].map((tip) => (
                   <div key={tip} className={`flex items-start gap-2.5 p-2.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-slate-50'}`}>
                     <span className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${
                       isDark ? 'bg-fuchsia-500/30 text-fuchsia-300' : 'bg-fuchsia-100 text-fuchsia-600'
-                    }`}>\u2713</span>
+                    }`}>✓</span>
                     <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{tip}</span>
                   </div>
                 ))}
