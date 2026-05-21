@@ -66,6 +66,14 @@ import unicodedata
 
 import re
 
+import os
+
+import shutil
+
+import subprocess
+
+import tempfile
+
 from sklearn.metrics.pairwise import linear_kernel
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -2737,6 +2745,50 @@ class DocumentRetryChunkingView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+def _compress_pdf_ghostscript(file_path: str) -> int:
+    """
+    Compresse un PDF avec Ghostscript en place.
+    Retourne la nouvelle taille en octets (ou la taille originale si la compression échoue / n'est pas bénéfique).
+    Ne compresse que les fichiers > 500 Ko.
+    """
+    original_size = os.path.getsize(file_path)
+    if original_size < 500_000:
+        return original_size
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        result = subprocess.run(
+            [
+                'gs', '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4',
+                '-dPDFSETTINGS=/ebook', '-dNOPAUSE', '-dQUIET', '-dBATCH',
+                f'-sOutputFile={tmp_path}', file_path,
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+
+        if result.returncode == 0:
+            compressed_size = os.path.getsize(tmp_path)
+            if compressed_size < original_size * 0.9 and compressed_size > 0:
+                shutil.copy2(tmp_path, file_path)
+                ratio = (1 - compressed_size / original_size) * 100
+                logging.info(
+                    "PDF compressé : %s → %s octets (%.0f%% de réduction)",
+                    original_size, compressed_size, ratio,
+                )
+                return compressed_size
+    except Exception:
+        logging.warning("Compression PDF Ghostscript échouée pour %s", file_path, exc_info=True)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    return original_size
+
+
 class DocumentUploadView(APIView):
 
     """Téléverser un document avec fichier"""
@@ -2837,7 +2889,14 @@ class DocumentUploadView(APIView):
 
         chemin = default_storage.save(nom_fichier, fichier)
 
-
+        # Compression PDF automatique (Ghostscript, > 500 Ko uniquement)
+        taille_reelle = fichier.size
+        if fichier_mime == 'application/pdf':
+            try:
+                file_path = default_storage.path(chemin)
+                taille_reelle = _compress_pdf_ghostscript(file_path)
+            except Exception:
+                logging.warning("Compression PDF ignorée pour %s", chemin, exc_info=True)
 
         try:
 
@@ -2851,7 +2910,7 @@ class DocumentUploadView(APIView):
 
                 type_fichier=fichier.content_type or mimetypes.guess_type(fichier.name)[0] or 'application/octet-stream',
 
-                taille_fichier=fichier.size,
+                taille_fichier=taille_reelle,
 
                 type_courrier=type_courrier,
 

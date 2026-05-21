@@ -48,6 +48,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
     poppler-utils \
 
+    ghostscript \
+
     libgl1 \
 
     libglib2.0-0 \
