@@ -132,7 +132,7 @@ export default function ConsultantChatPage() {
     message: string;
     variant: "error" | "warning" | "success" | "info";
   }>({ open: false, title: "", message: "", variant: "error" });
-  const [modaleTutoriel, setModaleTutoriel] = useState(false);
+  const [etapeOnboarding, setEtapeOnboarding] = useState<number | null>(null);
 
   // État pour la modale de prévisualisation document
   const [modaleDocument, setModaleDocument] = useState<{
@@ -177,6 +177,12 @@ export default function ConsultantChatPage() {
   useEffect(() => {
     const user = getUtilisateurActif();
     setUtilisateur(user);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !localStorage.getItem('acs_onboarding_done')) {
+      setEtapeOnboarding(0);
+    }
   }, []);
 
   useEffect(() => {
@@ -593,6 +599,17 @@ export default function ConsultantChatPage() {
             >
               <Icon name="plus" size="xs" />
               <span className="hidden sm:inline">Nouveau</span>
+            </button>
+
+            {/* Aide / Tutoriel */}
+            <button
+              onClick={() => setEtapeOnboarding(0)}
+              title="Guide d'utilisation"
+              className={`w-7 h-7 rounded-full border text-xs font-bold transition-colors ${
+                isDark ? "border-white/20 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/50" : "border-slate-300 text-slate-500 hover:text-cyan-600 hover:border-cyan-400"
+              }`}
+            >
+              ?
             </button>
 
             {/* Dashboard (admin) */}
@@ -1197,74 +1214,191 @@ export default function ConsultantChatPage() {
         variant={alerteModal.variant}
         isDark={isDark}
       />
-
-      {/* Modale Tutoriel Assistant */}
-      {modaleTutoriel && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setModaleTutoriel(false)
-          }}
-        >
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-          <div
-            className="relative max-w-2xl w-full p-6 rounded-2xl bg-theme-card border border-theme shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="tutoriel-title"
-          >
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-theme-muted flex items-center justify-center flex-shrink-0">
-                <Icon name="info" size="sm" className="text-theme-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 id="tutoriel-title" className="text-lg font-semibold text-theme-primary">Comment utiliser l'Assistant IA</h3>
-                <p className="mt-1 text-sm text-theme-secondary">
-                  L’assistant répond à des questions sur vos documents et exercices. Pour de meilleurs résultats, soyez précis.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setModaleTutoriel(false)}
-                className="p-2 rounded-lg text-theme-secondary hover:text-theme-primary hover:bg-theme-muted"
-                aria-label="Fermer"
-              >
-                <Icon name="close" size="sm" />
-              </button>
-            </div>
-
-            <div className="space-y-4 text-sm">
-              <div>
-                <h4 className="font-medium text-theme-primary mb-1">Conseils</h4>
-                <ul className="list-disc pl-5 space-y-1 text-theme-secondary">
-                  <li>Précisez le <span className="font-medium">client</span>, l’<span className="font-medium">année</span>, le <span className="font-medium">type de document</span> et le <span className="font-medium">risque</span>.</li>
-                  <li>Utilisez des mots-clés exacts (ex: « avenant », « police », « échéance »).</li>
-                  <li>Ajoutez des filtres temporels: « ce mois », « 2023 », « entre 2019 et 2021 ».</li>
-                </ul>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-theme-primary mb-1">Exemples de requêtes</h4>
+      {/* Onboarding / Guide d'utilisation */}
+      {etapeOnboarding !== null && (() => {
+        const fermer = () => {
+          localStorage.setItem('acs_onboarding_done', '1');
+          setEtapeOnboarding(null);
+        };
+        const etapes = [
+          {
+            gradient: 'from-cyan-500 to-purple-500',
+            icone: '\u2728',
+            titre: 'Bienvenue sur ACS Assistant',
+            corps: (
+              <p className={`text-sm leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                Votre assistant intelligent pour explorer vos archives. Posez une question en <span className="font-semibold">langage naturel</span> et retrouvez vos documents en quelques secondes.
+              </p>
+            ),
+          },
+          {
+            gradient: 'from-blue-500 to-cyan-500',
+            icone: '\ud83d\udd0d',
+            titre: 'Comment formuler une question',
+            corps: (
+              <div className="space-y-3">
+                <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Soyez pr\u00e9cis \u2014 mentionnez le client, l&apos;ann\u00e9e, le type et le risque.</p>
                 <div className="space-y-2">
-                  <div className="p-3 rounded-lg bg-theme-muted text-theme-primary flex items-start justify-between gap-3">
-                    <span className="text-sm">Trouve-moi l’avenant 2018 du client 3CB risque Automobile</span>
+                  {[
+                    "Avenant 2018 du client 3CB risque Automobile",
+                    "Factures de SANLAM 2024",
+                    "Documents du mois dernier",
+                  ].map((ex) => (
+                    <button
+                      key={ex}
+                      type="button"
+                      onClick={() => { setInput(ex); fermer(); }}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 transition-colors ${
+                        isDark ? 'bg-white/5 hover:bg-cyan-500/20 text-slate-300 border border-white/10' : 'bg-slate-100 hover:bg-cyan-50 text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      <span>{ex}</span>
+                      <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full ${isDark ? 'bg-cyan-500/20 text-cyan-400' : 'bg-cyan-100 text-cyan-600'}`}>Utiliser</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ),
+          },
+          {
+            gradient: 'from-purple-500 to-fuchsia-500',
+            icone: '\ud83d\udcc4',
+            titre: 'Consulter et t\u00e9l\u00e9charger',
+            corps: (
+              <div className="space-y-3">
+                <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Apr\u00e8s une r\u00e9ponse, les documents trouv\u00e9s s&apos;affichent sous le message.</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    { icone: '\ud83d\udc41\ufe0f', label: 'Cliquez sur une carte pour voir le document en plein \u00e9cran' },
+                    { icone: '\u2b07\ufe0f', label: 'Bouton t\u00e9l\u00e9charger dans la barre du document' },
+                    { icone: '\u229e', label: 'Basculez entre vue grille et vue liste en haut \u00e0 droite' },
+                  ].map((f) => (
+                    <div key={f.label} className={`flex items-start gap-3 p-2.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-slate-50'}`}>
+                      <span className="text-lg">{f.icone}</span>
+                      <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{f.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ),
+          },
+          {
+            gradient: 'from-fuchsia-500 to-rose-500',
+            icone: '\ud83d\udca1',
+            titre: 'Astuces pour de meilleurs r\u00e9sultats',
+            corps: (
+              <div className="space-y-2">
+                {[
+                  'Utilisez le code client exact : 3CB, SANLAM, AXA\u2026',
+                  "Pr\u00e9cisez l'ann\u00e9e : \u00ab 2023 \u00bb ou \u00ab entre 2019 et 2021 \u00bb",
+                  'Mentionnez le type : avenant, police, facture, sinistre\u2026',
+                  'Le bouton ? en haut rouvre ce guide \u00e0 tout moment',
+                ].map((tip) => (
+                  <div key={tip} className={`flex items-start gap-2.5 p-2.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-slate-50'}`}>
+                    <span className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${
+                      isDark ? 'bg-fuchsia-500/30 text-fuchsia-300' : 'bg-fuchsia-100 text-fuchsia-600'
+                    }`}>\u2713</span>
+                    <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{tip}</span>
+                  </div>
+                ))}
+              </div>
+            ),
+          },
+        ];
+        const etape = etapes[etapeOnboarding];
+        const estDerniere = etapeOnboarding === etapes.length - 1;
+        return (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            onClick={fermer}
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <div
+              className={`relative w-full max-w-md rounded-2xl shadow-2xl overflow-hidden ${
+                isDark ? 'bg-slate-900 border border-white/10' : 'bg-white border border-slate-200'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              {/* Barre de progression gradient */}
+              <div className={`h-1 bg-gradient-to-r ${etape.gradient} transition-all duration-500`}
+                style={{ width: `${((etapeOnboarding + 1) / etapes.length) * 100}%` }}
+              />
+
+              <div className="p-6">
+                {/* Icône + titre */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${etape.gradient} flex items-center justify-center text-xl shadow-lg`}>
+                    {etape.icone}
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-[10px] font-medium uppercase tracking-wider mb-0.5 ${
+                      isDark ? 'text-slate-500' : 'text-slate-400'
+                    }`}>Étape {etapeOnboarding + 1} / {etapes.length}</p>
+                    <h3 className={`text-base font-semibold leading-tight ${
+                      isDark ? 'text-white' : 'text-slate-800'
+                    }`}>{etape.titre}</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fermer}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      isDark ? 'text-slate-500 hover:text-slate-300 hover:bg-white/10' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                    }`}
+                    aria-label="Fermer"
+                  >
+                    <Icon name="close" size="sm" />
+                  </button>
+                </div>
+
+                {/* Corps de l'étape */}
+                <div className="mb-6">{etape.corps}</div>
+
+                {/* Navigation */}
+                <div className="flex items-center justify-between">
+                  {/* Pastilles de progression */}
+                  <div className="flex gap-1.5">
+                    {etapes.map((_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setEtapeOnboarding(i)}
+                        className={`h-1.5 rounded-full transition-all duration-300 ${
+                          i === etapeOnboarding
+                            ? `w-6 bg-gradient-to-r ${etape.gradient}`
+                            : isDark ? 'w-1.5 bg-white/20' : 'w-1.5 bg-slate-300'
+                        }`}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {etapeOnboarding > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setEtapeOnboarding(etapeOnboarding - 1)}
+                        className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                          isDark ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                        }`}
+                      >
+                        Précédent
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => { setInput("Trouve-moi l’avenant 2018 du client 3CB risque Automobile"); setModaleTutoriel(false); }}
-                      className="shrink-0 px-3 py-1.5 text-xs rounded-md bg-theme-card border border-theme hover:bg-theme-muted"
+                      onClick={() => estDerniere ? fermer() : setEtapeOnboarding(etapeOnboarding + 1)}
+                      className={`px-4 py-1.5 text-xs font-medium rounded-lg text-white bg-gradient-to-r ${etape.gradient} hover:opacity-90 transition-opacity shadow-sm`}
                     >
-                      Utiliser
+                      {estDerniere ? 'Commencer ✓' : 'Suivant →'}
                     </button>
                   </div>
-                  <div className="p-3 rounded-lg bg-theme-muted text-theme-primary">Quels sont les derniers avenants de 2025 ?</div>
-                  <div className="p-3 rounded-lg bg-theme-muted text-theme-primary">Montre-moi les documents du client SANLAM</div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Modale de prévisualisation document plein écran */}
       {modaleDocument.open && modaleDocument.url && (
