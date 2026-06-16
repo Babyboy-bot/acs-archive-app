@@ -18,9 +18,11 @@ from rest_framework import serializers
 
 from .models import (
 
-    Utilisateur, Client, Exercice, Risque, 
+    Utilisateur, Client, Exercice, Risque,
 
-    Document, AssistantConversation, AssistantMessage
+    Document, AssistantConversation, AssistantMessage,
+
+    Bordereau,
 
 )
 
@@ -592,4 +594,106 @@ class AssistantMessageSerializer(serializers.ModelSerializer):
         ]
 
         read_only_fields = ['id', 'cree_le']
+
+
+
+
+
+class CompagnieInlineSerializer(serializers.ModelSerializer):
+
+    """Serializer léger pour afficher un client-compagnie dans un bordereau"""
+
+
+
+    class Meta:
+
+        model = Client
+
+        fields = ['id', 'nom', 'numero_client']
+
+        read_only_fields = ['id', 'nom', 'numero_client']
+
+
+
+
+
+class BordereauSerializer(serializers.ModelSerializer):
+
+    """Serializer pour le modèle Bordereau"""
+
+
+
+    auteur_nom = serializers.CharField(source='auteur.get_full_name', read_only=True)
+
+    compagnie_detail = CompagnieInlineSerializer(source='compagnie', read_only=True)
+
+    fichier_url = serializers.SerializerMethodField()
+
+
+
+    def get_fichier_url(self, obj):
+
+        if not obj.chemin_fichier:
+
+            return None
+
+        try:
+
+            chemin = default_storage.url(obj.chemin_fichier)
+
+        except Exception:
+
+            chemin = str(obj.chemin_fichier)
+
+        if chemin.startswith(('http://', 'https://')):
+
+            from urllib.parse import urlparse as _urlparse
+
+            chemin = _urlparse(chemin).path or chemin
+
+        if not chemin.startswith('/'):
+
+            chemin = f'/{chemin}'
+
+        from django.conf import settings as _settings
+
+        media_prefix = _settings.MEDIA_URL or '/media/'
+
+        if not media_prefix.startswith('/'):
+
+            media_prefix = f'/{media_prefix}'
+
+        if not media_prefix.endswith('/'):
+
+            media_prefix = f'{media_prefix}/'
+
+        if chemin.startswith('/media/'):
+
+            return chemin
+
+        cleaned = chemin.lstrip('/')
+
+        return f"{media_prefix}{cleaned}" if media_prefix.endswith('/') else f"{media_prefix}/{cleaned}"
+
+
+
+    class Meta:
+
+        model = Bordereau
+
+        fields = [
+
+            'id', 'titre', 'reference', 'annee',
+
+            'compagnie', 'compagnie_detail',
+
+            'chemin_fichier', 'type_fichier', 'taille_fichier',
+
+            'auteur', 'auteur_nom', 'fichier_url',
+
+            'is_deleted', 'cree_le', 'modifie_le',
+
+        ]
+
+        read_only_fields = ['id', 'cree_le', 'modifie_le', 'auteur']
 

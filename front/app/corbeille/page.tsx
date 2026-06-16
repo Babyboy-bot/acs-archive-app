@@ -11,6 +11,17 @@ import { useUtilisateurCourant } from '@/hooks/useUtilisateurCourant'
 import { AuthLoadingScreen } from '@/components/common'
 import { RoleUtilisateur } from '@/types'
 
+type BordCorbEille = {
+  id: string
+  titre: string
+  reference: string | null
+  annee: number
+  compagnie: string | null
+  taille_fichier: number
+  deleted_at: string
+  deleted_by: string | null
+}
+
 type DocCorbeille = {
   id: string
   titre: string
@@ -38,6 +49,9 @@ export default function CorbeillePage() {
   const utilisateur = useUtilisateurCourant()
   const router = useRouter()
 
+  const [onglet, setOnglet] = useState<'documents' | 'bordereaux'>('documents')
+
+  // ── Documents ──
   const [documents, setDocuments] = useState<DocCorbeille[]>([])
   const [chargement, setChargement] = useState(true)
   const [erreur, setErreur] = useState<string | null>(null)
@@ -45,6 +59,12 @@ export default function CorbeillePage() {
   const [enCours, setEnCours] = useState<string | null>(null)
   const [confirmerPurgeId, setConfirmerPurgeId] = useState<string | null>(null)
   const [confirmerPurgeAll, setConfirmerPurgeAll] = useState(false)
+
+  // ── Bordereaux ──
+  const [bordereaux, setBordereaux] = useState<BordCorbEille[]>([])
+  const [chargBord, setChargBord] = useState(true)
+  const [enCoursBord, setEnCoursBord] = useState<string | null>(null)
+  const [confirmerPurgeBordId, setConfirmerPurgeBordId] = useState<string | null>(null)
 
   const charger = async () => {
     setChargement(true)
@@ -59,9 +79,22 @@ export default function CorbeillePage() {
     }
   }
 
+  const chargerBordereaux = async () => {
+    setChargBord(true)
+    try {
+      const { data } = await apiFetchJson<{ bordereaux: BordCorbEille[] }>('/corbeille/bordereaux/')
+      setBordereaux(data?.bordereaux ?? [])
+    } catch {
+      setErreur('Impossible de charger les bordereaux supprimés.')
+    } finally {
+      setChargBord(false)
+    }
+  }
+
   useEffect(() => {
     if (estAuthentifie && utilisateur?.role === RoleUtilisateur.ADMIN) {
       charger()
+      chargerBordereaux()
     }
   }, [estAuthentifie, utilisateur])
 
@@ -89,6 +122,33 @@ export default function CorbeillePage() {
       setErreur('Erreur lors de la suppression définitive.')
     } finally {
       setEnCours(null)
+    }
+  }
+
+  const restaurerBordereau = async (id: string) => {
+    setEnCoursBord(id)
+    try {
+      await apiFetchJson(`/corbeille/bordereaux/${id}/restaurer/`, { method: 'POST' })
+      setMessage('Bordereau restauré avec succès.')
+      setBordereaux(prev => prev.filter(b => b.id !== id))
+    } catch {
+      setErreur('Erreur lors de la restauration.')
+    } finally {
+      setEnCoursBord(null)
+    }
+  }
+
+  const purgerBordereau = async (id: string) => {
+    setEnCoursBord(id)
+    setConfirmerPurgeBordId(null)
+    try {
+      await apiFetchJson(`/corbeille/bordereaux/${id}/purger/`, { method: 'DELETE' })
+      setMessage('Bordereau supprimé définitivement.')
+      setBordereaux(prev => prev.filter(b => b.id !== id))
+    } catch {
+      setErreur('Erreur lors de la suppression définitive.')
+    } finally {
+      setEnCoursBord(null)
     }
   }
 
@@ -134,7 +194,7 @@ export default function CorbeillePage() {
                 <Icon name="trash" size="lg" className="text-red-500" />
                 Corbeille
               </h1>
-              <p className="text-sm text-theme-secondary mt-1">Documents supprimés — restauration ou purge définitive</p>
+              <p className="text-sm text-theme-secondary mt-1">Éléments supprimés — restauration ou purge définitive</p>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -180,8 +240,36 @@ export default function CorbeillePage() {
           )}
         </AnimatePresence>
 
-        {/* Contenu */}
-        {chargement ? (
+        {/* Onglets */}
+        <div className="flex gap-1 mb-6 bg-theme-muted/40 p-1 rounded-xl w-fit">
+          <button
+            onClick={() => setOnglet('documents')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              onglet === 'documents'
+                ? 'bg-theme-card text-theme-primary shadow-sm'
+                : 'text-theme-secondary hover:text-theme-primary'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Icon name="document" size="xs" /> Documents {documents.length > 0 && `(${documents.length})`}
+            </span>
+          </button>
+          <button
+            onClick={() => setOnglet('bordereaux')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              onglet === 'bordereaux'
+                ? 'bg-theme-card text-theme-primary shadow-sm'
+                : 'text-theme-secondary hover:text-theme-primary'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Icon name="card" size="xs" /> Bordereaux {bordereaux.length > 0 && `(${bordereaux.length})`}
+            </span>
+          </button>
+        </div>
+
+        {/* Contenu Documents */}
+        {onglet === 'documents' && (chargement ? (
           <div className="flex items-center gap-3 text-theme-secondary py-12 justify-center">
             <div className="w-5 h-5 border-2 border-theme-secondary border-t-transparent rounded-full animate-spin" />
             Chargement...
@@ -189,8 +277,7 @@ export default function CorbeillePage() {
         ) : documents.length === 0 ? (
           <div className="text-center py-20 bg-theme-card border border-theme rounded-xl">
             <Icon name="trash" size="xl" className="mx-auto mb-4 text-theme-secondary opacity-40" />
-            <p className="text-lg font-medium text-theme-primary">La corbeille est vide</p>
-            <p className="text-sm text-theme-secondary mt-1">Les documents supprimés apparaîtront ici</p>
+            <p className="text-lg font-medium text-theme-primary">Aucun document dans la corbeille</p>
           </div>
         ) : (
           <div className="bg-theme-card border border-theme rounded-xl overflow-hidden">
@@ -257,7 +344,111 @@ export default function CorbeillePage() {
               </table>
             </div>
           </div>
-        )}
+        ))}
+
+        {/* Contenu Bordereaux */}
+        {onglet === 'bordereaux' && (chargBord ? (
+          <div className="flex items-center gap-3 text-theme-secondary py-12 justify-center">
+            <div className="w-5 h-5 border-2 border-theme-secondary border-t-transparent rounded-full animate-spin" />
+            Chargement...
+          </div>
+        ) : bordereaux.length === 0 ? (
+          <div className="text-center py-20 bg-theme-card border border-theme rounded-xl">
+            <Icon name="trash" size="xl" className="mx-auto mb-4 text-theme-secondary opacity-40" />
+            <p className="text-lg font-medium text-theme-primary">Aucun bordereau dans la corbeille</p>
+          </div>
+        ) : (
+          <div className="bg-theme-card border border-theme rounded-xl overflow-hidden">
+            <div className="px-6 py-3 border-b border-theme bg-theme-muted/50">
+              <span className="text-sm text-theme-secondary font-medium">{bordereaux.length} bordereau(x) dans la corbeille</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-theme">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-theme-secondary">Bordereau</th>
+                    <th className="text-left px-4 py-3 font-medium text-theme-secondary hidden md:table-cell">Compagnie</th>
+                    <th className="text-left px-4 py-3 font-medium text-theme-secondary hidden lg:table-cell">Supprimé le</th>
+                    <th className="text-left px-4 py-3 font-medium text-theme-secondary hidden lg:table-cell">Supprimé par</th>
+                    <th className="text-right px-4 py-3 font-medium text-theme-secondary">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-theme">
+                  {bordereaux.map((b, i) => (
+                    <motion.tr
+                      key={b.id}
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                      className="hover:bg-theme-muted/40 transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0">
+                            <Icon name="document" size="xs" className="text-blue-400" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-medium text-theme-primary truncate max-w-xs">{b.titre}</p>
+                            <p className="text-xs text-theme-secondary font-mono">{b.reference ?? '—'} · {b.annee} · {formaterTaille(b.taille_fichier)}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-theme-secondary hidden md:table-cell">{b.compagnie ?? '—'}</td>
+                      <td className="px-4 py-3 text-theme-secondary hidden lg:table-cell whitespace-nowrap">{formaterDate(b.deleted_at)}</td>
+                      <td className="px-4 py-3 text-theme-secondary hidden lg:table-cell">{b.deleted_by ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => restaurerBordereau(b.id)}
+                            disabled={enCoursBord === b.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/40 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <Icon name="check" size="xs" />
+                            <span className="hidden sm:inline">Restaurer</span>
+                          </button>
+                          <button
+                            onClick={() => setConfirmerPurgeBordId(b.id)}
+                            disabled={enCoursBord === b.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <Icon name="trash" size="xs" />
+                            <span className="hidden sm:inline">Purger</span>
+                          </button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+
+        {/* Modal purge bordereau */}
+        <AnimatePresence>
+          {confirmerPurgeBordId && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+              onClick={() => setConfirmerPurgeBordId(null)}
+            >
+              <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+                className="bg-theme-card rounded-xl p-6 max-w-md w-full shadow-xl"
+                onClick={e => e.stopPropagation()}
+              >
+                <h3 className="font-semibold text-theme-primary mb-2">Suppression définitive</h3>
+                <p className="text-sm text-theme-secondary mb-6">Le fichier bordereau sera effacé du serveur de façon irréversible.</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setConfirmerPurgeBordId(null)}
+                    className="flex-1 py-2 text-sm border border-theme rounded-lg hover:bg-theme-muted transition-colors">
+                    Annuler
+                  </button>
+                  <button onClick={() => purgerBordereau(confirmerPurgeBordId)}
+                    className="flex-1 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
+                    Supprimer définitivement
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Modale confirmation purge unitaire */}
         <AnimatePresence>

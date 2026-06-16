@@ -5,6 +5,16 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from .views_bordereaux import (
+    CompagnieListView,
+    BordereauListView,
+    BordereauUploadView,
+    BordereauDetailView,
+    BordereauCorbeilleListView,
+    BordereauRestoreView,
+    BordereauPurgeView,
+)
+
 from .views_main import (
     DocumentRetryChunkingView,
     DocumentLogViewView,
@@ -113,6 +123,19 @@ urlpatterns = [
     path('ready/', ready_check, name='ready-check'),
     path('version/', version_info, name='version-info'),
         
+    # Compagnies (clients de type ENTREPRISE)
+    path('compagnies/', CompagnieListView.as_view(), name='compagnie-list'),
+
+    # Bordereaux
+    path('bordereaux/', BordereauListView.as_view(), name='bordereau-list'),
+    path('bordereaux/upload/', BordereauUploadView.as_view(), name='bordereau-upload'),
+    path('bordereaux/<str:bordereau_id>/', BordereauDetailView.as_view(), name='bordereau-detail'),
+
+    # Corbeille bordereaux
+    path('corbeille/bordereaux/', BordereauCorbeilleListView.as_view(), name='bordereau-corbeille'),
+    path('corbeille/bordereaux/<str:bordereau_id>/restaurer/', BordereauRestoreView.as_view(), name='bordereau-restaurer'),
+    path('corbeille/bordereaux/<str:bordereau_id>/purger/', BordereauPurgeView.as_view(), name='bordereau-purger'),
+
     # Routes des ViewSets
     path('', include(router.urls)),
 ]

@@ -980,7 +980,7 @@ class AuditLog(models.Model):
 
         return f"{self.timestamp} - {self.utilisateur_nom} - {self.action} - {self.resource_type}"
 
-    
+
 
     @classmethod
 
@@ -1040,3 +1040,100 @@ class AuditLog(models.Model):
 
 
 
+
+
+
+
+class Bordereau(models.Model):
+
+    """Bordereau d'assurance lié à une compagnie et un exercice (année)"""
+
+    id = models.TextField(primary_key=True, default=uuid.uuid4)
+
+    titre = models.CharField(max_length=255)
+
+    reference = models.CharField(max_length=100, null=True, blank=True)
+
+    annee = models.IntegerField()
+
+    compagnie = models.ForeignKey(
+
+        'Client',
+
+        on_delete=models.PROTECT,
+
+        related_name='bordereaux',
+
+        db_column='compagnieId',
+
+        limit_choices_to={'type': 'ENTREPRISE'},
+
+    )
+
+    chemin_fichier = models.CharField(max_length=500, db_column='cheminFichier')
+
+    type_fichier = models.CharField(max_length=50, db_column='typeFichier')
+
+    taille_fichier = models.IntegerField(db_column='tailleFichier')
+
+    file_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+
+    auteur = models.ForeignKey(
+
+        Utilisateur,
+
+        on_delete=models.PROTECT,
+
+        related_name='bordereaux',
+
+        db_column='auteurId',
+
+    )
+
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    deleted_by = models.ForeignKey(
+
+        Utilisateur,
+
+        on_delete=models.SET_NULL,
+
+        null=True,
+
+        blank=True,
+
+        related_name='bordereaux_supprimes',
+
+    )
+
+    cree_le = models.DateTimeField(auto_now_add=True, db_column='creeLe')
+
+    modifie_le = models.DateTimeField(auto_now=True, db_column='modifieLe')
+
+    class Meta:
+
+        db_table = 'bordereaux'
+
+        verbose_name = 'Bordereau'
+
+        verbose_name_plural = 'Bordereaux'
+
+        ordering = ['-annee', '-cree_le']
+
+        indexes = [
+
+            models.Index(fields=['compagnie']),
+
+            models.Index(fields=['annee']),
+
+            models.Index(fields=['auteur']),
+
+            models.Index(fields=['cree_le']),
+
+        ]
+
+    def __str__(self):
+
+        return f"{self.titre} – {self.compagnie} ({self.annee})"
