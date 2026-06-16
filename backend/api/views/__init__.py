@@ -66,6 +66,10 @@ from ..views_main import (
     
     # OCR
     ocr_quality_report_view,
+
+    # Fonctions internes utilisées par search_index.py
+    _build_document_payload,
+    _build_document_text,
 )
 
 __all__ = [
@@ -118,4 +122,8 @@ __all__ = [
     
     # OCR
     'ocr_quality_report_view',
+
+    # Fonctions internes
+    '_build_document_payload',
+    '_build_document_text',
 ]
