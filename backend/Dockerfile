@@ -64,6 +64,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
     libgthread-2.0-0 \
 
+    postgresql-client \
+
     && rm -rf /var/lib/apt/lists/*
 
 

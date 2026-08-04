@@ -52,6 +52,7 @@ from .views_main import (
     assistant_chat_view,
     assistant_chat_stream_view,
     ocr_quality_report_view,
+    backup_view,
 )
 
 from .views import (
@@ -116,6 +117,9 @@ urlpatterns = [
     path('audit/logs/<int:log_id>/', audit_log_detail, name='audit-log-detail'),
     path('audit/stats/', audit_log_stats, name='audit-log-stats'),
     path('audit/log-export/', audit_log_export, name='audit-log-export'),
+
+    # Sauvegarde manuelle
+    path('backup/', backup_view, name='backup'),
     
     # Healthcheck (monitoring/Kubernetes)
     path('auth/verify/', auth_verify_view, name='auth-verify'),

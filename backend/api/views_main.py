@@ -7665,4 +7665,112 @@ def audit_log_export(request):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def backup_view(request):
+    """Génère une sauvegarde manuelle : dump PostgreSQL + zip des fichiers médias."""
+    if not request.user or request.user.role != 'ADMIN':
+        raise PermissionDenied('Seuls les administrateurs peuvent lancer une sauvegarde.')
+
+    import subprocess
+    import tempfile
+    import os
+    import zipfile
+    from django.http import HttpResponse
+
+    timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+
+    try:
+        tmp_dir = tempfile.mkdtemp(prefix='acs_backup_')
+
+        # 1) pg_dump
+        db_name = settings.DATABASES['default']['NAME']
+        db_user = settings.DATABASES['default']['USER']
+        db_host = settings.DATABASES['default']['HOST']
+        db_port = settings.DATABASES['default']['PORT']
+        db_password = settings.DATABASES['default'].get('PASSWORD', '')
+
+        sql_path = os.path.join(tmp_dir, f'backup_db_{timestamp}.sql')
+
+        env = os.environ.copy()
+        if db_password:
+            env['PGPASSWORD'] = db_password
+
+        cmd = [
+            'pg_dump',
+            '-U', db_user,
+            '-h', db_host,
+            '-p', str(db_port),
+            '-d', str(db_name),
+            '--no-owner',
+            '--no-privileges',
+            '-f', sql_path,
+        ]
+
+        result = subprocess.run(cmd, env=env, capture_output=True, timeout=300)
+
+        if result.returncode != 0:
+            logging.error(f"pg_dump failed: {result.stderr.decode('utf-8', errors='replace')}")
+            return Response(
+                {'success': False, 'erreur': 'Échec du dump de la base de données.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # 2) Zip des médias
+        media_root = getattr(settings, 'MEDIA_ROOT', '/app/media')
+        zip_path = os.path.join(tmp_dir, f'backup_media_{timestamp}.zip')
+
+        media_count = 0
+        if os.path.isdir(media_root):
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(media_root):
+                    for f in files:
+                        file_path = os.path.join(root, f)
+                        arcname = os.path.relpath(file_path, media_root)
+                        zf.write(file_path, arcname)
+                        media_count += 1
+
+        # 3) Zip global contenant le dump SQL + le zip médias
+        final_zip_path = os.path.join(tmp_dir, f'acs_backup_{timestamp}.zip')
+        with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.write(sql_path, f'backup_db_{timestamp}.sql')
+            if os.path.exists(zip_path):
+                zf.write(zip_path, f'backup_media_{timestamp}.zip')
+
+        # 4) Lire et retourner le fichier
+        with open(final_zip_path, 'rb') as f:
+            zip_data = f.read()
+
+        # Nettoyer les fichiers temporaires
+        for f_path in [sql_path, zip_path, final_zip_path]:
+            try:
+                if os.path.exists(f_path):
+                    os.remove(f_path)
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+
+        log_action(request, 'EXPORT', 'document', '', f'Sauvegarde manuelle ({media_count} fichiers médias)',
+                   details={'timestamp': timestamp, 'media_count': media_count})
+
+        response = HttpResponse(zip_data, content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="acs_backup_{timestamp}.zip"'
+        return response
+
+    except subprocess.TimeoutExpired:
+        return Response(
+            {'success': False, 'erreur': 'La sauvegarde a expiré (délai dépassé).'},
+            status=status.HTTP_504_GATEWAY_TIMEOUT
+        )
+    except Exception as e:
+        logging.exception("Erreur lors de la sauvegarde manuelle")
+        return Response(
+            {'success': False, 'erreur': f'Erreur lors de la sauvegarde : {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 

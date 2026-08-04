@@ -5,7 +5,7 @@ import { Icon, IconName } from '@/components/Icon'
 import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { apiFetchJson } from '@/lib/api'
+import { apiFetchJson, apiFetch, buildApiUrl } from '@/lib/api'
 import { getUtilisateurActif, enregistrerSession, supprimerSession } from '@/lib/session'
 import { RoleUtilisateur } from '@/types'
 import { useRequireAuth } from '@/hooks/useRequireAuth'
@@ -52,14 +52,27 @@ export default function PageParametres() {
 
   const estAdmin = role === 'ADMIN'
 
-  const changerOnglet = (id: 'profil' | 'securite') => {
+  const [sauvegardeEnCours, setSauvegardeEnCours] = useState(false)
+  const [messageSauvegarde, setMessageSauvegarde] = useState('')
+  const [erreurSauvegarde, setErreurSauvegarde] = useState('')
+
+  const changerOnglet = (id: 'profil' | 'securite' | 'sauvegarde') => {
     setOngletActif(id)
     if (id === 'profil') {
       setMessageSecurite('')
       setErreurSecurite('')
+      setMessageSauvegarde('')
+      setErreurSauvegarde('')
+    } else if (id === 'securite') {
+      setMessageProfil('')
+      setErreurProfil('')
+      setMessageSauvegarde('')
+      setErreurSauvegarde('')
     } else {
       setMessageProfil('')
       setErreurProfil('')
+      setMessageSecurite('')
+      setErreurSecurite('')
     }
   }
 
@@ -80,6 +93,15 @@ export default function PageParametres() {
     }, 4000)
     return () => clearTimeout(timer)
   }, [messageSecurite, erreurSecurite])
+
+  useEffect(() => {
+    if (!messageSauvegarde && !erreurSauvegarde) return
+    const timer = setTimeout(() => {
+      setMessageSauvegarde('')
+      setErreurSauvegarde('')
+    }, 6000)
+    return () => clearTimeout(timer)
+  }, [messageSauvegarde, erreurSauvegarde])
 
   const sauvegarderProfil = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -193,9 +215,10 @@ export default function PageParametres() {
       }[role]
     : 'Profil'
 
-  const onglets: { id: 'profil' | 'securite'; label: string; icon: IconName }[] = [
+  const onglets: { id: 'profil' | 'securite' | 'sauvegarde'; label: string; icon: IconName }[] = [
     { id: 'profil', label: 'Profil', icon: 'user' },
     { id: 'securite', label: 'Sécurité', icon: 'lock' },
+    ...(estAdmin ? [{ id: 'sauvegarde' as const, label: 'Sauvegarde', icon: 'download' as IconName }] : []),
   ]
 
   if (authChargement || !estAuthentifie) {
@@ -458,6 +481,105 @@ export default function PageParametres() {
                     </div>
                   </div>
                 )}
+              </motion.div>
+            )}
+            {ongletActif === 'sauvegarde' && estAdmin && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                transition={{ delay: 0.1 }}
+                className="bg-theme-card border border-theme rounded-xl p-6"
+              >
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-theme">
+                  <div className="w-10 h-10 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
+                    <Icon name="download" size="sm" className="text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-theme-primary">Sauvegarde manuelle</h3>
+                    <p className="text-xs text-theme-secondary">Base de données et fichiers médias</p>
+                  </div>
+                </div>
+
+                {messageSauvegarde && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-6 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 text-green-700 dark:text-green-400 text-sm"
+                  >
+                    {messageSauvegarde}
+                  </motion.div>
+                )}
+
+                {erreurSauvegarde && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-sm"
+                  >
+                    {erreurSauvegarde}
+                  </motion.div>
+                )}
+
+                <div className="space-y-5">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 flex items-start gap-3">
+                    <Icon name="info" size="sm" className="text-blue-500 mt-0.5" />
+                    <div className="text-xs text-theme-secondary space-y-1">
+                      <p>La sauvegarde génère un fichier ZIP contenant :</p>
+                      <p>• <strong>Dump de la base de données</strong> PostgreSQL (toutes les tables, documents, clients, exercices, risques, bordereaux, historiques)</p>
+                      <p>• <strong>Archive des fichiers médias</strong> (tous les PDF et documents uploadés)</p>
+                      <p>Le téléchargement démarre automatiquement. La durée dépend du volume de données.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-4 rounded-lg border border-theme">
+                    <Icon name="document" size="sm" className="text-theme-secondary" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-theme-primary">Sauvegarde complète</p>
+                      <p className="text-xs text-theme-secondary">Base de données + fichiers médias</p>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={async () => {
+                      setSauvegardeEnCours(true)
+                      setMessageSauvegarde('')
+                      setErreurSauvegarde('')
+                      try {
+                        const response = await fetch(buildApiUrl('/backup/'), {
+                          method: 'GET',
+                          credentials: 'include',
+                        })
+                        if (!response.ok) {
+                          let errMsg = 'Erreur lors de la sauvegarde'
+                          try {
+                            const errData = await response.json()
+                            errMsg = errData?.erreur || errMsg
+                          } catch {}
+                          throw new Error(errMsg)
+                        }
+                        const blob = await response.blob()
+                        const url = window.URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `acs_backup_${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}.zip`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                        window.URL.revokeObjectURL(url)
+                        setMessageSauvegarde('Sauvegarde téléchargée avec succès !')
+                      } catch (error) {
+                        setErreurSauvegarde(error instanceof Error ? error.message : 'Erreur lors de la sauvegarde')
+                      } finally {
+                        setSauvegardeEnCours(false)
+                      }
+                    }}
+                    disabled={sauvegardeEnCours} 
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Icon name="download" size="sm" />
+                    {sauvegardeEnCours ? 'Sauvegarde en cours...' : 'Lancer la sauvegarde'}
+                  </button>
+                </div>
               </motion.div>
             )}
           </div>
